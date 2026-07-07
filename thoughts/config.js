@@ -21,6 +21,7 @@ export const DEFAULT_THOUGHT_PROMPT = [
 
 export const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
+    generationMode: 'raw',
     maxInjectedThoughts: 8,
     includeThoughtsInMainPrompt: true,
     includePendingThoughtInMainPrompt: true,

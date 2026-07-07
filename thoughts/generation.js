@@ -6,18 +6,36 @@ import {
     persistChatChanges,
 } from './core.js';
 import {
+    buildManualThoughtHybridPrompt,
     buildManualThoughtRawRequest,
+    buildThoughtHybridPrompt,
     buildThoughtRawRequest,
     getPromptInjectionMessage,
     normalizeThoughtResult,
 } from './prompts.js';
 import { state } from './state.js';
 
+async function requestThoughtGeneration(context, settings, rawRequest, hybridPrompt) {
+    const mode = settings?.generationMode === 'hybrid' ? 'hybrid' : 'raw';
+
+    if (mode === 'hybrid' && typeof context?.generateQuietPrompt === 'function') {
+        return normalizeThoughtResult(await context.generateQuietPrompt({
+            quietPrompt: hybridPrompt,
+        }));
+    }
+
+    if (typeof context?.generateRaw === 'function') {
+        return normalizeThoughtResult(await context.generateRaw(rawRequest));
+    }
+
+    return '';
+}
+
 export async function generatePendingThought() {
     const context = getContext();
     const settings = getSettings();
 
-    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateRaw !== 'function') {
+    if (!settings.enabled || state.isGeneratingThought) {
         return;
     }
 
@@ -25,7 +43,12 @@ export async function generatePendingThought() {
     state.pendingThought = null;
 
     try {
-        const thought = normalizeThoughtResult(await context.generateRaw(buildThoughtRawRequest()));
+        const thought = await requestThoughtGeneration(
+            context,
+            settings,
+            buildThoughtRawRequest(),
+            buildThoughtHybridPrompt(),
+        );
 
         if (!thought) {
             return;
@@ -47,7 +70,7 @@ export async function generateThoughtForMessage(messageIndex, afterChange) {
     const settings = getSettings();
     const message = context?.chat?.[messageIndex];
 
-    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateRaw !== 'function') {
+    if (!settings.enabled || state.isGeneratingThought) {
         return '';
     }
 
@@ -58,7 +81,12 @@ export async function generateThoughtForMessage(messageIndex, afterChange) {
     state.isGeneratingThought = true;
 
     try {
-        const thought = normalizeThoughtResult(await context.generateRaw(buildManualThoughtRawRequest(messageIndex)));
+        const thought = await requestThoughtGeneration(
+            context,
+            settings,
+            buildManualThoughtRawRequest(messageIndex),
+            buildManualThoughtHybridPrompt(messageIndex),
+        );
 
         if (!thought) {
             return '';

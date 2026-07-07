@@ -128,6 +128,18 @@ export function buildThoughtRawRequest() {
     };
 }
 
+export function buildThoughtHybridPrompt() {
+    return [
+        buildThoughtPrompt(),
+        '',
+        'Identity context:',
+        buildIdentityContextBlock(),
+        '',
+        'Recent visible conversation context:',
+        buildConversationContextBlock(),
+    ].join('\n');
+}
+
 function buildManualThoughtPrompt(messageIndex) {
     const context = getContext();
     const settings = getSettings();
@@ -168,6 +180,18 @@ export function buildManualThoughtRawRequest(messageIndex) {
             buildConversationContextBlock(),
         ].join('\n'),
     };
+}
+
+export function buildManualThoughtHybridPrompt(messageIndex) {
+    return [
+        buildManualThoughtPrompt(messageIndex),
+        '',
+        'Identity context:',
+        buildIdentityContextBlock(),
+        '',
+        'Recent visible conversation context:',
+        buildConversationContextBlock(),
+    ].join('\n');
 }
 
 function buildMainPromptInjection() {

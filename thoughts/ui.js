@@ -128,6 +128,7 @@ function syncSettingsUi() {
     const settings = getSettings();
 
     $('#kw-thoughts-enabled').prop('checked', settings.enabled);
+    $('#kw-thoughts-generation-mode').val(settings.generationMode === 'hybrid' ? 'hybrid' : 'raw');
     $('#kw-thoughts-history').val(settings.maxInjectedThoughts);
     $('#kw-thoughts-main-prompt').prop('checked', settings.includeThoughtsInMainPrompt);
     $('#kw-thoughts-pending').prop('checked', settings.includePendingThoughtInMainPrompt);
@@ -137,6 +138,12 @@ function syncSettingsUi() {
 function bindSettingsUi() {
     $('#kw-thoughts-enabled').off('input').on('input', (event) => {
         getSettings().enabled = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-generation-mode').off('input').on('input', (event) => {
+        const value = String($(event.currentTarget).val() || 'raw').trim().toLowerCase();
+        getSettings().generationMode = value === 'hybrid' ? 'hybrid' : 'raw';
         scheduleSettingsSave();
     });
 
@@ -178,6 +185,13 @@ export function renderSettingsPanel() {
                 <label class="killer-within-settings__row">
                     <input id="kw-thoughts-enabled" type="checkbox" />
                     <span>Enable hidden thoughts generation</span>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Thought generation mode</span>
+                    <select id="kw-thoughts-generation-mode" class="text_pole">
+                        <option value="raw">Raw</option>
+                        <option value="hybrid">Hybrid</option>
+                    </select>
                 </label>
                 <label class="killer-within-settings__field">
                     <span>Stored thought history to inject</span>
