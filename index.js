@@ -1,6 +1,7 @@
 const MODULE_NAME = 'killer_within_thoughts';
 const PANEL_ID = 'killer-within-thoughts-panel';
 const MESSAGE_EXTRA_KEY = 'killerWithinThoughts';
+const RAW_THOUGHT_CONTEXT_LIMIT = 12;
 
 const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
@@ -127,6 +128,53 @@ function buildThoughtPrompt() {
     ].join('\n');
 }
 
+function getRelevantChatMessages(limit = RAW_THOUGHT_CONTEXT_LIMIT) {
+    const context = getContext();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+
+    return chat
+        .filter((message) => !message?.extra?.[MESSAGE_EXTRA_KEY]?.injected)
+        .slice(-Math.max(0, Number(limit) || 0));
+}
+
+function formatChatMessageForThoughtContext(message, index) {
+    const role = message?.is_user ? 'User' : message?.is_system ? 'System' : 'Assistant';
+    const name = String(message?.name || role).trim();
+    const body = String(message?.mes || '').trim() || '(empty)';
+    return `[${index + 1}] ${role} | ${name}\n${body}`;
+}
+
+function buildConversationContextBlock(limit = RAW_THOUGHT_CONTEXT_LIMIT) {
+    const messages = getRelevantChatMessages(limit);
+
+    if (!messages.length) {
+        return 'No recent visible chat messages are available yet.';
+    }
+
+    return messages
+        .map((message, index) => formatChatMessageForThoughtContext(message, index))
+        .join('\n\n');
+}
+
+function buildThoughtRawRequest() {
+    return {
+        systemPrompt: [
+            'You are generating a hidden internal monologue for the current character.',
+            'Use the provided conversation context and previous hidden thoughts to infer what the character privately thinks immediately before their visible reply.',
+            'Stay in-character.',
+            'Do not write the visible reply.',
+            'Do not mention being an AI, assistant, or model.',
+            'Output only the hidden thoughts.'
+        ].join('\n'),
+        prompt: [
+            buildThoughtPrompt(),
+            '',
+            'Recent visible conversation context:',
+            buildConversationContextBlock(),
+        ].join('\n'),
+    };
+}
+
 function buildManualThoughtPrompt(messageIndex) {
     const context = getContext();
     const settings = getSettings();
@@ -146,6 +194,24 @@ function buildManualThoughtPrompt(messageIndex) {
         'Write the hidden thoughts that immediately happened before that visible reply.',
         'Output only the thoughts.',
     ].join('\n');
+}
+
+function buildManualThoughtRawRequest(messageIndex) {
+    return {
+        systemPrompt: [
+            'You are reconstructing the hidden internal monologue for a character reply that already exists.',
+            'Use the provided conversation context, previous hidden thoughts, and visible reply to infer what the character privately thought immediately before sending that reply.',
+            'Stay in-character.',
+            'Do not rewrite the visible reply.',
+            'Output only the hidden thoughts.'
+        ].join('\n'),
+        prompt: [
+            buildManualThoughtPrompt(messageIndex),
+            '',
+            'Recent visible conversation context:',
+            buildConversationContextBlock(),
+        ].join('\n'),
+    };
 }
 
 function buildMainPromptInjection() {
@@ -244,7 +310,7 @@ async function generatePendingThought() {
     const context = getContext();
     const settings = getSettings();
 
-    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateQuietPrompt !== 'function') {
+    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateRaw !== 'function') {
         return;
     }
 
@@ -252,9 +318,7 @@ async function generatePendingThought() {
     state.pendingThought = null;
 
     try {
-        const thought = normalizeThoughtResult(await context.generateQuietPrompt({
-            quietPrompt: buildThoughtPrompt(),
-        }));
+        const thought = normalizeThoughtResult(await context.generateRaw(buildThoughtRawRequest()));
 
         if (!thought) {
             return;
@@ -276,7 +340,7 @@ async function generateThoughtForMessage(messageIndex) {
     const settings = getSettings();
     const message = context?.chat?.[messageIndex];
 
-    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateQuietPrompt !== 'function') {
+    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateRaw !== 'function') {
         return '';
     }
 
@@ -287,9 +351,7 @@ async function generateThoughtForMessage(messageIndex) {
     state.isGeneratingThought = true;
 
     try {
-        const thought = normalizeThoughtResult(await context.generateQuietPrompt({
-            quietPrompt: buildManualThoughtPrompt(messageIndex),
-        }));
+        const thought = normalizeThoughtResult(await context.generateRaw(buildManualThoughtRawRequest(messageIndex)));
 
         if (!thought) {
             return '';
