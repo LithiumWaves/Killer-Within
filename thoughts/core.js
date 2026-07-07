@@ -77,6 +77,17 @@ export function applyPromptMacros(text) {
     return source;
 }
 
+export function resolvePromptMacro(name) {
+    const source = `{{${String(name || '').trim()}}}`;
+    const resolved = applyPromptMacros(source).trim();
+
+    if (!resolved || resolved === source) {
+        return '';
+    }
+
+    return resolved;
+}
+
 export function getAssistantThought(message) {
     return message?.extra?.[MESSAGE_EXTRA_KEY]?.thought ?? '';
 }

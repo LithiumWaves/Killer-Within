@@ -7,6 +7,7 @@ import {
     getAssistantThought,
     getContext,
     getSettings,
+    resolvePromptMacro,
 } from './core.js';
 import { state } from './state.js';
 
@@ -79,6 +80,32 @@ function buildConversationContextBlock(limit = RAW_THOUGHT_CONTEXT_LIMIT) {
         .join('\n\n');
 }
 
+function buildIdentityContextBlock() {
+    const characterDescription = resolvePromptMacro('description');
+    const userPersona = resolvePromptMacro('persona');
+    const sections = [];
+
+    if (characterDescription) {
+        sections.push([
+            "Active character card description:",
+            characterDescription,
+        ].join('\n'));
+    }
+
+    if (userPersona) {
+        sections.push([
+            "Active user persona:",
+            userPersona,
+        ].join('\n'));
+    }
+
+    if (!sections.length) {
+        return 'No additional character card description or user persona context is available.';
+    }
+
+    return sections.join('\n\n');
+}
+
 export function buildThoughtRawRequest() {
     return {
         systemPrompt: [
@@ -91,6 +118,9 @@ export function buildThoughtRawRequest() {
         ].join('\n'),
         prompt: [
             buildThoughtPrompt(),
+            '',
+            'Identity context:',
+            buildIdentityContextBlock(),
             '',
             'Recent visible conversation context:',
             buildConversationContextBlock(),
@@ -130,6 +160,9 @@ export function buildManualThoughtRawRequest(messageIndex) {
         ].join('\n'),
         prompt: [
             buildManualThoughtPrompt(messageIndex),
+            '',
+            'Identity context:',
+            buildIdentityContextBlock(),
             '',
             'Recent visible conversation context:',
             buildConversationContextBlock(),
