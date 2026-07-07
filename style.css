@@ -1,1 +1,36 @@
+.killer-within-settings .inline-drawer-content {
+    display: grid;
+    gap: 0.75rem;
+}
 
+.killer-within-settings__row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.killer-within-settings__field {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.kw-thoughts {
+    margin-top: 0.65rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 40%, transparent);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 8%, transparent);
+}
+
+.kw-thoughts__summary {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.kw-thoughts__body {
+    margin-top: 0.6rem;
+    white-space: pre-wrap;
+    opacity: 0.9;
+}
