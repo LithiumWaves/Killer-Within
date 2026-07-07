@@ -21,6 +21,7 @@ const state = {
     isGeneratingThought: false,
     pendingThought: null,
     renderQueued: false,
+    autoThoughtInFlight: false,
 };
 
 function getContext() {
@@ -126,6 +127,27 @@ function buildThoughtPrompt() {
     ].join('\n');
 }
 
+function buildManualThoughtPrompt(messageIndex) {
+    const context = getContext();
+    const settings = getSettings();
+    const message = context?.chat?.[messageIndex];
+    const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts);
+    const visibleReply = String(message?.mes ?? '').trim();
+
+    return [
+        settings.thoughtPrompt.trim(),
+        '',
+        'Previous hidden thoughts for continuity:',
+        historyBlock,
+        '',
+        'Visible reply already sent:',
+        visibleReply || '(empty reply)',
+        '',
+        'Write the hidden thoughts that immediately happened before that visible reply.',
+        'Output only the thoughts.',
+    ].join('\n');
+}
+
 function buildMainPromptInjection() {
     const settings = getSettings();
     const sections = [];
@@ -184,6 +206,15 @@ globalThis.killerWithinThoughtsInterceptor = async function killerWithinThoughts
         return;
     }
 
+    if (!state.autoThoughtInFlight) {
+        state.autoThoughtInFlight = true;
+        try {
+            await generatePendingThought();
+        } finally {
+            state.autoThoughtInFlight = false;
+        }
+    }
+
     const injectionMessage = getPromptInjectionMessage();
     if (!injectionMessage) {
         return;
@@ -235,6 +266,48 @@ async function generatePendingThought() {
         };
     } catch (error) {
         console.warn(`[${MODULE_NAME}] Thought generation failed`, error);
+    } finally {
+        state.isGeneratingThought = false;
+    }
+}
+
+async function generateThoughtForMessage(messageIndex) {
+    const context = getContext();
+    const settings = getSettings();
+    const message = context?.chat?.[messageIndex];
+
+    if (!settings.enabled || state.isGeneratingThought || typeof context?.generateQuietPrompt !== 'function') {
+        return '';
+    }
+
+    if (!message || message.is_user || message.is_system) {
+        return '';
+    }
+
+    state.isGeneratingThought = true;
+
+    try {
+        const thought = normalizeThoughtResult(await context.generateQuietPrompt({
+            quietPrompt: buildManualThoughtPrompt(messageIndex),
+        }));
+
+        if (!thought) {
+            return '';
+        }
+
+        message.extra ??= {};
+        message.extra[MESSAGE_EXTRA_KEY] = {
+            thought,
+            createdAt: Date.now(),
+            generatedManually: true,
+        };
+
+        await persistChatChanges();
+        queueThoughtRender();
+        return thought;
+    } catch (error) {
+        console.warn(`[${MODULE_NAME}] Manual thought generation failed`, error);
+        return '';
     } finally {
         state.isGeneratingThought = false;
     }
@@ -315,8 +388,67 @@ function renderThoughtBlockForElement(element) {
     target.append(details);
 }
 
+function getMessageActionHost($message) {
+    const selectors = [
+        '.mes_buttons',
+        '.mes_edit_buttons',
+        '.extraMesButtons',
+        '.mes_header_buttons',
+        '.mes_title_buttons',
+    ];
+
+    for (const selector of selectors) {
+        const host = $message.find(selector).first();
+        if (host.length) {
+            return host;
+        }
+    }
+
+    return $();
+}
+
+function renderThoughtButtonForElement(element) {
+    const $message = $(element);
+    const mesIdRaw = $message.attr('mesid') ?? $message.data('mesid');
+    const mesId = Number(mesIdRaw);
+
+    $message.find('.kw-thought-button').remove();
+
+    if (!Number.isInteger(mesId)) {
+        return;
+    }
+
+    const context = getContext();
+    const message = context?.chat?.[mesId];
+    if (!message || message.is_user || message.is_system) {
+        return;
+    }
+
+    const host = getMessageActionHost($message);
+    if (!host.length) {
+        return;
+    }
+
+    const hasThought = Boolean(getAssistantThought(message));
+    const button = $(`
+        <button
+            type="button"
+            class="kw-thought-button menu_button fa-solid fa-brain interactable"
+            title="${hasThought ? 'Regenerate hidden thought' : 'Generate hidden thought'}"
+            aria-label="${hasThought ? 'Regenerate hidden thought' : 'Generate hidden thought'}"
+            data-mesid="${mesId}"
+        ></button>
+    `);
+
+    host.append(button);
+}
+
 function renderThoughts() {
     $('.mes').each((_, element) => renderThoughtBlockForElement(element));
+}
+
+function renderThoughtButtons() {
+    $('.mes').each((_, element) => renderThoughtButtonForElement(element));
 }
 
 function queueThoughtRender() {
@@ -328,6 +460,7 @@ function queueThoughtRender() {
     requestAnimationFrame(() => {
         state.renderQueued = false;
         renderThoughts();
+        renderThoughtButtons();
     });
 }
 
@@ -414,6 +547,41 @@ function bindSettingsUi() {
     });
 }
 
+function notify(type, message) {
+    if (globalThis.toastr?.[type]) {
+        globalThis.toastr[type](message);
+        return;
+    }
+
+    console.info(`[${MODULE_NAME}] ${message}`);
+}
+
+function bindGlobalUi() {
+    $(document)
+        .off('click', '.kw-thought-button')
+        .on('click', '.kw-thought-button', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const mesId = Number($(event.currentTarget).data('mesid'));
+            if (!Number.isInteger(mesId)) {
+                return;
+            }
+
+            if (state.isGeneratingThought) {
+                notify('info', 'Thought generation is already in progress.');
+                return;
+            }
+
+            const thought = await generateThoughtForMessage(mesId);
+            if (thought) {
+                notify('success', 'Hidden thought generated.');
+            } else {
+                notify('warning', 'No hidden thought was generated.');
+            }
+        });
+}
+
 function registerEventHandlers() {
     const context = getContext();
     const { eventSource, event_types } = context ?? {};
@@ -435,10 +603,6 @@ function registerEventHandlers() {
         queueThoughtRender();
     });
 
-    eventSource.on(event_types.GENERATION_AFTER_COMMANDS, async () => {
-        await generatePendingThought();
-    });
-
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         await attachPendingThoughtToLatestMessage();
     });
@@ -451,6 +615,7 @@ function registerEventHandlers() {
 jQuery(() => {
     getSettings();
     renderSettingsPanel();
+    bindGlobalUi();
     registerEventHandlers();
     queueThoughtRender();
 });
