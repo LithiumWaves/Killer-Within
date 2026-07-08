@@ -143,6 +143,8 @@ export function addDeathEntry({
     cause,
     remainingAssistantMessages,
     noteText,
+    hasExplicitCause,
+    hasExplicitTime,
 } = {}) {
     const state = getChatState();
 
@@ -152,6 +154,8 @@ export function addDeathEntry({
         cause: String(cause || '').trim(),
         noteText: String(noteText || '').trim(),
         remainingAssistantMessages: normalizeRemaining(remainingAssistantMessages),
+        hasExplicitCause: Boolean(hasExplicitCause),
+        hasExplicitTime: Boolean(hasExplicitTime),
         status: 'active',
         createdAt: Date.now(),
         resolvedAt: null,
@@ -165,6 +169,50 @@ export function addDeathEntry({
     return entry;
 }
 
+function looksLikeNameOnly(text) {
+    const value = String(text || '').trim();
+    if (!value) {
+        return false;
+    }
+
+    if (/[,:;.!?]/.test(value)) {
+        return false;
+    }
+
+    const lowered = value.toLowerCase();
+    const explicitTerms = [
+        ' will ',
+        ' die',
+        ' dies',
+        ' died',
+        ' killed',
+        ' kill',
+        ' heart attack',
+        ' poison',
+        ' poisoned',
+        ' stabbed',
+        ' shot',
+        ' burned',
+        ' drowned',
+        ' strangle',
+        ' suicide',
+        ' accident',
+        ' truck',
+        ' car',
+        ' next message',
+        ' minute',
+        ' hour',
+        ' day',
+    ];
+
+    if (explicitTerms.some((term) => lowered.includes(term.trim()) || lowered.includes(term))) {
+        return false;
+    }
+
+    const words = value.split(/\s+/).filter(Boolean);
+    return words.length > 0 && words.length <= 5;
+}
+
 function parseNotebookLine(line) {
     const raw = String(line || '').trim();
     if (!raw) {
@@ -173,17 +221,25 @@ function parseNotebookLine(line) {
 
     let remainingAssistantMessages = 1;
     let body = raw;
+    let hasExplicitTime = false;
     const timeMatch = body.match(/\s+(\d+)\s*$/);
     if (timeMatch) {
         remainingAssistantMessages = Math.max(0, Number(timeMatch[1]) || 0);
         body = body.slice(0, Math.max(0, timeMatch.index)).trim();
+        hasExplicitTime = true;
     }
+
+    const hasExplicitCause = !looksLikeNameOnly(body);
+    const cause = hasExplicitCause ? body : 'heart attack';
+    const targetName = hasExplicitCause ? '' : body;
 
     return {
         noteText: raw,
-        targetName: '',
-        cause: body,
+        targetName,
+        cause,
         remainingAssistantMessages,
+        hasExplicitCause,
+        hasExplicitTime,
     };
 }
 

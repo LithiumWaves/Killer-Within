@@ -7,10 +7,10 @@ import {
     setNotebookPages,
 } from './core.js';
 
-const PAGE_PLACEHOLDER = '[NAME] [METHOD OF DEATH] [TIME]';
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
 const CLOSED_HEIGHT = 340;
+const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
@@ -155,7 +155,7 @@ function renderNotebookPage(text, extraClass = '') {
 
     return `
         <div class="${classes}">
-            <div class="kw-deathnote__page-text">${escapeHtml(content || PAGE_PLACEHOLDER)}</div>
+            <div class="kw-deathnote__page-text">${escapeHtml(content)}</div>
         </div>
     `;
 }
@@ -171,7 +171,6 @@ function renderEditablePage({ pageIndex, side, text, extraClass = '' }) {
                 data-page-side="${side}"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="${PAGE_PLACEHOLDER}"
             >${escapeHtml(String(text || ''))}</textarea>
         </div>
     `;
@@ -183,6 +182,56 @@ function queueFocusRestore(pageIndex, side, mode = 'end') {
         side,
         mode,
     };
+}
+
+function getSettingsHost() {
+    return $('#extensions_settings2, #extensions_settings').first();
+}
+
+function syncSettingsUi() {
+    const settings = getSettings();
+    $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
+}
+
+function bindSettingsUi() {
+    $('#kw-deathnote-font-mode').off('input').on('input', (event) => {
+        const value = String($(event.currentTarget).val() || 'print').trim().toLowerCase();
+        getSettings().fontMode = value === 'script' ? 'script' : 'print';
+        scheduleSettingsSave();
+        refreshDeathNoteUi();
+    });
+}
+
+function renderSettingsPanel() {
+    const host = getSettingsHost();
+    if (!host.length || document.getElementById(SETTINGS_PANEL_ID)) {
+        return;
+    }
+
+    host.append(`
+        <div id="${SETTINGS_PANEL_ID}" class="killer-within-settings inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>Killer Within Death Note</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <label class="killer-within-settings__field">
+                    <span>Notebook font</span>
+                    <select id="kw-deathnote-font-mode" class="text_pole">
+                        <option value="print">Print</option>
+                        <option value="script">Script</option>
+                    </select>
+                </label>
+                <div class="killer-within-settings__field">
+                    <span>Notebook defaults</span>
+                    <small>If a cause is omitted, Death Note entries default to heart attack. If time is omitted, they trigger on the next assistant message.</small>
+                </div>
+            </div>
+        </div>
+    `);
+
+    bindSettingsUi();
+    syncSettingsUi();
 }
 
 function updatePageWithOverflow(textarea, pages, pageIndex, value) {
@@ -287,19 +336,6 @@ function buildWidgetHtml() {
                     ></button>
                 </div>
                 <div class="kw-deathnote__page-right">
-                    <div class="kw-deathnote__toolbar">
-                        <div class="kw-deathnote__page-indicator">${getSpreadLabel(currentSpreadIndex, visible)}</div>
-                        <button
-                            type="button"
-                            class="kw-deathnote__font-button ${settings.fontMode === 'print' ? 'is-active' : ''}"
-                            data-font-mode="print"
-                        >Print</button>
-                        <button
-                            type="button"
-                            class="kw-deathnote__font-button ${settings.fontMode === 'script' ? 'is-active' : ''}"
-                            data-font-mode="script"
-                        >Script</button>
-                    </div>
                     ${renderEditablePage({
                         pageIndex: visible.rightPageIndex,
                         side: 'right',
@@ -359,6 +395,8 @@ function ensureWidget() {
 
     root.innerHTML = buildWidgetHtml();
     restorePendingFocus(root);
+    renderSettingsPanel();
+    syncSettingsUi();
     return root;
 }
 
@@ -624,14 +662,6 @@ function bindWidgetUi() {
             scheduleSettingsSave();
             scheduleChatSave(state);
         })
-        .off('click', `#${FLOATING_ID} .kw-deathnote__font-button`)
-        .on('click', `#${FLOATING_ID} .kw-deathnote__font-button`, (event) => {
-            event.preventDefault();
-            const fontMode = String($(event.currentTarget).data('fontMode') || 'print').trim().toLowerCase();
-            getSettings().fontMode = fontMode === 'script' ? 'script' : 'print';
-            scheduleSettingsSave();
-            refreshDeathNoteUi();
-        })
         .off('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`, (event) => {
             event.preventDefault();
@@ -764,10 +794,14 @@ function paginateNotebookText(textarea, text) {
 }
 
 export function refreshDeathNoteUi() {
+    renderSettingsPanel();
+    syncSettingsUi();
     ensureWidget();
 }
 
 export function setupDeathNoteUi() {
+    renderSettingsPanel();
+    syncSettingsUi();
     ensureWidget();
     bindWidgetUi();
 }

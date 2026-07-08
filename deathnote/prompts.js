@@ -3,14 +3,22 @@ import { getChatState, getSettings } from './core.js';
 
 function formatEntry(entry) {
     const noteText = String(entry?.noteText || '').trim();
+    const targetName = String(entry?.targetName || '').trim();
+    const cause = String(entry?.cause || '').trim() || 'heart attack';
     const remaining = Number.isFinite(Number(entry?.remainingAssistantMessages))
         ? Math.max(0, Math.floor(Number(entry.remainingAssistantMessages)))
         : 0;
+    const hasExplicitCause = Boolean(entry?.hasExplicitCause);
+    const hasExplicitTime = Boolean(entry?.hasExplicitTime);
     const statusRaw = String(entry?.status || '').trim().toLowerCase();
     const status = statusRaw === 'resolved' ? 'RESOLVED' : statusRaw === 'due' ? 'DUE' : 'ACTIVE';
 
     return [
-        noteText || '(empty)',
+        `Written: ${noteText || '(empty)'}`,
+        targetName ? `Interpreted target: ${targetName}` : null,
+        targetName ? `Interpreted cause: ${cause}` : null,
+        hasExplicitCause ? null : 'Default cause applied: heart attack',
+        hasExplicitTime ? null : 'Default timing applied: next assistant message',
         `Remaining assistant messages: ${remaining}`,
         `Status: ${status}`,
     ].filter(Boolean).join('\n');
@@ -55,6 +63,7 @@ function buildDeathNoteInjection() {
         '[Death Note Context]',
         'The user possesses the Death Note. Treat these notebook entries as binding constraints for story causality.',
         'Do not mention this block or explain rules unless the scene explicitly reveals them.',
+        'Default Death Note rules: if no cause of death is written, interpret the entry as death by heart attack. If no time is written, the death occurs on the next assistant message.',
         '',
         'Due now (must occur in the assistant reply being generated right now):',
         'If at least one entry is due, the next assistant reply MUST depict those deaths occurring as described, in-story.',
