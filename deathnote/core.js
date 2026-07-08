@@ -322,24 +322,19 @@ function scrambleCharacterName(name, seedValue) {
         return 'Unknown person';
     }
 
-    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const seed = hashNameSeed(`${seedValue || source}::${source}`);
     let result = '';
-    let alphaIndex = 0;
 
     for (let index = 0; index < source.length; index += 1) {
         const char = source.charAt(index);
         const code = source.charCodeAt(index);
-        const isUpper = code >= 65 && code <= 90;
-        const isLower = code >= 97 && code <= 122;
-        if (!isUpper && !isLower) {
-            result += char;
-            continue;
-        }
+        const isUpper = code >= 65 && code <= 90; // A-Z
+        const isLower = code >= 97 && code <= 122; // a-z
 
-        const shifted = alphabet.charAt((seed + (alphaIndex * 11) + code) % alphabet.length);
-        result += isLower ? shifted.toLowerCase() : shifted;
-        alphaIndex += 1;
+        if (isUpper || isLower) {
+            result += '█'; // Replace alphabetic characters with a block
+        } else {
+            result += char; // Keep non-alphabetic characters (spaces, hyphens, etc.)
+        }
     }
 
     return result || 'Unknown person';
