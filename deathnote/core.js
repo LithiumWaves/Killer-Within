@@ -8,6 +8,8 @@ import {
 } from './config.js';
 
 const INVENTORY_HISTORY_LIMIT = 40;
+const ID_THEFT_FAILURE_CHANCE = 0.25;
+const ID_THEFT_COOLDOWN_MS = 5 * 60 * 1000;
 
 export function getContext() {
     return globalThis.SillyTavern?.getContext?.() ?? null;
@@ -78,11 +80,12 @@ export function notify(type, message) {
 
 function createDefaultChatState() {
     return {
-        version: 3,
+        version: 4,
         hasNotebook: true,
         ownership: createDefaultOwnershipState(),
         shinigamiLink: createDefaultShinigamiLinkState(),
         nameKnowledge: createDefaultNameKnowledgeState(),
+        identityTheft: createDefaultIdentityTheftState(),
         inventory: createDefaultInventoryState(),
         notebookText: '',
         notebookPages: [''],
@@ -125,6 +128,17 @@ function createDefaultNameKnowledgeState() {
     };
 }
 
+function createDefaultIdentityTheftState() {
+    return {
+        cooldowns: [],
+        pendingExposure: {
+            active: false,
+            actor: createActorRef(NOTEBOOK_ACTOR_TYPES.NONE, ''),
+            createdAt: null,
+        },
+    };
+}
+
 function createDefaultInventoryState() {
     return {
         notebook: {
@@ -137,6 +151,7 @@ function createDefaultInventoryState() {
             holder: createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User'),
             updatedAt: null,
         },
+        ids: [],
         scraps: [],
         touchers: [],
         history: [],
@@ -510,6 +525,26 @@ function getExplicitSelfIntroductionReason(message, actor) {
     return '';
 }
 
+function getQuotedDialogueSections(text) {
+    const body = String(text || '').trim();
+    if (!body) {
+        return [];
+    }
+
+    const sections = [];
+    const pattern = /"([^"\n]+)"|“([^”\n]+)”/g;
+    let match = pattern.exec(body);
+    while (match) {
+        const section = String(match[1] || match[2] || '').trim();
+        if (section) {
+            sections.push(section);
+        }
+        match = pattern.exec(body);
+    }
+
+    return sections;
+}
+
 function normalizeInventoryScrap(value, index, fallbackOwner, fallbackHolder) {
     const defaults = {
         id: `death-note-scrap-${index + 1}`,
@@ -532,6 +567,20 @@ function normalizeInventoryScrap(value, index, fallbackOwner, fallbackHolder) {
         active: scrap.active !== false,
         createdAt: normalizeTransferredAt(scrap.createdAt),
         updatedAt: normalizeTransferredAt(scrap.updatedAt),
+    };
+}
+
+function normalizeInventoryIdCard(value, index) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(entry.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const fallbackLabel = actor.name ? `${actor.name} ID` : `ID Card ${index + 1}`;
+    return {
+        id: String(entry.id || `death-note-id-${index + 1}`).trim() || `death-note-id-${index + 1}`,
+        kind: 'id_card',
+        label: String(entry.label || fallbackLabel).trim() || fallbackLabel,
+        actor,
+        createdAt: normalizeTransferredAt(entry.createdAt),
+        updatedAt: normalizeTransferredAt(entry.updatedAt),
     };
 }
 
@@ -566,6 +615,97 @@ function normalizeInventoryToucher(value, index) {
     };
 }
 
+function normalizeIdentityTheftCooldown(value, index) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(entry.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = String(entry.key || getActorKnowledgeKey(actor) || `identity-theft-cooldown-${index + 1}`).trim();
+    return {
+        key,
+        actor,
+        availableAt: normalizeTransferredAt(entry.availableAt),
+    };
+}
+
+function normalizeIdentityTheftPendingExposure(value) {
+    const defaults = createDefaultIdentityTheftState().pendingExposure;
+    const entry = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(entry.actor, defaults.actor.type, defaults.actor.name);
+    const createdAt = normalizeTransferredAt(entry.createdAt);
+    return {
+        active: Boolean(entry.active) && Boolean(getActorKnowledgeKey(actor)),
+        actor,
+        createdAt,
+    };
+}
+
+function normalizeIdentityTheftState(value) {
+    const state = value && typeof value === 'object' ? value : {};
+    const seen = new Set();
+    const now = Date.now();
+    const cooldownsRaw = Array.isArray(state.cooldowns) ? state.cooldowns : [];
+    const cooldowns = [];
+
+    for (let index = 0; index < cooldownsRaw.length; index += 1) {
+        const entry = normalizeIdentityTheftCooldown(cooldownsRaw[index], index);
+        if (!entry.key || seen.has(entry.key) || entry.availableAt === null || entry.availableAt <= now) {
+            continue;
+        }
+
+        seen.add(entry.key);
+        cooldowns.push(entry);
+    }
+
+    return {
+        cooldowns,
+        pendingExposure: normalizeIdentityTheftPendingExposure(state.pendingExposure),
+    };
+}
+
+function getIdentityTheftActorKey(actor) {
+    return getActorKnowledgeKey(normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, ''));
+}
+
+function findInventoryIdCardByActor(state, actor) {
+    const key = getIdentityTheftActorKey(actor);
+    if (!key) {
+        return null;
+    }
+
+    return state.inventory.ids.find((entry) => getIdentityTheftActorKey(entry.actor) === key) || null;
+}
+
+function upsertIdentityTheftCooldown(state, actor, availableAt) {
+    const key = getIdentityTheftActorKey(actor);
+    if (!key) {
+        return null;
+    }
+
+    const nextAvailableAt = normalizeTransferredAt(availableAt);
+    const existing = state.identityTheft.cooldowns.find((entry) => entry.key === key);
+    if (existing) {
+        existing.actor = cloneActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+        existing.availableAt = nextAvailableAt;
+        return existing;
+    }
+
+    const entry = normalizeIdentityTheftCooldown({
+        key,
+        actor,
+        availableAt: nextAvailableAt,
+    }, state.identityTheft.cooldowns.length);
+    state.identityTheft.cooldowns.push(entry);
+    return entry;
+}
+
+function clearIdentityTheftCooldown(state, actor) {
+    const key = getIdentityTheftActorKey(actor);
+    if (!key) {
+        return;
+    }
+
+    state.identityTheft.cooldowns = state.identityTheft.cooldowns.filter((entry) => entry.key !== key);
+}
+
 function normalizeInventoryState(value, ownership, hasNotebook) {
     const defaults = createDefaultInventoryState();
     const inventory = value && typeof value === 'object' ? value : {};
@@ -585,6 +725,9 @@ function normalizeInventoryState(value, ownership, hasNotebook) {
             holder: normalizeActorRef(notebook.holder, fallbackHolder.type, fallbackHolder.name),
             updatedAt: normalizeTransferredAt(notebook.updatedAt),
         },
+        ids: Array.isArray(inventory.ids)
+            ? inventory.ids.map((entry, index) => normalizeInventoryIdCard(entry, index))
+            : [],
         scraps: Array.isArray(inventory.scraps)
             ? inventory.scraps.map((scrap, index) => normalizeInventoryScrap(scrap, index, fallbackOwner, fallbackHolder))
             : [],
@@ -827,6 +970,7 @@ export function getChatState() {
     state.ownership = normalizeOwnershipState(state.ownership);
     state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
+    state.identityTheft = normalizeIdentityTheftState(state.identityTheft);
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
 
     if (state.inventory.notebook.destroyed) {
@@ -1042,6 +1186,184 @@ export function autoLearnCharacterNameFromMessage(messageIndex, options = {}) {
         timestamp: options.timestamp,
         reason: `${actor.name || 'Character'} explicitly introduced themself in dialogue.`,
     });
+}
+
+export function autoLearnQuotedCharacterNamesFromMessage(messageIndex, options = {}) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    const speaker = getCharacterActorForMessage(message);
+    if (!speaker) {
+        return false;
+    }
+
+    const quotedSections = getQuotedDialogueSections(message?.mes);
+    if (!quotedSections.length) {
+        return false;
+    }
+
+    const speakerKey = getActorKnowledgeKey(speaker);
+    let learnedAny = false;
+    const directory = getCharacterNameDirectory();
+    for (const entry of directory) {
+        if (!entry || entry.known || !entry.trueName) {
+            continue;
+        }
+
+        if (entry.key && speakerKey && entry.key === speakerKey) {
+            continue;
+        }
+
+        const namePattern = new RegExp(`\\b${buildFlexibleNamePattern(entry.trueName)}\\b`, 'i');
+        if (!quotedSections.some((section) => namePattern.test(section))) {
+            continue;
+        }
+
+        const learned = learnCharacterName(entry.actor, {
+            source: 'quoted_confession',
+            timestamp: options.timestamp,
+            reason: `${speaker.name || 'A character'} explicitly said ${entry.trueName} in quoted dialogue.`,
+        });
+        learnedAny = learned || learnedAny;
+    }
+
+    return learnedAny;
+}
+
+export function getIdentityStealAttemptState(actor) {
+    const state = getChatState();
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getIdentityTheftActorKey(normalized);
+    const existingId = findInventoryIdCardByActor(state, normalized);
+    const cooldown = state.identityTheft.cooldowns.find((entry) => entry.key === key) || null;
+    const now = Date.now();
+    const cooldownUntil = cooldown && cooldown.availableAt && cooldown.availableAt > now ? cooldown.availableAt : null;
+    return {
+        key,
+        hasId: Boolean(existingId),
+        idItem: existingId,
+        cooldownUntil,
+        onCooldown: Boolean(cooldownUntil),
+        canAttempt: Boolean(key) && !existingId && !cooldownUntil,
+    };
+}
+
+export function attemptStealCharacterId(actor, options = {}) {
+    const state = getChatState();
+    const target = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const targetKey = getIdentityTheftActorKey(target);
+    if (!targetKey || target.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        return { changed: false, success: false, reason: 'invalid_target' };
+    }
+
+    const currentState = getIdentityStealAttemptState(target);
+    if (currentState.hasId) {
+        return {
+            changed: false,
+            success: false,
+            reason: 'already_owned',
+            idItem: currentState.idItem,
+        };
+    }
+
+    if (currentState.onCooldown) {
+        return {
+            changed: false,
+            success: false,
+            reason: 'cooldown',
+            cooldownUntil: currentState.cooldownUntil,
+        };
+    }
+
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    const userActor = normalizeActorRef(options.actor, NOTEBOOK_ACTOR_TYPES.USER, 'User');
+    if (Math.random() < ID_THEFT_FAILURE_CHANCE) {
+        const cooldownUntil = timestamp + ID_THEFT_COOLDOWN_MS;
+        upsertIdentityTheftCooldown(state, target, cooldownUntil);
+        state.identityTheft.pendingExposure = normalizeIdentityTheftPendingExposure({
+            active: true,
+            actor: target,
+            createdAt: timestamp,
+        });
+        pushInventoryHistory(state, {
+            action: 'steal_id_failed',
+            itemId: targetKey,
+            detail: String(options.failureReason || '').trim() || `${userActor.name || 'User'} failed to steal ${target.name || 'that character'}'s ID.`,
+            actor: userActor,
+            target,
+            timestamp,
+        });
+        return {
+            changed: true,
+            success: false,
+            reason: 'failed',
+            cooldownUntil,
+        };
+    }
+
+    const idItem = normalizeInventoryIdCard({
+        id: `death-note-id-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
+        label: `${target.name || 'Unknown'} ID`,
+        actor: target,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+    }, state.inventory.ids.length);
+    state.inventory.ids.push(idItem);
+    clearIdentityTheftCooldown(state, target);
+    state.identityTheft.pendingExposure = normalizeIdentityTheftPendingExposure(null);
+    const learned = learnCharacterName(target, {
+        source: 'stolen_id',
+        timestamp,
+        reason: `${target.name || 'Character'}'s ID was stolen.`,
+    });
+    pushInventoryHistory(state, {
+        action: 'steal_id_success',
+        itemId: idItem.id,
+        detail: String(options.successReason || '').trim() || `${userActor.name || 'User'} successfully stole ${target.name || 'that character'}'s ID.`,
+        actor: userActor,
+        target,
+        timestamp,
+    });
+    return {
+        changed: true,
+        success: true,
+        reason: 'success',
+        learned,
+        idItem,
+    };
+}
+
+export function getPendingIdentityTheftExposure() {
+    const state = getChatState();
+    return normalizeIdentityTheftPendingExposure(state.identityTheft?.pendingExposure);
+}
+
+export function consumePendingIdentityTheftExposureForMessage(messageIndex) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const state = getChatState();
+    const pending = normalizeIdentityTheftPendingExposure(state.identityTheft?.pendingExposure);
+    if (!pending.active) {
+        return false;
+    }
+
+    const actor = getCharacterActorForMessage(chat[index]);
+    if (!actor || getIdentityTheftActorKey(actor) !== getIdentityTheftActorKey(pending.actor)) {
+        return false;
+    }
+
+    state.identityTheft.pendingExposure = normalizeIdentityTheftPendingExposure(null);
+    return true;
 }
 
 export function getDeathNoteInventory() {

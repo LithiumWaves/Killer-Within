@@ -1,6 +1,7 @@
 import { FLOATING_ID, NOTEBOOK_ACTOR_TYPES, NOTEBOOK_USER_ACCESS } from './config.js';
 import {
     addNotebookToucher,
+    attemptStealCharacterId,
     clearNotebookTouchers,
     createNotebookScrap,
     destroyNotebook,
@@ -12,12 +13,12 @@ import {
     getContext,
     getCurrentChatCharacterActors,
     getDeathNoteInventory,
+    getIdentityStealAttemptState,
     getLinkedShinigami,
     getNotebookPages,
     getNotebookOwnership,
     getRecentChatMemoryCandidates,
     getSettings,
-    learnCharacterName,
     linkNotebookShinigami,
     notify,
     persistChatChanges,
@@ -344,18 +345,37 @@ function renderNameKnowledgeManagerHtml() {
     }
 
     const rows = directory.map((entry) => {
+        const stealState = getIdentityStealAttemptState(entry.actor);
+        let actionLabel = entry.known ? 'Hide again' : 'Steal ID';
+        let actionClass = entry.known ? 'kw-deathnote-hide-name' : 'kw-deathnote-steal-id';
+        let actionDisabled = '';
+        let statusDetail = entry.known ? 'Known to the user' : 'Name hidden from the user';
+
+        if (!entry.known && stealState.hasId) {
+            actionLabel = 'ID Stolen';
+            actionDisabled = 'disabled';
+            statusDetail = 'ID card already taken';
+        } else if (!entry.known && stealState.onCooldown) {
+            actionLabel = `Cooldown ${formatRemainingTime(stealState.cooldownUntil - Date.now())}`;
+            actionDisabled = 'disabled';
+            statusDetail = 'They are on alert after the last attempt';
+        }
+
         return `
             <div class="kw-deathnote-item">
                 <div class="kw-deathnote-item__meta">
                     <b>${escapeHtml(entry.displayName)}</b>
-                    <span>${entry.known ? 'Known to the user' : 'Name hidden from the user'}</span>
+                    <span>${escapeHtml(statusDetail)}</span>
                 </div>
                 <span class="kw-deathnote-name-state">${entry.known ? 'Known' : 'Hidden'}</span>
-                <button
-                    type="button"
-                    class="menu_button ${entry.known ? 'kw-deathnote-hide-name' : 'kw-deathnote-learn-name'}"
-                    data-actor="${escapeHtml(encodeActorValue(entry.actor))}"
-                >${entry.known ? 'Hide again' : 'Learn name'}</button>
+                <div class="kw-deathnote-item__actions">
+                    <button
+                        type="button"
+                        class="menu_button ${actionClass}"
+                        data-actor="${escapeHtml(encodeActorValue(entry.actor))}"
+                        ${actionDisabled}
+                    >${escapeHtml(actionLabel)}</button>
+                </div>
             </div>
         `;
     }).join('');
@@ -363,12 +383,29 @@ function renderNameKnowledgeManagerHtml() {
     return `
         <div class="kw-deathnote-manager">
             <div class="kw-deathnote-manager__summary">
-                <span><b>Unknown names stay scrambled</b> until the user explicitly learns them.</span>
+                <span><b>Unknown names stay scrambled</b> until they are learned in-scene.</span>
+                <span><b>Steal ID:</b> risky, can fail, and puts the target on alert.</span>
                 <span><b>Scope:</b> Current chat participants only</span>
             </div>
             <div class="kw-deathnote-manager__list">${rows}</div>
         </div>
     `;
+}
+
+function formatRemainingTime(milliseconds) {
+    const value = Number(milliseconds);
+    if (!Number.isFinite(value) || value <= 0) {
+        return '0m';
+    }
+
+    const totalSeconds = Math.ceil(value / 1000);
+    if (totalSeconds < 60) {
+        return `${totalSeconds}s`;
+    }
+
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 function summarizeMessageBody(text) {
@@ -820,6 +857,7 @@ function renderUserAccessOptions(selectedAccess) {
 
 function getSelectedInventoryItemKey(settings, inventory) {
     const scraps = inventory.scraps.filter((scrap) => scrap && scrap.active);
+    const ids = Array.isArray(inventory.ids) ? inventory.ids : [];
     const selected = String(settings.inventorySelectedItemKey || 'notebook').trim();
     if (!selected || selected === 'notebook') {
         return 'notebook';
@@ -828,6 +866,13 @@ function getSelectedInventoryItemKey(settings, inventory) {
     if (selected.startsWith('scrap:')) {
         const scrapId = selected.slice('scrap:'.length);
         if (scraps.some((scrap) => scrap.id === scrapId)) {
+            return selected;
+        }
+    }
+
+    if (selected.startsWith('id:')) {
+        const idCardId = selected.slice('id:'.length);
+        if (ids.some((entry) => entry && entry.id === idCardId)) {
             return selected;
         }
     }
@@ -870,7 +915,23 @@ function renderInventoryGridSlots(inventory, selectedKey, coverUrl) {
         `);
     }
 
-    if (!scraps.length) {
+    const ids = Array.isArray(inventory.ids) ? inventory.ids : [];
+    for (const idCard of ids) {
+        const itemKey = `id:${idCard.id}`;
+        slots.push(`
+            <button
+                type="button"
+                class="kw-dn-inventory__slot kw-dn-inventory__slot--id ${selectedKey === itemKey ? 'is-selected' : ''}"
+                data-item-key="${escapeHtml(itemKey)}"
+                aria-pressed="${selectedKey === itemKey ? 'true' : 'false'}"
+            >
+                <span class="kw-dn-inventory__id-art" aria-hidden="true"></span>
+                <span class="kw-dn-inventory__slot-label">${escapeHtml(idCard.label)}</span>
+            </button>
+        `);
+    }
+
+    if (!scraps.length && !ids.length) {
         slots.push(`
             <div class="kw-dn-inventory__slot kw-dn-inventory__slot--empty" aria-hidden="true">
                 <span class="kw-dn-inventory__slot-label">Empty</span>
@@ -992,9 +1053,38 @@ function renderScrapSelectionPanel(scrap) {
     `;
 }
 
+function renderIdentityCardSelectionPanel(idCard) {
+    return `
+        <div class="kw-dn-inventory__context-card kw-dn-inventory__context-card--id">
+            <div class="kw-dn-inventory__context-head">
+                <div>
+                    <div class="kw-dn-inventory__item-eyebrow">ID Card</div>
+                    <div class="kw-dn-inventory__context-title">${escapeHtml(idCard.actor.name || idCard.label)}</div>
+                </div>
+                <div class="kw-dn-inventory__context-meta">Held by User</div>
+            </div>
+            <div class="kw-dn-inventory__context-meta">
+                A stolen identification confirming this character's true name.
+            </div>
+        </div>
+    `;
+}
+
 function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
     const selectedKey = getSelectedInventoryItemKey(settings, inventory);
     if (selectedKey === 'notebook') {
+        return renderNotebookSelectionPanel({ settings, inventory, ownership, linked });
+    }
+
+    if (selectedKey.startsWith('id:')) {
+        const idCardId = selectedKey.slice('id:'.length);
+        const idCard = Array.isArray(inventory.ids)
+            ? inventory.ids.find((entry) => entry && entry.id === idCardId)
+            : null;
+        if (idCard) {
+            return renderIdentityCardSelectionPanel(idCard);
+        }
+
         return renderNotebookSelectionPanel({ settings, inventory, ownership, linked });
     }
 
@@ -1013,7 +1103,9 @@ function renderInventoryTrayHtml() {
     const inventory = getDeathNoteInventory();
     const linked = getLinkedShinigami();
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
-    const itemCount = (inventory.notebook.destroyed ? 0 : 1) + inventory.scraps.filter((scrap) => scrap && scrap.active).length;
+    const itemCount = (inventory.notebook.destroyed ? 0 : 1)
+        + inventory.scraps.filter((scrap) => scrap && scrap.active).length
+        + (Array.isArray(inventory.ids) ? inventory.ids.length : 0);
     const selectedKey = getSelectedInventoryItemKey(settings, inventory);
 
     return `
@@ -1347,17 +1439,47 @@ function bindSettingsUi() {
             }), 'User access updated.');
         })
         .off('click', '.kw-deathnote-learn-name')
-        .on('click', '.kw-deathnote-learn-name', async (event) => {
+        .off('click', '.kw-deathnote-steal-id')
+        .on('click', '.kw-deathnote-steal-id', async (event) => {
             event.preventDefault();
             const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
             if (!actor) {
                 return;
             }
 
-            await commitInventoryMutation(() => learnCharacterName(actor, {
-                source: 'manual',
-                reason: `${actor.name || 'Character'} learned via manager.`,
-            }), 'Character name learned.');
+            const result = attemptStealCharacterId(actor);
+            if (!result || !result.changed && result.reason !== 'already_owned' && result.reason !== 'cooldown') {
+                notify('warning', 'That ID cannot be stolen right now.');
+                return;
+            }
+
+            if (result.changed) {
+                await persistChatChanges();
+            }
+
+            if (result.success && result.idItem) {
+                const settings = getSettings();
+                settings.inventorySelectedItemKey = `id:${result.idItem.id}`;
+                scheduleSettingsSave();
+                refreshDeathNoteUi();
+                notify('success', `${actor.name || 'That character'}'s ID was stolen.`);
+                return;
+            }
+
+            refreshDeathNoteUi();
+            if (result.reason === 'cooldown') {
+                notify('warning', `Too risky right now. Try again in ${formatRemainingTime(result.cooldownUntil - Date.now())}.`);
+                return;
+            }
+
+            if (result.reason === 'already_owned') {
+                notify('info', `You already have ${actor.name || 'that character'}'s ID.`);
+                return;
+            }
+
+            if (result.reason === 'failed') {
+                notify('warning', `${actor.name || 'That character'} noticed the attempt and will react the next time they speak.`);
+            }
         })
         .off('click', '.kw-deathnote-hide-name')
         .on('click', '.kw-deathnote-hide-name', async (event) => {

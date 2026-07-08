@@ -1,6 +1,8 @@
 import {
     autoLearnCharacterNameFromMessage,
+    autoLearnQuotedCharacterNamesFromMessage,
     autoTrackDeathNoteMemoryMessage,
+    consumePendingIdentityTheftExposureForMessage,
     getSettings,
     reconcileEntriesFromNotebookText,
 } from './core.js';
@@ -25,10 +27,14 @@ export function setupDeathNoteExtension() {
                         : [],
                 });
                 const nameLearned = autoLearnCharacterNameFromMessage(messageIndex);
+                const confessionLearned = autoLearnQuotedCharacterNamesFromMessage(messageIndex);
+                const identityExposureConsumed = details?.kind === 'received'
+                    ? consumePendingIdentityTheftExposureForMessage(messageIndex)
+                    : false;
                 if (memoryTracked) {
                     await syncLinkedShinigamiVisibility();
                 }
-                return memoryTracked || nameLearned;
+                return memoryTracked || nameLearned || confessionLearned || identityExposureConsumed;
             },
             onUiRefresh: refreshDeathNoteUi,
         });

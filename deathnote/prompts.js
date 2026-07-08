@@ -4,10 +4,12 @@ import {
     NOTEBOOK_USER_ACCESS,
 } from './config.js';
 import {
+    getContext,
     getCharacterNameDirectory,
     getChatState,
     getDeathNoteInventory,
     getNotebookOwnership,
+    getPendingIdentityTheftExposure,
     getSettings,
     getUserHeldNotebookScraps,
 } from './core.js';
@@ -127,11 +129,13 @@ function buildOwnershipBlock(ownership) {
 
 function buildInventoryBlock(inventory) {
     const notebook = inventory?.notebook || {};
+    const ids = Array.isArray(inventory?.ids) ? inventory.ids : [];
     const scraps = Array.isArray(inventory?.scraps) ? inventory.scraps.filter((scrap) => scrap?.active) : [];
     const userHeldScraps = getUserHeldNotebookScraps();
     const lines = [
         'Inventory state:',
         `Notebook item status: ${notebook.destroyed ? 'destroyed' : notebook.exists ? 'present' : 'missing'}`,
+        `Stolen IDs carried by the user: ${ids.length}`,
         `Active scraps: ${scraps.length}`,
     ];
 
@@ -207,6 +211,7 @@ function buildNameKnowledgeInjection() {
         'For any character marked HIDDEN below, do not reveal, confirm, or casually use their true name in user-facing dialogue, narration, labels, or exposition until the scene explicitly establishes that the user learned it.',
         'When referring to a hidden-name character from the user-facing perspective, use the masked label below or a descriptive in-scene reference instead.',
         'Third-person narration that merely contains a true name is not itself a valid introduction. Only explicit direct introductions, such as "I am <name>" or "My name is <name>", count as learning that name.',
+        'If another character explicitly says a hidden true name inside quoted dialogue, that also counts as learning that name.',
         'A hidden true name must not appear in narration like "<true name> smiled" before it is learned.',
         '',
         'Character name knowledge:',
@@ -222,6 +227,38 @@ function buildNameKnowledgeInjection() {
     }
 
     return lines.join('\n');
+}
+
+function buildIdentityTheftInjection() {
+    const settings = getSettings();
+    if (!settings.enabled) {
+        return '';
+    }
+
+    const pending = getPendingIdentityTheftExposure();
+    if (!pending.active) {
+        return '';
+    }
+
+    const context = getContext();
+    let userLabel = 'the user';
+    try {
+        const resolved = String(context?.substituteParams?.('{{user}}') || '').trim();
+        if (resolved && resolved !== '{{user}}') {
+            userLabel = resolved;
+        }
+    } catch (_error) {
+        // Ignore macro substitution failures and fall back to a generic label.
+    }
+
+    const targetLabel = formatActorLabel(pending.actor, 'that character');
+    return [
+        '[Failed Identity Theft]',
+        `If the responding character is ${targetLabel}, they already noticed that ${userLabel} tried to steal their ID.`,
+        'Treat that failed theft as something that already happened in-scene.',
+        `In this reply, ${targetLabel} should react naturally to that violation with suspicion, confrontation, guardedness, or alarm.`,
+        `If the responding character is not ${targetLabel}, ignore this block entirely.`,
+    ].join('\n');
 }
 
 export function getDeathNotePromptInjectionMessage() {
@@ -260,6 +297,27 @@ export function getNameKnowledgePromptInjectionMessage() {
             [MESSAGE_EXTRA_KEY]: {
                 injected: true,
                 nameKnowledge: true,
+            },
+        },
+    };
+}
+
+export function getIdentityTheftPromptInjectionMessage() {
+    const injection = buildIdentityTheftInjection();
+    if (!injection) {
+        return null;
+    }
+
+    return {
+        name: 'Failed Identity Theft',
+        is_user: false,
+        is_system: true,
+        send_date: Date.now(),
+        mes: injection,
+        extra: {
+            [MESSAGE_EXTRA_KEY]: {
+                injected: true,
+                identityTheft: true,
             },
         },
     };

@@ -75,6 +75,11 @@
     overflow-wrap: anywhere;
 }
 
+.kw-deathnote-item__actions {
+    display: flex;
+    justify-content: end;
+}
+
 .kw-deathnote-name-state {
     font-size: 0.9em;
     opacity: 0.78;
@@ -258,6 +263,43 @@
         linear-gradient(180deg, rgba(243, 232, 211, 0.96), rgba(221, 210, 189, 0.92));
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
     clip-path: polygon(0 10%, 6% 0, 100% 0, 100% 90%, 95% 100%, 0 100%);
+}
+
+.kw-dn-inventory__id-art {
+    width: 46px;
+    height: 60px;
+    display: block;
+    border: 1px solid rgba(160, 148, 138, 0.4);
+    border-radius: 0.16rem;
+    background:
+        linear-gradient(180deg, rgba(226, 219, 208, 0.98), rgba(196, 188, 177, 0.96));
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+    position: relative;
+}
+
+.kw-dn-inventory__id-art::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 8px;
+    width: 12px;
+    height: 14px;
+    border-radius: 999px;
+    background: rgba(76, 74, 82, 0.45);
+    box-shadow: 0 18px 0 4px rgba(76, 74, 82, 0.2);
+}
+
+.kw-dn-inventory__id-art::after {
+    content: "";
+    position: absolute;
+    right: 6px;
+    top: 10px;
+    width: 14px;
+    height: 2px;
+    background: rgba(90, 85, 92, 0.34);
+    box-shadow:
+        0 7px 0 rgba(90, 85, 92, 0.34),
+        0 14px 0 rgba(90, 85, 92, 0.34);
 }
 
 .kw-dn-inventory__slot-label {

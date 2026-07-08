@@ -15,7 +15,11 @@ import {
     getPromptInjectionMessage,
     normalizeThoughtResult,
 } from './prompts.js';
-import { getDeathNotePromptInjectionMessage, getNameKnowledgePromptInjectionMessage } from '../deathnote/prompts.js';
+import {
+    getDeathNotePromptInjectionMessage,
+    getIdentityTheftPromptInjectionMessage,
+    getNameKnowledgePromptInjectionMessage,
+} from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
@@ -176,6 +180,12 @@ export function installInterceptor() {
         if (nameKnowledgeInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
             chat.splice(insertAt, 0, nameKnowledgeInjection);
+        }
+
+        const identityTheftInjection = getIdentityTheftPromptInjectionMessage();
+        if (identityTheftInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, identityTheftInjection);
         }
 
         const presenceInjection = getPresencePromptInjectionMessage();
