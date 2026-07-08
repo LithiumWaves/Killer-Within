@@ -61,7 +61,7 @@ function setPosition(x, y) {
 
 function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
-    const interiorUrl = new URL('../assets/deathnote/interior.png', import.meta.url).toString();
+    const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
     const state = getChatState();
     const settings = getSettings();
 
@@ -78,9 +78,19 @@ function buildWidgetHtml() {
                 class="kw-deathnote__spread"
                 role="dialog"
                 aria-label="Death Note notebook"
-                style="background-image:url('${interiorUrl}')"
             >
-                <div class="kw-deathnote__inside-cover kw-deathnote__drag-handle kw-deathnote__toggle" aria-label="Close notebook"></div>
+                <div class="kw-deathnote__inside-cover kw-deathnote__drag-handle kw-deathnote__toggle" aria-label="Close notebook">
+                    <div class="kw-deathnote__inside-cover-panel">
+                        <div class="kw-deathnote__inside-cover-sheet">
+                            <img
+                                class="kw-deathnote__rules-page"
+                                src="${rulesPageUrl}"
+                                alt="Death Note rules"
+                                draggable="false"
+                            />
+                        </div>
+                    </div>
+                </div>
                 <div class="kw-deathnote__page-right">
                     <div class="kw-deathnote__toolbar">
                         <button
