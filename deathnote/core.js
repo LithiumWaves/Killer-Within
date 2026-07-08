@@ -75,8 +75,10 @@ function createDefaultChatState() {
     return {
         version: 1,
         hasNotebook: true,
+        notebookText: '',
         entries: [],
         lastAssistantMessageCountedAt: null,
+        lastGenerationCountedAt: null,
     };
 }
 
@@ -96,6 +98,10 @@ export function getChatState() {
 
     if (!Object.hasOwn(state, 'hasNotebook')) {
         state.hasNotebook = true;
+    }
+
+    if (!Object.hasOwn(state, 'notebookText')) {
+        state.notebookText = '';
     }
 
     return state;
@@ -133,12 +139,97 @@ export function addDeathEntry({
         resolvedAt: null,
     };
 
-    if (!entry.targetName) {
+    if (!entry.targetName && !entry.noteText) {
         return null;
     }
 
     state.entries.push(entry);
     return entry;
+}
+
+function parseNotebookLine(line) {
+    const raw = String(line || '').trim();
+    if (!raw) {
+        return null;
+    }
+
+    let remainingAssistantMessages = 1;
+    let body = raw;
+    const timeMatch = body.match(/\s+(\d+)\s*$/);
+    if (timeMatch) {
+        remainingAssistantMessages = Math.max(0, Number(timeMatch[1]) || 0);
+        body = body.slice(0, Math.max(0, timeMatch.index)).trim();
+    }
+
+    return {
+        noteText: raw,
+        targetName: '',
+        cause: body,
+        remainingAssistantMessages,
+    };
+}
+
+function buildLineCounts(lines) {
+    const counts = new Map();
+    for (const line of lines) {
+        counts.set(line, (counts.get(line) ?? 0) + 1);
+    }
+    return counts;
+}
+
+export function setNotebookText(text) {
+    const state = getChatState();
+    const value = String(text ?? '');
+
+    if (state.notebookText === value) {
+        return false;
+    }
+
+    state.notebookText = value;
+    reconcileEntriesFromNotebookText();
+    return true;
+}
+
+export function reconcileEntriesFromNotebookText() {
+    const state = getChatState();
+    const lines = String(state.notebookText ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    const counts = buildLineCounts(lines);
+    const retained = [];
+
+    for (const entry of state.entries) {
+        const key = String(entry?.noteText || '').trim();
+        if (!key) {
+            continue;
+        }
+
+        const available = counts.get(key) ?? 0;
+        if (available <= 0) {
+            continue;
+        }
+
+        counts.set(key, available - 1);
+        retained.push(entry);
+    }
+
+    for (const [line, count] of counts.entries()) {
+        for (let i = 0; i < count; i += 1) {
+            const parsed = parseNotebookLine(line);
+            if (!parsed) {
+                continue;
+            }
+
+            const entry = addDeathEntry(parsed);
+            if (entry) {
+                retained.push(entry);
+            }
+        }
+    }
+
+    state.entries = retained;
 }
 
 export function removeDeathEntry(entryId) {
@@ -171,31 +262,46 @@ function isAssistantMessage(message) {
     return Boolean(text);
 }
 
-export function tickDeathNoteCountdown() {
-    const context = getContext();
-    const chat = Array.isArray(context?.chat) ? context.chat : [];
-    if (!chat.length) {
-        return { ticked: false, triggered: [] };
+function normalizeEntryStatus(value) {
+    const status = String(value || '').trim().toLowerCase();
+    if (status === 'due' || status === 'resolved' || status === 'active') {
+        return status;
     }
+    return 'active';
+}
 
-    const lastMessage = chat[chat.length - 1];
-    if (!isAssistantMessage(lastMessage)) {
-        return { ticked: false, triggered: [] };
-    }
-
+export function tickDeathNoteCountdownForGeneration(signature) {
+    const settings = getSettings();
     const state = getChatState();
-    const lastDate = Number(lastMessage?.send_date) || null;
-    const signature = lastDate ?? chat.length - 1;
 
-    if (state.lastAssistantMessageCountedAt === signature) {
-        return { ticked: false, triggered: [] };
+    if (!settings.enabled) {
+        return { ticked: false, due: [] };
     }
 
-    state.lastAssistantMessageCountedAt = signature;
+    if (!state.hasNotebook) {
+        return { ticked: false, due: [] };
+    }
 
-    const triggered = [];
+    const key = Number.isFinite(Number(signature)) ? Number(signature) : null;
+    if (key === null) {
+        return { ticked: false, due: [] };
+    }
+
+    if (state.lastGenerationCountedAt === key) {
+        return { ticked: false, due: [] };
+    }
+
+    state.lastGenerationCountedAt = key;
+
+    const due = [];
     for (const entry of state.entries) {
-        if (!entry || entry.status !== 'active') {
+        if (!entry) {
+            continue;
+        }
+
+        entry.status = normalizeEntryStatus(entry.status);
+
+        if (entry.status !== 'active') {
             continue;
         }
 
@@ -204,13 +310,50 @@ export function tickDeathNoteCountdown() {
         entry.remainingAssistantMessages = next;
 
         if (next === 0) {
-            entry.status = 'triggered';
-            entry.resolvedAt = Date.now();
-            triggered.push(entry);
+            entry.status = 'due';
+            due.push(entry);
         }
     }
 
-    return { ticked: true, triggered };
+    return { ticked: true, due };
+}
+
+export function resolveDueEntriesForAssistantMessage(signature) {
+    const settings = getSettings();
+    const state = getChatState();
+    const key = Number.isFinite(Number(signature)) ? Number(signature) : null;
+    if (key === null) {
+        return { resolved: false, resolvedEntries: [] };
+    }
+
+    if (!settings.enabled) {
+        return { resolved: false, resolvedEntries: [] };
+    }
+
+    if (state.lastAssistantMessageCountedAt === key) {
+        return { resolved: false, resolvedEntries: [] };
+    }
+
+    state.lastAssistantMessageCountedAt = key;
+
+    const resolvedEntries = [];
+    for (const entry of state.entries) {
+        if (!entry) {
+            continue;
+        }
+
+        entry.status = normalizeEntryStatus(entry.status);
+
+        if (entry.status !== 'due') {
+            continue;
+        }
+
+        entry.status = 'resolved';
+        entry.resolvedAt = Date.now();
+        resolvedEntries.push(entry);
+    }
+
+    return { resolved: resolvedEntries.length > 0, resolvedEntries };
 }
 
 export function isDebugEnabled() {

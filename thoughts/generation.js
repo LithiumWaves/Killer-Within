@@ -16,6 +16,7 @@ import {
     normalizeThoughtResult,
 } from './prompts.js';
 import { getDeathNotePromptInjectionMessage } from '../deathnote/prompts.js';
+import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
 
 async function requestThoughtGeneration(context, settings, rawRequest, hybridPrompt) {
@@ -155,19 +156,13 @@ export function clearPendingThought() {
 
 export function installInterceptor() {
     globalThis.killerWithinThoughtsInterceptor = async function killerWithinThoughtsInterceptor(chat, _contextSize, _abort, type) {
-        const settings = getSettings();
-
-        if (!settings.enabled || state.isGeneratingThought || type === 'quiet' || !Array.isArray(chat)) {
+        if (type === 'quiet' || !Array.isArray(chat)) {
             return;
         }
 
-        if (!state.autoThoughtInFlight) {
-            state.autoThoughtInFlight = true;
-            try {
-                await generatePendingThought();
-            } finally {
-                state.autoThoughtInFlight = false;
-            }
+        const deathNoteTick = tickDeathNoteCountdownForGeneration(chat.length);
+        if (deathNoteTick?.ticked) {
+            await persistDeathNoteChatChanges();
         }
 
         const deathNoteInjection = getDeathNotePromptInjectionMessage();
@@ -176,10 +171,25 @@ export function installInterceptor() {
             chat.splice(insertAt, 0, deathNoteInjection);
         }
 
-        const thoughtsInjection = getPromptInjectionMessage();
-        if (thoughtsInjection) {
-            const insertAt = Math.max(chat.length - 1, 0);
-            chat.splice(insertAt, 0, thoughtsInjection);
+        const settings = getSettings();
+
+        if (settings.enabled && !state.isGeneratingThought) {
+            if (!state.autoThoughtInFlight) {
+                state.autoThoughtInFlight = true;
+                try {
+                    await generatePendingThought();
+                } finally {
+                    state.autoThoughtInFlight = false;
+                }
+            }
+        }
+
+        if (settings.enabled) {
+            const thoughtsInjection = getPromptInjectionMessage();
+            if (thoughtsInjection) {
+                const insertAt = Math.max(chat.length - 1, 0);
+                chat.splice(insertAt, 0, thoughtsInjection);
+            }
         }
     };
 }

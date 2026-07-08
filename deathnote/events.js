@@ -1,8 +1,8 @@
-import { persistChatChanges } from './core.js';
+import { getContext, persistChatChanges } from './core.js';
 
 export function registerEventHandlers({
     onChatChanged,
-    onTick,
+    onAssistantMessage,
     onUiRefresh,
 } = {}) {
     const context = globalThis.SillyTavern?.getContext?.() ?? null;
@@ -24,8 +24,13 @@ export function registerEventHandlers({
     });
 
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
-        const result = onTick?.();
-        if (result?.ticked) {
+        const latestContext = getContext();
+        const chat = Array.isArray(latestContext?.chat) ? latestContext.chat : [];
+        const lastMessage = chat.length ? chat[chat.length - 1] : null;
+        const signature = Number(lastMessage?.send_date) || chat.length - 1;
+        const result = onAssistantMessage?.(signature);
+
+        if (result?.resolved) {
             await persistChatChanges();
             refresh();
         }

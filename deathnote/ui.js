@@ -1,14 +1,10 @@
 import { FLOATING_ID } from './config.js';
 import {
-    addDeathEntry,
-    clearDeathEntries,
     getChatState,
     getSettings,
-    isDebugEnabled,
-    notify,
     persistChatChanges,
-    removeDeathEntry,
     scheduleSettingsSave,
+    setNotebookText,
 } from './core.js';
 
 function escapeHtml(text) {
@@ -63,61 +59,6 @@ function setPosition(x, y) {
     scheduleSettingsSave();
 }
 
-function renderEntriesHtml() {
-    const state = getChatState();
-    const entries = Array.isArray(state.entries) ? state.entries : [];
-
-    if (!entries.length) {
-        return '<div class="kw-deathnote__entries-empty">No names written yet.</div>';
-    }
-
-    return entries
-        .slice()
-        .reverse()
-        .map((entry) => {
-            const status = entry?.status === 'triggered' ? 'triggered' : 'active';
-            const remaining = Number.isFinite(Number(entry?.remainingAssistantMessages))
-                ? Math.max(0, Math.floor(Number(entry.remainingAssistantMessages)))
-                : 0;
-            const noteText = String(entry?.noteText || '').trim();
-            const headline = noteText || String(entry?.targetName || '').trim();
-            const details = noteText ? '' : String(entry?.cause || '').trim();
-
-            return `
-                <div class="kw-deathnote__entry kw-deathnote__entry--${status}">
-                    <div class="kw-deathnote__entry-text">
-                        <div class="kw-deathnote__entry-headline">${escapeHtml(headline)}</div>
-                        ${details ? `<div class="kw-deathnote__entry-details">${escapeHtml(details)}</div>` : ''}
-                        <div class="kw-deathnote__entry-meta">
-                            <span>${status === 'triggered' ? 'Triggered' : `In ${remaining} assistant messages`}</span>
-                        </div>
-                    </div>
-                    <button type="button" class="kw-deathnote__entry-remove menu_button" data-entry-id="${escapeHtml(String(entry?.id || ''))}">✕</button>
-                </div>
-            `;
-        })
-        .join('');
-}
-
-function renderDebugHtml() {
-    if (!isDebugEnabled()) {
-        return '';
-    }
-
-    const state = getChatState();
-    return `
-        <details class="kw-deathnote__debug" open>
-            <summary class="kw-deathnote__debug-summary">Debug</summary>
-            <div class="kw-deathnote__debug-actions">
-                <button type="button" class="kw-deathnote__debug-button menu_button" data-action="copy-state">Copy state</button>
-                <button type="button" class="kw-deathnote__debug-button menu_button" data-action="clear-entries">Clear entries</button>
-                <button type="button" class="kw-deathnote__debug-button menu_button" data-action="toggle-notebook">${state.hasNotebook ? 'Drop notebook' : 'Claim notebook'}</button>
-            </div>
-            <pre class="kw-deathnote__debug-pre">${escapeHtml(JSON.stringify(state, null, 2))}</pre>
-        </details>
-    `;
-}
-
 function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
     const interiorUrl = new URL('../assets/deathnote/interior.png', import.meta.url).toString();
@@ -139,43 +80,16 @@ function buildWidgetHtml() {
                 aria-label="Death Note notebook"
                 style="background-image:url('${interiorUrl}')"
             >
-                <div class="kw-deathnote__inside-cover" aria-hidden="true"></div>
+                <div class="kw-deathnote__inside-cover kw-deathnote__drag-handle kw-deathnote__toggle" aria-label="Close notebook"></div>
                 <div class="kw-deathnote__page-right">
                     <div class="kw-deathnote__paper">
-                        <div class="kw-deathnote__paper-header kw-deathnote__drag-handle">
-                            <div class="kw-deathnote__title">Death Note</div>
-                            <div class="kw-deathnote__header-controls">
-                                <label class="kw-deathnote__row kw-deathnote__row--compact">
-                                    <input class="kw-deathnote__has-notebook" type="checkbox" ${state.hasNotebook ? 'checked' : ''} />
-                                    <span>In possession</span>
-                                </label>
-                                <label class="kw-deathnote__row kw-deathnote__row--compact">
-                                    <input class="kw-deathnote__debug-toggle" type="checkbox" ${settings.debug ? 'checked' : ''} />
-                                    <span>Debug</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <form class="kw-deathnote__form">
-                            <textarea
-                                class="kw-deathnote__entry-textarea"
-                                name="entryText"
-                                rows="5"
-                                autocomplete="off"
-                                spellcheck="false"
-                            >${escapeHtml(String(settings.draftText || ''))}</textarea>
-                            <div class="kw-deathnote__actions">
-                                <button type="submit" class="kw-deathnote__write menu_button">Write</button>
-                                <button type="button" class="kw-deathnote__close menu_button">Close</button>
-                            </div>
-                        </form>
-
-                        <div class="kw-deathnote__entries">
-                            <div class="kw-deathnote__entries-title">Written names</div>
-                            <div class="kw-deathnote__entries-list">${renderEntriesHtml()}</div>
-                        </div>
-
-                        ${renderDebugHtml()}
+                        <textarea
+                            class="kw-deathnote__entry-textarea"
+                            name="entryText"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="[NAME] [METHOD OF DEATH] [TIME]"
+                        >${escapeHtml(String(state.notebookText || settings.draftText || ''))}</textarea>
                     </div>
                 </div>
             </div>
@@ -219,112 +133,7 @@ function ensureWidget() {
     root.classList.toggle('kw-deathnote--open', Boolean(settings.isOpen));
 
     root.innerHTML = buildWidgetHtml();
-
-    if (!globalThis.__kwDeathNoteRenderLogged) {
-        globalThis.__kwDeathNoteRenderLogged = true;
-        console.info('[killer_within_deathnote] render', {
-            x: Math.round(x),
-            y: Math.round(y),
-            open: Boolean(settings.isOpen),
-        });
-    }
     return root;
-}
-
-function parseDeathNoteEntryText(text) {
-    const raw = String(text || '').trim();
-    if (!raw) {
-        return null;
-    }
-
-    const lines = raw
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-    let targetName = '';
-    let rest = '';
-
-    if (lines.length >= 2) {
-        targetName = lines[0];
-        rest = lines.slice(1).join(' ').trim();
-    } else {
-        const compact = raw.replace(/\s+/g, ' ').trim();
-        const matcher = compact.match(/^(.*?)\s*(?:[-—|:]|\bwill\s+die\b)([\s\S]*)$/i);
-        if (matcher) {
-            targetName = String(matcher[1] || '').trim();
-            rest = String(matcher[2] || '').trim();
-        } else {
-            targetName = compact;
-            rest = '';
-        }
-    }
-
-    let remainingAssistantMessages = 1;
-    let cause = rest;
-
-    const numberMatch = cause.match(/(\d+)\s*(?:assistant\s+messages?|messages?)?\s*$/i);
-    if (numberMatch) {
-        remainingAssistantMessages = Math.max(0, Number(numberMatch[1]) || 0);
-        cause = cause.slice(0, Math.max(0, numberMatch.index)).trim();
-    }
-
-    return {
-        noteText: raw,
-        targetName: String(targetName || '').trim(),
-        cause: String(cause || '').trim(),
-        remainingAssistantMessages,
-    };
-}
-
-async function writeEntryFromForm(form) {
-    const data = new FormData(form);
-    const parsed = parseDeathNoteEntryText(data.get('entryText'));
-    if (!parsed) {
-        notify('warning', 'Write something in the notebook first.');
-        return;
-    }
-
-    const entry = addDeathEntry(parsed);
-
-    if (!entry) {
-        notify('warning', 'A full display name is required.');
-        return;
-    }
-
-    await persistChatChanges();
-    getSettings().draftText = '';
-    scheduleSettingsSave();
-    notify('success', 'Name written in the Death Note.');
-    form.reset();
-}
-
-async function copyText(text) {
-    const value = String(text || '');
-
-    try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(value);
-            return true;
-        }
-    } catch (error) {
-        console.warn('[killer_within_deathnote] Clipboard write failed', error);
-    }
-
-    try {
-        const textarea = document.createElement('textarea');
-        textarea.value = value;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        document.body.append(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        textarea.remove();
-        return true;
-    } catch (error) {
-        console.warn('[killer_within_deathnote] Fallback clipboard copy failed', error);
-        return false;
-    }
 }
 
 function bindWidgetUi() {
@@ -340,6 +149,7 @@ function bindWidgetUi() {
         handlersInstalled: false,
         moveHandler: null,
         upHandler: null,
+        saveTimer: null,
     };
 
     $(document)
@@ -446,83 +256,23 @@ function bindWidgetUi() {
 
             installHandlers();
         })
-        .off('submit', `#${FLOATING_ID} .kw-deathnote__form`)
-        .on('submit', `#${FLOATING_ID} .kw-deathnote__form`, async (event) => {
-            event.preventDefault();
-            const form = event.currentTarget;
-            if (!(form instanceof HTMLFormElement)) {
-                return;
-            }
-
-            await writeEntryFromForm(form);
-            refreshDeathNoteUi();
-        })
         .off('input', `#${FLOATING_ID} .kw-deathnote__entry-textarea`)
         .on('input', `#${FLOATING_ID} .kw-deathnote__entry-textarea`, (event) => {
-            getSettings().draftText = String($(event.currentTarget).val() ?? '');
-            scheduleSettingsSave();
-        })
-        .off('click', `#${FLOATING_ID} .kw-deathnote__close`)
-        .on('click', `#${FLOATING_ID} .kw-deathnote__close`, (event) => {
-            event.preventDefault();
-            getSettings().isOpen = false;
-            scheduleSettingsSave();
-            refreshDeathNoteUi();
-        })
-        .off('click', `#${FLOATING_ID} .kw-deathnote__entry-remove`)
-        .on('click', `#${FLOATING_ID} .kw-deathnote__entry-remove`, async (event) => {
-            event.preventDefault();
-            const id = String($(event.currentTarget).data('entryId') ?? '').trim();
-            if (!id) {
+            const value = String($(event.currentTarget).val() ?? '');
+            const changed = setNotebookText(value);
+
+            if (!changed) {
                 return;
             }
 
-            if (!removeDeathEntry(id)) {
-                return;
+            if (state.saveTimer) {
+                clearTimeout(state.saveTimer);
             }
 
-            await persistChatChanges();
-            refreshDeathNoteUi();
-        })
-        .off('change', `#${FLOATING_ID} .kw-deathnote__has-notebook`)
-        .on('change', `#${FLOATING_ID} .kw-deathnote__has-notebook`, async (event) => {
-            const checked = Boolean($(event.currentTarget).prop('checked'));
-            getChatState().hasNotebook = checked;
-            await persistChatChanges();
-            refreshDeathNoteUi();
-        })
-        .off('change', `#${FLOATING_ID} .kw-deathnote__debug-toggle`)
-        .on('change', `#${FLOATING_ID} .kw-deathnote__debug-toggle`, (event) => {
-            getSettings().debug = Boolean($(event.currentTarget).prop('checked'));
-            scheduleSettingsSave();
-            refreshDeathNoteUi();
-        })
-        .off('click', `#${FLOATING_ID} .kw-deathnote__debug-button`)
-        .on('click', `#${FLOATING_ID} .kw-deathnote__debug-button`, async (event) => {
-            event.preventDefault();
-            const action = String($(event.currentTarget).data('action') || '').trim();
-            if (!action) {
-                return;
-            }
-
-            if (action === 'copy-state') {
-                const ok = await copyText(JSON.stringify(getChatState(), null, 2));
-                notify(ok ? 'success' : 'warning', ok ? 'Death Note state copied.' : 'Could not copy state.');
-                return;
-            }
-
-            if (action === 'clear-entries') {
-                clearDeathEntries();
+            state.saveTimer = setTimeout(async () => {
+                state.saveTimer = null;
                 await persistChatChanges();
-                refreshDeathNoteUi();
-                return;
-            }
-
-            if (action === 'toggle-notebook') {
-                getChatState().hasNotebook = !getChatState().hasNotebook;
-                await persistChatChanges();
-                refreshDeathNoteUi();
-            }
+            }, 450);
         });
 }
 
