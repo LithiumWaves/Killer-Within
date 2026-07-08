@@ -376,7 +376,6 @@ function getMessageNameHosts($message) {
         '.mes_title',
         '.mes_header .name',
         '.mes_header',
-        '.mes_block',
     ];
     const hosts = [];
     const seen = new Set();
@@ -409,6 +408,24 @@ function getMessageNameHosts($message) {
 
 function escapeRegExpForUi(value) {
     return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isIgnoredMessageTextNode(node) {
+    if (!node || !node.parentElement || typeof node.parentElement.closest !== 'function') {
+        return false;
+    }
+
+    return Boolean(node.parentElement.closest([
+        '.mes_text',
+        '.message_text',
+        '.mes_block .mes_text',
+        '.swipes',
+        '.kw-thoughts',
+        '.kw-thoughts__body',
+        '.mes_reasoning',
+        '.mes_timer',
+        '.mesIDDisplay',
+    ].join(', ')));
 }
 
 function replaceLeadingName(text, originalName, displayName) {
@@ -451,6 +468,33 @@ function replaceMatchingTextNodes(root, originalName, displayName) {
             node.textContent = replaced;
             changed = true;
         }
+    }
+
+    return changed;
+}
+
+function replaceStandaloneMessageNameText($message, originalName, displayName) {
+    const messageRoot = $message && $message.length ? $message.get(0) : null;
+    if (!messageRoot || !originalName || !displayName || originalName === displayName) {
+        return false;
+    }
+
+    const walker = document.createTreeWalker(messageRoot, NodeFilter.SHOW_TEXT);
+    let changed = false;
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = String(node && node.textContent ? node.textContent : '');
+        const trimmed = text.trim();
+        if (!trimmed || trimmed !== originalName) {
+            continue;
+        }
+
+        if (isIgnoredMessageTextNode(node)) {
+            continue;
+        }
+
+        node.textContent = text.replace(originalName, displayName);
+        changed = true;
     }
 
     return changed;
@@ -521,6 +565,8 @@ function renderMaskedChatMessageNames() {
 
             replaceMatchingTextNodes(element, baseline, displayName);
         }
+
+        replaceStandaloneMessageNameText($message, originalName, displayName);
     });
 }
 
