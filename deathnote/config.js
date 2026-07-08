@@ -9,6 +9,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     isOpen: false,
     floatingX: null,
     floatingY: null,
+    closedFloatingX: null,
+    closedFloatingY: null,
     draftText: '',
     fontMode: 'print',
     currentPageIndex: 0,

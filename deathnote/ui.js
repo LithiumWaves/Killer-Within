@@ -50,6 +50,16 @@ function getDefaultPosition() {
 
 function resolvePosition() {
     const settings = getSettings();
+    const preferredX = settings.isOpen ? settings.floatingX : settings.closedFloatingX;
+    const preferredY = settings.isOpen ? settings.floatingY : settings.closedFloatingY;
+
+    if (Number.isFinite(preferredX) && Number.isFinite(preferredY)) {
+        return {
+            x: preferredX,
+            y: preferredY,
+        };
+    }
+
     if (Number.isFinite(settings.floatingX) && Number.isFinite(settings.floatingY)) {
         return {
             x: settings.floatingX,
@@ -57,13 +67,26 @@ function resolvePosition() {
         };
     }
 
+    if (Number.isFinite(settings.closedFloatingX) && Number.isFinite(settings.closedFloatingY)) {
+        return {
+            x: settings.closedFloatingX,
+            y: settings.closedFloatingY,
+        };
+    }
+
     return getDefaultPosition();
 }
 
-function setPosition(x, y) {
+function setPosition(x, y, options = {}) {
     const settings = getSettings();
     settings.floatingX = x;
     settings.floatingY = y;
+
+    if (options.rememberClosed) {
+        settings.closedFloatingX = x;
+        settings.closedFloatingY = y;
+    }
+
     scheduleSettingsSave();
 }
 
@@ -321,7 +344,7 @@ function ensureWidget() {
     const y = clamp(resolved.y, 0, maxY);
 
     if (resolved.x !== x || resolved.y !== y) {
-        setPosition(x, y);
+        setPosition(x, y, { rememberClosed: !settings.isOpen });
     }
 
     root.style.left = `${Math.round(x)}px`;
@@ -504,7 +527,9 @@ function bindWidgetUi() {
 
                     if (root) {
                         const rectFinal = root.getBoundingClientRect();
-                        setPosition(Math.round(rectFinal.left), Math.round(rectFinal.top));
+                        setPosition(Math.round(rectFinal.left), Math.round(rectFinal.top), {
+                            rememberClosed: !getSettings().isOpen,
+                        });
                     }
 
                     window.removeEventListener('pointermove', state.moveHandler, true);
@@ -517,9 +542,20 @@ function bindWidgetUi() {
                         const isOpening = !settings.isOpen;
                         if (root) {
                             const rectFinal = root.getBoundingClientRect();
-                            const nextPosition = getTogglePosition(rectFinal.left, rectFinal.top, isOpening);
-                            settings.floatingX = nextPosition.x;
-                            settings.floatingY = nextPosition.y;
+                            if (isOpening) {
+                                settings.closedFloatingX = Math.round(rectFinal.left);
+                                settings.closedFloatingY = Math.round(rectFinal.top);
+
+                                const nextPosition = getTogglePosition(rectFinal.left, rectFinal.top, true);
+                                settings.floatingX = nextPosition.x;
+                                settings.floatingY = nextPosition.y;
+                            } else if (Number.isFinite(settings.closedFloatingX) && Number.isFinite(settings.closedFloatingY)) {
+                                settings.floatingX = settings.closedFloatingX;
+                                settings.floatingY = settings.closedFloatingY;
+                            } else {
+                                settings.floatingX = Math.round(rectFinal.left);
+                                settings.floatingY = Math.round(rectFinal.top);
+                            }
                         }
                         settings.isOpen = isOpening;
                         scheduleSettingsSave();
