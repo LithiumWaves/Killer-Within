@@ -1,4 +1,4 @@
-import { getDeathNotePresenceState } from '../deathnote/core.js';
+import { getDeathNotePresenceState, getLinkedShinigami } from '../deathnote/core.js';
 
 function formatActor(actor) {
     const value = actor && typeof actor === 'object' ? actor : {};
@@ -76,6 +76,7 @@ function buildTouchersBlock(touchers) {
 
 function buildPresenceInjection() {
     const state = getDeathNotePresenceState();
+    const shinigamiLink = getLinkedShinigami();
     if (!state.notebookPresent && !state.touchers.length && !state.userCanSeeShinigami) {
         return '';
     }
@@ -83,6 +84,7 @@ function buildPresenceInjection() {
     return [
         '[Presence Context]',
         'Selective supernatural visibility is active for Death Note-related entities.',
+        `Linked Shinigami: ${shinigamiLink?.active ? (shinigamiLink.actor.name || shinigamiLink.avatar || 'linked') : 'none currently linked'}.`,
         'Anyone currently touching the Death Note or one of its scraps can perceive that notebook\'s Shinigami.',
         'Characters without current contact cannot directly see, hear, or confidently remember Shinigami-only actions or speech as witnessed fact unless the scene separately establishes that perception.',
         'If a Shinigami tied to this Death Note appears, apply these visibility limits strictly.',

@@ -80,6 +80,7 @@ function createDefaultChatState() {
         version: 3,
         hasNotebook: true,
         ownership: createDefaultOwnershipState(),
+        shinigamiLink: createDefaultShinigamiLinkState(),
         inventory: createDefaultInventoryState(),
         notebookText: '',
         notebookPages: [''],
@@ -103,6 +104,16 @@ function createDefaultOwnershipState() {
         holder: createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User'),
         userAccess: NOTEBOOK_USER_ACCESS.FULL,
         lastTransferredAt: null,
+    };
+}
+
+function createDefaultShinigamiLinkState() {
+    return {
+        active: false,
+        actor: createActorRef(NOTEBOOK_ACTOR_TYPES.SHINIGAMI, ''),
+        avatar: '',
+        notebookItemId: 'death-note-main',
+        linkedAt: null,
     };
 }
 
@@ -185,6 +196,23 @@ function normalizeOwnershipState(value) {
         holder: normalizeActorRef(ownership.holder, defaults.holder.type, defaults.holder.name),
         userAccess: normalizeUserAccess(ownership.userAccess, defaults.userAccess),
         lastTransferredAt: normalizeTransferredAt(ownership.lastTransferredAt),
+    };
+}
+
+function normalizeShinigamiLinkState(value) {
+    const defaults = createDefaultShinigamiLinkState();
+    const link = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(link.actor, defaults.actor.type, defaults.actor.name);
+    const avatar = String(link.avatar || actor.id || '').trim();
+    return {
+        active: Boolean(link.active) && Boolean(actor.name || avatar),
+        actor: {
+            ...actor,
+            id: String(actor.id || avatar).trim(),
+        },
+        avatar,
+        notebookItemId: String(link.notebookItemId || defaults.notebookItemId).trim() || defaults.notebookItemId,
+        linkedAt: normalizeTransferredAt(link.linkedAt),
     };
 }
 
@@ -518,6 +546,7 @@ export function getChatState() {
     }
 
     state.ownership = normalizeOwnershipState(state.ownership);
+    state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
 
     if (state.inventory.notebook.destroyed) {
@@ -547,6 +576,12 @@ export function getNotebookOwnership() {
     return state.ownership;
 }
 
+export function getLinkedShinigami() {
+    const state = getChatState();
+    state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
+    return state.shinigamiLink;
+}
+
 export function getDeathNoteInventory() {
     const state = getChatState();
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
@@ -554,9 +589,77 @@ export function getDeathNoteInventory() {
     return state.inventory;
 }
 
+export function linkNotebookShinigami(actor, options = {}) {
+    const state = getChatState();
+    const normalizedActor = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.SHINIGAMI, '');
+    const avatar = String(options.avatar || normalizedActor.id || '').trim();
+    const name = String(options.name || normalizedActor.name || '').trim();
+    if (!name && !avatar) {
+        return false;
+    }
+
+    state.shinigamiLink = normalizeShinigamiLinkState({
+        active: true,
+        actor: {
+            ...normalizedActor,
+            type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
+            id: avatar || normalizedActor.id,
+            name,
+        },
+        avatar,
+        notebookItemId: String(options.notebookItemId || state.inventory.notebook.itemId || 'death-note-main').trim(),
+        linkedAt: normalizeTransferredAt(options.linkedAt) ?? Date.now(),
+    });
+
+    pushInventoryHistory(state, {
+        action: 'link_shinigami',
+        itemId: state.shinigamiLink.notebookItemId,
+        detail: String(options.reason || '').trim() || `${state.shinigamiLink.actor.name || 'Shinigami'} linked to the notebook.`,
+        actor: state.shinigamiLink.actor,
+        target: state.ownership.holder,
+        timestamp: state.shinigamiLink.linkedAt || Date.now(),
+    });
+    return true;
+}
+
+export function unlinkNotebookShinigami(options = {}) {
+    const state = getChatState();
+    const current = normalizeShinigamiLinkState(state.shinigamiLink);
+    if (!current.active && !current.actor.name && !current.avatar) {
+        return false;
+    }
+
+    state.shinigamiLink = createDefaultShinigamiLinkState();
+    pushInventoryHistory(state, {
+        action: 'unlink_shinigami',
+        itemId: current.notebookItemId,
+        detail: String(options.reason || '').trim() || `${current.actor.name || 'Linked Shinigami'} unlinked from the notebook.`,
+        actor: current.actor,
+        target: state.ownership.holder,
+        timestamp: normalizeTransferredAt(options.timestamp) ?? Date.now(),
+    });
+    return true;
+}
+
 export function getNotebookTouchers() {
     const state = getChatState();
     return buildDeathNotePresenceParticipants(state);
+}
+
+export function getLinkedShinigamiPresenceBinding() {
+    const state = getChatState();
+    const shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
+    const touchers = buildDeathNotePresenceParticipants(state);
+    const visibleActors = touchers
+        .map((entry) => entry?.actor)
+        .filter((actor) => actor && (actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER || actor.type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI));
+
+    return {
+        linked: Boolean(shinigamiLink.active && (shinigamiLink.avatar || shinigamiLink.actor.name)),
+        shinigami: shinigamiLink,
+        visibleActors,
+        touchers,
+    };
 }
 
 export function setNotebookOwnership(nextOwnership = {}) {

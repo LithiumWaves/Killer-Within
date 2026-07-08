@@ -9,6 +9,20 @@ function normalizePresenceId(value) {
     return normalizeString(value).replace(/(\.\w+)$/i, '');
 }
 
+function getForceAvatarFile(message) {
+    const forceAvatar = normalizeString(message?.force_avatar);
+    if (!forceAvatar) {
+        return '';
+    }
+
+    try {
+        const url = new URL(forceAvatar, globalThis.window?.location?.origin || 'http://localhost');
+        return normalizeString(url.searchParams.get('file'));
+    } catch (_error) {
+        return '';
+    }
+}
+
 export function getPresenceContext() {
     return globalThis.SillyTavern?.getContext?.() ?? null;
 }
@@ -86,6 +100,20 @@ export function getMessagePresenceTracker(message) {
         .filter(Boolean);
 }
 
+export function getMessageAuthorPresenceId(message) {
+    const originalAvatar = normalizeString(message?.original_avatar);
+    if (originalAvatar) {
+        return originalAvatar;
+    }
+
+    const forceAvatarFile = getForceAvatarFile(message);
+    if (forceAvatarFile) {
+        return forceAvatarFile;
+    }
+
+    return resolvePresenceAvatar(message?.name);
+}
+
 function uniquePresenceEntries(entries) {
     return Array.from(new Set((Array.isArray(entries) ? entries : []).map((entry) => normalizeString(entry)).filter(Boolean)));
 }
@@ -139,6 +167,16 @@ export function filterMessagesVisibleToPresenceCharacter(messages, characterName
     }
 
     return source.filter((message) => isMessageVisibleToPresenceCharacter(message, character));
+}
+
+export function isMessageAuthoredByPresenceCharacter(message, characterNameOrAvatar) {
+    const authorId = getMessageAuthorPresenceId(message);
+    const targetId = resolvePresenceAvatar(characterNameOrAvatar);
+    if (!authorId || !targetId) {
+        return false;
+    }
+
+    return normalizePresenceId(authorId) === normalizePresenceId(targetId);
 }
 
 export async function setCharacterPresenceForMessages(characterNameOrAvatar, messageIndexes, present = true) {
@@ -236,6 +274,41 @@ export async function replacePresenceCharacterMessages(sourceCharacter, targetCh
         return false;
     }
 
+    await persistPresenceChatChanges();
+    return true;
+}
+
+export async function setMessagePresenceAudience(messageIndex, characterNamesOrAvatars = []) {
+    if (!isPresenceActive()) {
+        return false;
+    }
+
+    const context = getPresenceContext();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    if (!message) {
+        return false;
+    }
+
+    const audience = uniquePresenceEntries(
+        (Array.isArray(characterNamesOrAvatars) ? characterNamesOrAvatars : [])
+            .map((entry) => resolvePresenceAvatar(entry))
+            .filter(Boolean),
+    );
+
+    const current = uniquePresenceEntries(getMessagePresenceTracker(message));
+    const sameLength = current.length === audience.length;
+    const sameEntries = sameLength && current.every((entry, position) => normalizePresenceId(entry) === normalizePresenceId(audience[position]));
+    if (sameEntries) {
+        return false;
+    }
+
+    message.present = audience;
     await persistPresenceChatChanges();
     return true;
 }
