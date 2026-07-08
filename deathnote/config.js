@@ -9,5 +9,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
     isOpen: false,
     floatingX: null,
     floatingY: null,
+    draftText: '',
 });
 

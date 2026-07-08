@@ -118,6 +118,7 @@ export function addDeathEntry({
     targetName,
     cause,
     remainingAssistantMessages,
+    noteText,
 } = {}) {
     const state = getChatState();
 
@@ -125,6 +126,7 @@ export function addDeathEntry({
         id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         targetName: String(targetName || '').trim(),
         cause: String(cause || '').trim(),
+        noteText: String(noteText || '').trim(),
         remainingAssistantMessages: normalizeRemaining(remainingAssistantMessages),
         status: 'active',
         createdAt: Date.now(),

@@ -4,17 +4,19 @@ import { getChatState, getSettings } from './core.js';
 function formatEntry(entry) {
     const target = String(entry?.targetName || '').trim() || '(unknown)';
     const cause = String(entry?.cause || '').trim() || '(unspecified)';
+    const noteText = String(entry?.noteText || '').trim();
     const remaining = Number.isFinite(Number(entry?.remainingAssistantMessages))
         ? Math.max(0, Math.floor(Number(entry.remainingAssistantMessages)))
         : 0;
     const status = entry?.status === 'triggered' ? 'TRIGGERED' : 'ACTIVE';
 
     return [
+        noteText ? `Written: ${noteText}` : null,
         `Target: ${target}`,
         `Cause: ${cause}`,
         `Remaining assistant messages: ${remaining}`,
         `Status: ${status}`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 }
 
 function buildEntriesBlock(entries) {
