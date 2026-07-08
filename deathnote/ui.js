@@ -1,6 +1,5 @@
 import { FLOATING_ID } from './config.js';
 import {
-    getChatState,
     getNotebookPages,
     getSettings,
     persistChatChanges,
@@ -9,6 +8,10 @@ import {
 } from './core.js';
 
 const PAGE_PLACEHOLDER = '[NAME] [METHOD OF DEATH] [TIME]';
+const PAGE_TURN_MS = 240;
+let pendingFocus = null;
+let pageTurnTimer = null;
+let pageTurnCleanupTimer = null;
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -62,15 +65,49 @@ function setPosition(x, y) {
     scheduleSettingsSave();
 }
 
-function getClampedPageIndex(pages) {
+function getSpreadCount(pages) {
+    const totalPages = Math.max(1, Array.isArray(pages) ? pages.length : 0);
+    return Math.max(1, 1 + Math.ceil(Math.max(0, totalPages - 1) / 2));
+}
+
+function getClampedSpreadIndex(pages) {
     const settings = getSettings();
-    const maxIndex = Math.max(0, pages.length - 1);
-    const next = clamp(Number(settings.currentPageIndex) || 0, 0, maxIndex);
-    if (next !== settings.currentPageIndex) {
-        settings.currentPageIndex = next;
+    const fallback = Number(settings.currentSpreadIndex ?? settings.currentPageIndex) || 0;
+    const maxIndex = Math.max(0, getSpreadCount(pages) - 1);
+    const next = clamp(fallback, 0, maxIndex);
+    if (next !== settings.currentSpreadIndex) {
+        settings.currentSpreadIndex = next;
         scheduleSettingsSave();
     }
     return next;
+}
+
+function ensurePageCapacity(pages, pageIndex) {
+    const nextPages = Array.isArray(pages) ? [...pages] : [''];
+    while (nextPages.length <= pageIndex) {
+        nextPages.push('');
+    }
+    return nextPages;
+}
+
+function getVisiblePageIndices(spreadIndex) {
+    if (spreadIndex <= 0) {
+        return { leftPageIndex: null, rightPageIndex: 0 };
+    }
+
+    const leftPageIndex = (spreadIndex * 2) - 1;
+    return {
+        leftPageIndex,
+        rightPageIndex: leftPageIndex + 1,
+    };
+}
+
+function getSpreadLabel(spreadIndex, visible) {
+    if (spreadIndex <= 0) {
+        return 'Rules + Page 1';
+    }
+
+    return `Pages ${visible.leftPageIndex + 1}-${visible.rightPageIndex + 1}`;
 }
 
 function renderNotebookPage(text, extraClass = '') {
@@ -84,16 +121,46 @@ function renderNotebookPage(text, extraClass = '') {
     `;
 }
 
+function renderEditablePage({ pageIndex, side, text, extraClass = '' }) {
+    const classes = ['kw-deathnote__paper', 'kw-deathnote__paper--editable', extraClass].filter(Boolean).join(' ');
+    return `
+        <div class="${classes}">
+            <textarea
+                class="kw-deathnote__entry-textarea"
+                name="entryText"
+                data-page-index="${pageIndex}"
+                data-page-side="${side}"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="${PAGE_PLACEHOLDER}"
+            >${escapeHtml(String(text || ''))}</textarea>
+        </div>
+    `;
+}
+
+function queueFocusRestore(pageIndex, side, mode = 'end') {
+    pendingFocus = {
+        pageIndex,
+        side,
+        mode,
+    };
+}
+
 function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
     const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
-    const state = getChatState();
     const settings = getSettings();
-    const pages = getNotebookPages();
-    const currentPageIndex = getClampedPageIndex(pages);
-    const hasPreviousPage = currentPageIndex > 0;
-    const leftPageHtml = hasPreviousPage
-        ? renderNotebookPage(pages[currentPageIndex - 1], 'kw-deathnote__paper--left')
+    const pages = ensurePageCapacity(getNotebookPages(), 0);
+    const currentSpreadIndex = getClampedSpreadIndex(pages);
+    const visible = getVisiblePageIndices(currentSpreadIndex);
+    const expandedPages = ensurePageCapacity(pages, visible.rightPageIndex);
+    const leftPageHtml = visible.leftPageIndex !== null
+        ? renderEditablePage({
+            pageIndex: visible.leftPageIndex,
+            side: 'left',
+            text: expandedPages[visible.leftPageIndex] || '',
+            extraClass: 'kw-deathnote__paper--left',
+        })
         : `
             <div class="kw-deathnote__inside-cover-panel">
                 <div class="kw-deathnote__inside-cover-sheet">
@@ -121,19 +188,25 @@ function buildWidgetHtml() {
                 role="dialog"
                 aria-label="Death Note notebook"
             >
-                <div class="kw-deathnote__page-left kw-deathnote__drag-handle" aria-label="Death Note left page">
+                <button
+                    type="button"
+                    class="kw-deathnote__close-tab kw-deathnote__drag-handle kw-deathnote__toggle"
+                    aria-label="Close notebook"
+                ></button>
+                <div class="kw-deathnote__spine-handle kw-deathnote__drag-handle" aria-hidden="true"></div>
+                <div class="kw-deathnote__page-left" aria-label="Death Note left page">
                     ${leftPageHtml}
+                    <button
+                        type="button"
+                        class="kw-deathnote__corner-tab kw-deathnote__corner-tab--prev ${currentSpreadIndex <= 0 ? 'is-hidden' : ''}"
+                        data-page-nav="prev"
+                        aria-label="Previous spread"
+                        ${currentSpreadIndex <= 0 ? 'disabled' : ''}
+                    ></button>
                 </div>
                 <div class="kw-deathnote__page-right">
                     <div class="kw-deathnote__toolbar">
-                        <button
-                            type="button"
-                            class="kw-deathnote__page-nav ${currentPageIndex <= 0 ? 'is-disabled' : ''}"
-                            data-page-nav="prev"
-                            aria-label="Previous page"
-                            ${currentPageIndex <= 0 ? 'disabled' : ''}
-                        >Previous</button>
-                        <div class="kw-deathnote__page-indicator">Page ${currentPageIndex + 1}</div>
+                        <div class="kw-deathnote__page-indicator">${getSpreadLabel(currentSpreadIndex, visible)}</div>
                         <button
                             type="button"
                             class="kw-deathnote__font-button ${settings.fontMode === 'print' ? 'is-active' : ''}"
@@ -144,22 +217,18 @@ function buildWidgetHtml() {
                             class="kw-deathnote__font-button ${settings.fontMode === 'script' ? 'is-active' : ''}"
                             data-font-mode="script"
                         >Script</button>
-                        <button
-                            type="button"
-                            class="kw-deathnote__page-nav"
-                            data-page-nav="next"
-                            aria-label="Next page"
-                        >Next</button>
                     </div>
-                    <div class="kw-deathnote__paper">
-                        <textarea
-                            class="kw-deathnote__entry-textarea"
-                            name="entryText"
-                            autocomplete="off"
-                            spellcheck="false"
-                            placeholder="${PAGE_PLACEHOLDER}"
-                        >${escapeHtml(String(pages[currentPageIndex] || ''))}</textarea>
-                    </div>
+                    ${renderEditablePage({
+                        pageIndex: visible.rightPageIndex,
+                        side: 'right',
+                        text: expandedPages[visible.rightPageIndex] || '',
+                    })}
+                    <button
+                        type="button"
+                        class="kw-deathnote__corner-tab kw-deathnote__corner-tab--next"
+                        data-page-nav="next"
+                        aria-label="Next spread"
+                    ></button>
                 </div>
             </div>
         </div>
@@ -204,7 +273,76 @@ function ensureWidget() {
     root.classList.toggle('kw-deathnote--font-script', settings.fontMode === 'script');
 
     root.innerHTML = buildWidgetHtml();
+    restorePendingFocus(root);
     return root;
+}
+
+function restorePendingFocus(root) {
+    if (!pendingFocus || !root) {
+        return;
+    }
+
+    const target = root.querySelector(`.kw-deathnote__entry-textarea[data-page-index="${pendingFocus.pageIndex}"]`);
+    if (!(target instanceof HTMLTextAreaElement)) {
+        return;
+    }
+
+    requestAnimationFrame(() => {
+        target.focus({ preventScroll: true });
+        const valueLength = target.value.length;
+        const position = pendingFocus.mode === 'start' ? 0 : valueLength;
+        target.setSelectionRange(position, position);
+        pendingFocus = null;
+    });
+}
+
+function scheduleChatSave(state) {
+    if (state.saveTimer) {
+        clearTimeout(state.saveTimer);
+    }
+
+    state.saveTimer = setTimeout(async () => {
+        state.saveTimer = null;
+        await persistChatChanges();
+    }, 450);
+}
+
+function getVisibleTexts(pages, spreadIndex) {
+    const visible = getVisiblePageIndices(spreadIndex);
+    return {
+        left: visible.leftPageIndex === null ? null : String(pages[visible.leftPageIndex] || ''),
+        right: String(pages[visible.rightPageIndex] || ''),
+    };
+}
+
+function runPageTurn(direction, callback) {
+    const root = document.getElementById(FLOATING_ID);
+    if (!root) {
+        callback();
+        refreshDeathNoteUi();
+        return;
+    }
+
+    clearTimeout(pageTurnTimer);
+    clearTimeout(pageTurnCleanupTimer);
+    root.classList.remove('kw-deathnote--turn-prev', 'kw-deathnote--turn-next', 'kw-deathnote--turn-prev-in', 'kw-deathnote--turn-next-in');
+    root.classList.add(direction === 'prev' ? 'kw-deathnote--turn-prev' : 'kw-deathnote--turn-next');
+
+    pageTurnTimer = setTimeout(() => {
+        callback();
+        refreshDeathNoteUi();
+        const nextRoot = document.getElementById(FLOATING_ID);
+        if (!nextRoot) {
+            return;
+        }
+
+        nextRoot.classList.remove('kw-deathnote--turn-prev', 'kw-deathnote--turn-next');
+        nextRoot.classList.add(direction === 'prev' ? 'kw-deathnote--turn-prev-in' : 'kw-deathnote--turn-next-in');
+
+        pageTurnCleanupTimer = setTimeout(() => {
+            nextRoot.classList.remove('kw-deathnote--turn-prev-in', 'kw-deathnote--turn-next-in');
+        }, PAGE_TURN_MS);
+    }, PAGE_TURN_MS);
 }
 
 function bindWidgetUi() {
@@ -334,14 +472,21 @@ function bindWidgetUi() {
                 return;
             }
 
-            const pages = [...getNotebookPages()];
+            const pageIndex = Number(textarea.dataset.pageIndex);
+            const pageSide = String(textarea.dataset.pageSide || 'right').trim().toLowerCase();
+            if (!Number.isFinite(pageIndex) || pageIndex < 0) {
+                return;
+            }
+
+            const pages = ensurePageCapacity(getNotebookPages(), pageIndex);
             const settings = getSettings();
-            const currentPageIndex = getClampedPageIndex(pages);
+            const currentSpreadIndex = getClampedSpreadIndex(pages);
+            const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
             const value = String($(textarea).val() ?? '');
-            const tailText = pages.slice(currentPageIndex + 1).join('');
+            const tailText = pages.slice(pageIndex + 1).join('');
             const repaginated = paginateNotebookText(textarea, `${value}${tailText}`);
             const nextPages = [
-                ...pages.slice(0, currentPageIndex),
+                ...pages.slice(0, pageIndex),
                 ...repaginated,
             ];
             const changed = setNotebookPages(nextPages);
@@ -350,25 +495,30 @@ function bindWidgetUi() {
                 return;
             }
 
-            const movedForward = repaginated.length > 1 && repaginated[0] !== value;
-            if (movedForward) {
-                settings.currentPageIndex = Math.min(nextPages.length - 1, currentPageIndex + 1);
-            } else {
-                settings.currentPageIndex = currentPageIndex;
+            const activeTrimmed = String(nextPages[pageIndex] || '') !== value;
+            const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
+            const visibleChanged = beforeVisible.left !== afterVisible.left || beforeVisible.right !== afterVisible.right;
+
+            if (activeTrimmed) {
+                const nextPageIndex = pageIndex + 1;
+                const nextSpreadIndex = nextPageIndex === 0 ? 0 : Math.floor((nextPageIndex + 1) / 2);
+                settings.currentSpreadIndex = nextSpreadIndex;
+                queueFocusRestore(nextPageIndex, nextPageIndex % 2 === 1 ? 'left' : 'right', 'start');
+                scheduleSettingsSave();
+                refreshDeathNoteUi();
+                scheduleChatSave(state);
+                return;
             }
 
+            if (visibleChanged) {
+                queueFocusRestore(pageIndex, pageSide, 'end');
+                refreshDeathNoteUi();
+            }
+                textarea.dataset.pageIndex = String(pageIndex);
             scheduleSettingsSave();
             refreshDeathNoteUi();
-
-            if (state.saveTimer) {
-                clearTimeout(state.saveTimer);
-            }
-
-            state.saveTimer = setTimeout(async () => {
-                state.saveTimer = null;
-                await persistChatChanges();
-            }, 450);
-        })
+            scheduleChatSave(state);
+        .on('click', `#${FLOATING_ID} .kw-deathnote__font-button`, (event) => {
         .off('click', `#${FLOATING_ID} .kw-deathnote__font-button`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__font-button`, (event) => {
             event.preventDefault();
@@ -377,28 +527,36 @@ function bindWidgetUi() {
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
-        .off('click', `#${FLOATING_ID} .kw-deathnote__page-nav`)
-        .on('click', `#${FLOATING_ID} .kw-deathnote__page-nav`, (event) => {
+        .off('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`)
+        .on('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`, (event) => {
             event.preventDefault();
             const direction = String($(event.currentTarget).data('pageNav') || '').trim().toLowerCase();
             const pages = getNotebookPages();
             const settings = getSettings();
-            const currentPageIndex = getClampedPageIndex(pages);
+            const currentSpreadIndex = getClampedSpreadIndex(pages);
 
-            if (direction === 'prev') {
-                settings.currentPageIndex = Math.max(0, currentPageIndex - 1);
+            if (direction === 'prev' && currentSpreadIndex > 0) {
+                runPageTurn('prev', () => {
+                    settings.currentSpreadIndex = Math.max(0, currentSpreadIndex - 1);
+                    queueFocusRestore(getVisiblePageIndices(settings.currentSpreadIndex).rightPageIndex, 'right', 'end');
+                    scheduleSettingsSave();
+                });
+                return;
             }
 
             if (direction === 'next') {
-                if (currentPageIndex >= pages.length - 1) {
-                    setNotebookPages([...pages, '']);
-                }
-                settings.currentPageIndex = Math.min(getNotebookPages().length - 1, currentPageIndex + 1);
-            }
+                const nextSpreadIndex = currentSpreadIndex + 1;
+                const nextVisible = getVisiblePageIndices(nextSpreadIndex);
+                const expanded = ensurePageCapacity(pages, nextVisible.rightPageIndex);
 
-            scheduleSettingsSave();
-            persistChatChanges();
-            refreshDeathNoteUi();
+                runPageTurn('next', () => {
+                    setNotebookPages(expanded);
+                    settings.currentSpreadIndex = nextSpreadIndex;
+                    queueFocusRestore(nextVisible.leftPageIndex ?? nextVisible.rightPageIndex, nextVisible.leftPageIndex === null ? 'right' : 'left', 'end');
+                    scheduleSettingsSave();
+                    persistChatChanges();
+                });
+            }
         });
 }
 

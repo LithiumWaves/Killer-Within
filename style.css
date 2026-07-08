@@ -102,6 +102,11 @@
     width: 170px;
     height: 240px;
     touch-action: auto;
+    transition:
+        width 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        height 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        left 180ms ease,
+        top 180ms ease;
     --kw-dn-font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
     --kw-dn-font-size: 18px;
     --kw-dn-line-height: 31px;
@@ -126,13 +131,15 @@
     height: 100%;
     position: relative;
     display: grid;
-    overflow: hidden;
+    overflow: visible;
     perspective: 1400px;
     transform-style: preserve-3d;
     isolation: isolate;
 }
 
 .kw-deathnote__cover {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     border: 0;
@@ -143,16 +150,21 @@
     transform: rotateY(0deg);
     transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
     touch-action: none;
-    position: relative;
     padding: 0;
     display: block;
     backface-visibility: hidden;
     z-index: 2;
     background-color: #000;
+    opacity: 1;
+    transition:
+        transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        opacity 220ms ease;
 }
 
 .kw-deathnote--open .kw-deathnote__cover {
-    display: none;
+    transform: rotateY(-105deg) translateX(-8px) scale(0.98);
+    opacity: 0;
+    pointer-events: none;
 }
 
 .kw-deathnote--open {
@@ -162,8 +174,10 @@
 }
 
 .kw-deathnote__spread {
+    position: absolute;
+    inset: 0;
     height: 100%;
-    display: none;
+    display: grid;
     width: 100%;
     grid-template-columns: 1fr 1fr;
     border-radius: 0;
@@ -173,10 +187,59 @@
     box-shadow:
         0 18px 38px rgba(0, 0, 0, 0.42),
         0 0 0 1px rgba(255, 255, 255, 0.05);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform-origin: right center;
+    transform: rotateY(-22deg) scale(0.965);
+    transition:
+        transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        opacity 220ms ease,
+        visibility 0s linear 220ms;
 }
 
 .kw-deathnote--open .kw-deathnote__spread {
-    display: grid;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: rotateY(0deg) scale(1);
+    transition:
+        transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        opacity 220ms ease,
+        visibility 0s;
+}
+
+.kw-deathnote__close-tab {
+    position: absolute;
+    left: -24px;
+    top: 3.5%;
+    width: 34px;
+    height: 93%;
+    border: 0;
+    padding: 0;
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 24%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.3)),
+        #050505;
+    box-shadow:
+        inset -1px 0 0 rgba(255, 255, 255, 0.04),
+        0 14px 24px rgba(0, 0, 0, 0.26);
+    cursor: pointer;
+    z-index: 3;
+}
+
+.kw-deathnote__spine-handle {
+    position: absolute;
+    top: 0;
+    left: calc(50% - 18px);
+    width: 36px;
+    height: 100%;
+    z-index: 3;
+    cursor: grab;
+    background:
+        linear-gradient(90deg, rgba(0, 0, 0, 0.22), rgba(255, 255, 255, 0.02) 50%, rgba(0, 0, 0, 0.18));
+    opacity: 0.18;
+    pointer-events: auto;
 }
 
 .kw-deathnote__page-left {
@@ -340,6 +403,7 @@
     top: 0.55rem;
     right: 0.75rem;
     z-index: 2;
+    pointer-events: auto;
 }
 
 .kw-deathnote__page-indicator {
@@ -350,31 +414,13 @@
     margin: 0 0.15rem;
 }
 
-.kw-deathnote__page-nav {
-    border: 0;
-    background: rgba(0, 0, 0, 0.06);
-    color: rgba(0, 0, 0, 0.66);
-    padding: 0.18rem 0.45rem;
-    border-radius: 999px;
-    font-size: 0.68rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    cursor: pointer;
-}
-
-.kw-deathnote__page-nav.is-disabled,
-.kw-deathnote__page-nav:disabled {
-    opacity: 0.35;
-    cursor: default;
-}
-
 .kw-deathnote__font-button {
     border: 0;
-    background: rgba(255, 255, 255, 0.6);
-    color: rgba(0, 0, 0, 0.72);
-    padding: 0.18rem 0.5rem;
+    background: rgba(255, 255, 255, 0.42);
+    color: rgba(0, 0, 0, 0.68);
+    padding: 0.14rem 0.45rem;
     border-radius: 999px;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     cursor: pointer;
@@ -406,6 +452,8 @@
     overflow-wrap: break-word;
     overflow: hidden;
     scrollbar-width: none;
+    position: relative;
+    z-index: 1;
 }
 
 .kw-deathnote__entry-textarea::-webkit-scrollbar {
@@ -443,4 +491,122 @@
     pointer-events: none;
     white-space: pre-wrap;
     box-sizing: border-box;
+}
+
+.kw-deathnote__corner-tab {
+    position: absolute;
+    bottom: 0;
+    width: 54px;
+    height: 54px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    z-index: 4;
+}
+
+.kw-deathnote__corner-tab::before,
+.kw-deathnote__corner-tab::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.kw-deathnote__corner-tab::before {
+    background: linear-gradient(135deg, transparent 49%, rgba(255, 255, 255, 0.9) 50%);
+    filter: drop-shadow(-2px -2px 4px rgba(0, 0, 0, 0.14));
+}
+
+.kw-deathnote__corner-tab::after {
+    opacity: 0.6;
+}
+
+.kw-deathnote__corner-tab--next {
+    right: 0;
+}
+
+.kw-deathnote__corner-tab--next::after {
+    background: linear-gradient(135deg, transparent 56%, rgba(0, 0, 0, 0.18) 100%);
+}
+
+.kw-deathnote__corner-tab--prev {
+    left: 0;
+    transform: scaleX(-1);
+}
+
+.kw-deathnote__corner-tab--prev::after {
+    background: linear-gradient(135deg, transparent 56%, rgba(0, 0, 0, 0.18) 100%);
+}
+
+.kw-deathnote__corner-tab.is-hidden,
+.kw-deathnote__corner-tab:disabled {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.kw-deathnote--turn-next .kw-deathnote__page-right {
+    transform-origin: left center;
+    animation: kwDeathNoteTurnNext 240ms ease forwards;
+}
+
+.kw-deathnote--turn-next-in .kw-deathnote__page-right {
+    transform-origin: left center;
+    animation: kwDeathNoteTurnNextIn 240ms ease forwards;
+}
+
+.kw-deathnote--turn-prev .kw-deathnote__page-left {
+    transform-origin: right center;
+    animation: kwDeathNoteTurnPrev 240ms ease forwards;
+}
+
+.kw-deathnote--turn-prev-in .kw-deathnote__page-left {
+    transform-origin: right center;
+    animation: kwDeathNoteTurnPrevIn 240ms ease forwards;
+}
+
+@keyframes kwDeathNoteTurnNext {
+    0% {
+        transform: perspective(1400px) rotateY(0deg);
+        filter: brightness(1);
+    }
+    100% {
+        transform: perspective(1400px) rotateY(-76deg);
+        filter: brightness(0.85);
+    }
+}
+
+@keyframes kwDeathNoteTurnNextIn {
+    0% {
+        transform: perspective(1400px) rotateY(76deg);
+        filter: brightness(0.88);
+    }
+    100% {
+        transform: perspective(1400px) rotateY(0deg);
+        filter: brightness(1);
+    }
+}
+
+@keyframes kwDeathNoteTurnPrev {
+    0% {
+        transform: perspective(1400px) rotateY(0deg);
+        filter: brightness(1);
+    }
+    100% {
+        transform: perspective(1400px) rotateY(76deg);
+        filter: brightness(0.85);
+    }
+}
+
+@keyframes kwDeathNoteTurnPrevIn {
+    0% {
+        transform: perspective(1400px) rotateY(-76deg);
+        filter: brightness(0.88);
+    }
+    100% {
+        transform: perspective(1400px) rotateY(0deg);
+        filter: brightness(1);
+    }
 }
