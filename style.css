@@ -462,7 +462,7 @@
     font-family: var(--kw-dn-font-family);
     font-size: var(--kw-dn-font-size);
     line-height: var(--kw-dn-line-height);
-    padding: calc(var(--kw-dn-editor-top) + 0.45rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);
+    padding: calc(var(--kw-dn-editor-top) + 0.62rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);
     margin: 0;
     caret-color: #111;
     box-sizing: border-box;
@@ -482,7 +482,7 @@
 
 .kw-deathnote__page-text {
     min-height: 100%;
-    padding: calc(var(--kw-dn-editor-top) + 0.45rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);
+    padding: calc(var(--kw-dn-editor-top) + 0.62rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);
     font-family: var(--kw-dn-font-family);
     font-size: var(--kw-dn-font-size);
     line-height: var(--kw-dn-line-height);
