@@ -37,6 +37,7 @@ import { syncLinkedShinigamiVisibility } from '../presence/index.js';
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
 const CLOSED_HEIGHT = 340;
+const MOBILE_VIEWPORT_MAX = 520;
 const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
 const INVENTORY_ID = 'kw-deathnote-inventory';
 let pendingFocus = null;
@@ -55,9 +56,40 @@ function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
 
+function isPortraitMobileViewport() {
+    return window.innerWidth <= MOBILE_VIEWPORT_MAX && window.innerHeight > window.innerWidth;
+}
+
+function getClosedWidgetSize() {
+    if (!isPortraitMobileViewport()) {
+        return { width: CLOSED_WIDTH, height: CLOSED_HEIGHT };
+    }
+
+    const maxWidth = Math.max(172, Math.min(188, window.innerWidth - 24));
+    return {
+        width: maxWidth,
+        height: Math.round(maxWidth * (CLOSED_HEIGHT / CLOSED_WIDTH)),
+    };
+}
+
 function getWidgetSize(isOpen) {
     if (!isOpen) {
-        return { width: CLOSED_WIDTH, height: CLOSED_HEIGHT };
+        return getClosedWidgetSize();
+    }
+
+    if (isPortraitMobileViewport()) {
+        const width = Math.min(
+            Math.max(320, Math.round(window.innerWidth - 16)),
+            Math.max(280, window.innerWidth - 8),
+        );
+        const height = Math.min(
+            Math.max(560, Math.round(window.innerHeight * 0.92)),
+            Math.max(420, window.innerHeight - 8),
+        );
+        return {
+            width,
+            height,
+        };
     }
 
     const aspectRatio = 992 / 744;
@@ -69,9 +101,10 @@ function getWidgetSize(isOpen) {
 }
 
 function getDefaultPosition() {
-    const width = CLOSED_WIDTH;
-    const height = CLOSED_HEIGHT;
-    const margin = 16;
+    const closedSize = getClosedWidgetSize();
+    const width = closedSize.width;
+    const height = closedSize.height;
+    const margin = isPortraitMobileViewport() ? 8 : 16;
 
     const x = Math.max(margin, window.innerWidth - width - margin);
     const y = Math.max(margin, Math.round(window.innerHeight * 0.22) - Math.round(height / 2));
@@ -1859,6 +1892,7 @@ function ensureWidget() {
     root.style.opacity = '1';
     root.style.pointerEvents = 'auto';
     root.classList.toggle('kw-deathnote--open', Boolean(settings.isOpen));
+    root.classList.toggle('kw-deathnote--mobile', isPortraitMobileViewport());
     root.classList.toggle('kw-deathnote--font-print', settings.fontMode !== 'script');
     root.classList.toggle('kw-deathnote--font-script', settings.fontMode === 'script');
 
