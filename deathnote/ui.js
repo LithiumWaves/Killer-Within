@@ -9,6 +9,8 @@ import {
 
 const PAGE_PLACEHOLDER = '[NAME] [METHOD OF DEATH] [TIME]';
 const PAGE_TURN_MS = 240;
+const CLOSED_WIDTH = 220;
+const CLOSED_HEIGHT = 310;
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
@@ -25,7 +27,7 @@ function clamp(value, min, max) {
 
 function getWidgetSize(isOpen) {
     if (!isOpen) {
-        return { width: 170, height: 240 };
+        return { width: CLOSED_WIDTH, height: CLOSED_HEIGHT };
     }
 
     const aspectRatio = 992 / 744;
@@ -37,8 +39,8 @@ function getWidgetSize(isOpen) {
 }
 
 function getDefaultPosition() {
-    const width = 170;
-    const height = 240;
+    const width = CLOSED_WIDTH;
+    const height = CLOSED_HEIGHT;
     const margin = 16;
 
     const x = Math.max(margin, window.innerWidth - width - margin);
@@ -66,10 +68,8 @@ function setPosition(x, y) {
 }
 
 function getTogglePosition(left, top, isOpening) {
-    const currentSize = getWidgetSize(!isOpening ? true : false);
     const nextSize = getWidgetSize(isOpening);
-    const rightEdge = left + currentSize.width;
-    const nextX = clamp(rightEdge - nextSize.width, 0, Math.max(0, window.innerWidth - nextSize.width));
+    const nextX = clamp(left, 0, Math.max(0, window.innerWidth - nextSize.width));
     const nextY = clamp(top, 0, Math.max(0, window.innerHeight - nextSize.height));
 
     return {
@@ -229,12 +229,18 @@ function buildWidgetHtml() {
 
     return `
         <div class="kw-deathnote__stage">
-            <img
+            <button
+                type="button"
                 class="kw-deathnote__cover kw-deathnote__drag-handle kw-deathnote__toggle"
-                src="${coverUrl}"
-                alt="Death Note"
-                draggable="false"
-            />
+                aria-label="Open Death Note"
+            >
+                <img
+                    class="kw-deathnote__cover-art"
+                    src="${coverUrl}"
+                    alt="Death Note"
+                    draggable="false"
+                />
+            </button>
 
             <div
                 class="kw-deathnote__spread"
