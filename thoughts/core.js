@@ -88,8 +88,26 @@ export function resolvePromptMacro(name) {
     return resolved;
 }
 
+export function normalizeCharacterKey(value) {
+    return String(value ?? '')
+        .trim()
+        .toLowerCase();
+}
+
+export function getActiveCharacterKey() {
+    return normalizeCharacterKey(resolvePromptMacro('char'));
+}
+
 export function getAssistantThought(message) {
     return message?.extra?.[MESSAGE_EXTRA_KEY]?.thought ?? '';
+}
+
+export function getMessageCharacterKey(message) {
+    return normalizeCharacterKey(
+        message?.extra?.[MESSAGE_EXTRA_KEY]?.characterName
+        || message?.name
+        || ''
+    );
 }
 
 export function getLastAssistantMessage() {

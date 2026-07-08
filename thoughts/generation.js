@@ -1,7 +1,9 @@
 import { MESSAGE_EXTRA_KEY } from './config.js';
 import {
+    getActiveCharacterKey,
     getContext,
     getLastAssistantMessage,
+    getMessageCharacterKey,
     getSettings,
     persistChatChanges,
 } from './core.js';
@@ -43,6 +45,7 @@ export async function generatePendingThought() {
     state.pendingThought = null;
 
     try {
+        const characterKey = getActiveCharacterKey();
         const thought = await requestThoughtGeneration(
             context,
             settings,
@@ -57,6 +60,7 @@ export async function generatePendingThought() {
         state.pendingThought = {
             text: thought,
             createdAt: Date.now(),
+            characterKey,
         };
     } catch (error) {
         console.warn('[killer_within_thoughts] Thought generation failed', error);
@@ -96,6 +100,7 @@ export async function generateThoughtForMessage(messageIndex, afterChange) {
         message.extra[MESSAGE_EXTRA_KEY] = {
             thought,
             createdAt: Date.now(),
+            characterName: message?.name || '',
             generatedManually: true,
         };
 
@@ -120,10 +125,20 @@ export async function attachPendingThoughtToLatestMessage(afterChange) {
         return;
     }
 
+    if (
+        state.pendingThought.characterKey
+        && getMessageCharacterKey(match.message)
+        && getMessageCharacterKey(match.message) !== state.pendingThought.characterKey
+    ) {
+        state.pendingThought = null;
+        return;
+    }
+
     match.message.extra ??= {};
     match.message.extra[MESSAGE_EXTRA_KEY] = {
         thought: state.pendingThought.text,
         createdAt: state.pendingThought.createdAt,
+        characterName: match.message?.name || '',
     };
 
     state.pendingThought = null;

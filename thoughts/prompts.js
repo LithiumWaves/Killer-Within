@@ -4,20 +4,34 @@ import {
 } from './config.js';
 import {
     applyPromptMacros,
+    getActiveCharacterKey,
     getAssistantThought,
     getContext,
+    getMessageCharacterKey,
     getSettings,
+    normalizeCharacterKey,
     resolvePromptMacro,
 } from './core.js';
 import { state } from './state.js';
 
-export function getThoughtHistory(limit = getSettings().maxInjectedThoughts) {
+export function getThoughtHistory(limit = getSettings().maxInjectedThoughts, characterKey = getActiveCharacterKey()) {
     const context = getContext();
     const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const targetCharacterKey = normalizeCharacterKey(characterKey);
 
     return chat
         .map((message, index) => ({ message, index }))
-        .filter(({ message }) => !message?.is_user && !message?.is_system && getAssistantThought(message))
+        .filter(({ message }) => {
+            if (message?.is_user || message?.is_system || !getAssistantThought(message)) {
+                return false;
+            }
+
+            if (!targetCharacterKey) {
+                return true;
+            }
+
+            return getMessageCharacterKey(message) === targetCharacterKey;
+        })
         .slice(-Math.max(0, Number(limit) || 0))
         .map(({ message, index }) => ({
             index,
@@ -26,8 +40,8 @@ export function getThoughtHistory(limit = getSettings().maxInjectedThoughts) {
         }));
 }
 
-export function buildThoughtHistoryBlock(limit) {
-    const history = getThoughtHistory(limit);
+export function buildThoughtHistoryBlock(limit, characterKey = getActiveCharacterKey()) {
+    const history = getThoughtHistory(limit, characterKey);
 
     if (!history.length) {
         return 'No prior hidden thoughts are available yet.';
@@ -40,7 +54,7 @@ export function buildThoughtHistoryBlock(limit) {
 
 export function buildThoughtPrompt() {
     const settings = getSettings();
-    const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts);
+    const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts, getActiveCharacterKey());
 
     return [
         applyPromptMacros(settings.thoughtPrompt).trim(),
@@ -144,7 +158,7 @@ function buildManualThoughtPrompt(messageIndex) {
     const context = getContext();
     const settings = getSettings();
     const message = context?.chat?.[messageIndex];
-    const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts);
+    const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts, getMessageCharacterKey(message));
     const visibleReply = String(message?.mes ?? '').trim();
 
     return [
@@ -197,15 +211,20 @@ export function buildManualThoughtHybridPrompt(messageIndex) {
 function buildMainPromptInjection() {
     const settings = getSettings();
     const sections = [];
+    const activeCharacterKey = getActiveCharacterKey();
 
     if (settings.includeThoughtsInMainPrompt) {
         sections.push([
             'Recent hidden thoughts from earlier turns:',
-            buildThoughtHistoryBlock(settings.maxInjectedThoughts),
+            buildThoughtHistoryBlock(settings.maxInjectedThoughts, activeCharacterKey),
         ].join('\n'));
     }
 
-    if (settings.includePendingThoughtInMainPrompt && state.pendingThought?.text) {
+    if (
+        settings.includePendingThoughtInMainPrompt
+        && state.pendingThought?.text
+        && (!activeCharacterKey || state.pendingThought.characterKey === activeCharacterKey)
+    ) {
         sections.push([
             'Hidden thoughts for the reply being generated right now:',
             state.pendingThought.text,
