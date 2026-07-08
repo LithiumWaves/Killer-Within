@@ -4,13 +4,17 @@ import {
     clearNotebookTouchers,
     createNotebookScrap,
     destroyNotebook,
+    forgetCharacterName,
+    getActorDisplayName,
     getChatState,
+    getCharacterNameDirectory,
     getContext,
     getDeathNoteInventory,
     getLinkedShinigami,
     getNotebookPages,
     getNotebookOwnership,
     getSettings,
+    learnCharacterName,
     linkNotebookShinigami,
     notify,
     persistChatChanges,
@@ -240,7 +244,7 @@ function actorIdentityKey(actor) {
 function formatActorLabel(actor) {
     const source = actor && typeof actor === 'object' ? actor : {};
     const type = String(source.type || NOTEBOOK_ACTOR_TYPES.NONE).trim().toLowerCase();
-    const name = String(source.name || '').trim();
+    const name = getActorDisplayName(source, 'Unknown');
 
     if (type === NOTEBOOK_ACTOR_TYPES.USER) {
         return name || 'User';
@@ -259,6 +263,43 @@ function formatActorLabel(actor) {
     }
 
     return name || 'Unknown';
+}
+
+function renderNameKnowledgeManagerHtml() {
+    const directory = getCharacterNameDirectory();
+    if (!directory.length) {
+        return `
+            <div class="kw-deathnote-manager">
+                <div class="kw-memory-manager__empty">No character cards are available in this chat.</div>
+            </div>
+        `;
+    }
+
+    const rows = directory.map((entry) => {
+        return `
+            <div class="kw-deathnote-item">
+                <div class="kw-deathnote-item__meta">
+                    <b>${escapeHtml(entry.displayName)}</b>
+                    <span>${entry.known ? 'Known to the user' : 'Name hidden from the user'}</span>
+                </div>
+                <span class="kw-deathnote-name-state">${entry.known ? 'Known' : 'Hidden'}</span>
+                <button
+                    type="button"
+                    class="menu_button ${entry.known ? 'kw-deathnote-hide-name' : 'kw-deathnote-learn-name'}"
+                    data-actor="${escapeHtml(encodeActorValue(entry.actor))}"
+                >${entry.known ? 'Hide again' : 'Learn name'}</button>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="kw-deathnote-manager">
+            <div class="kw-deathnote-manager__summary">
+                <span><b>Unknown names stay scrambled</b> until you learn them for story purposes.</span>
+            </div>
+            <div class="kw-deathnote-manager__list">${rows}</div>
+        </div>
+    `;
 }
 
 function getAvailableCharacterActors() {
@@ -451,7 +492,7 @@ function renderLinkManagerHtml() {
     return `
         <div class="kw-deathnote-manager">
             <div class="kw-deathnote-manager__summary">
-                <span><b>Linked Shinigami:</b> ${escapeHtml(linked.active ? (linked.actor.name || linked.avatar || 'Linked') : 'None')}</span>
+                <span><b>Linked Shinigami:</b> ${escapeHtml(linked.active ? getActorDisplayName(linked.actor, linked.avatar || 'Linked') : 'None')}</span>
             </div>
             <div class="kw-deathnote-manager__actions">
                 <label class="killer-within-settings__field kw-deathnote-manager__grow">
@@ -628,6 +669,7 @@ function getSettingsHost() {
 function syncSettingsUi() {
     const settings = getSettings();
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
+    $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-notebook-manager').html(renderNotebookManagerHtml());
     $('#kw-deathnote-link-manager').html(renderLinkManagerHtml());
     $('#kw-deathnote-scrap-manager').html(renderScrapManagerHtml());
@@ -676,6 +718,31 @@ function bindSettingsUi() {
             await commitInventoryMutation(() => setUserNotebookAccess(nextAccess, {
                 reason: `User access changed to ${nextAccess} via manager.`,
             }), 'User access updated.');
+        })
+        .off('click', '.kw-deathnote-learn-name')
+        .on('click', '.kw-deathnote-learn-name', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            if (!actor) {
+                return;
+            }
+
+            await commitInventoryMutation(() => learnCharacterName(actor, {
+                source: 'manual',
+                reason: `${actor.name || 'Character'} learned via manager.`,
+            }), 'Character name learned.');
+        })
+        .off('click', '.kw-deathnote-hide-name')
+        .on('click', '.kw-deathnote-hide-name', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            if (!actor) {
+                return;
+            }
+
+            await commitInventoryMutation(() => forgetCharacterName(actor, {
+                reason: `${actor.name || 'Character'} hidden again via manager.`,
+            }), 'Character name hidden again.');
         })
         .off('click', '#kw-deathnote-toggle-destroyed')
         .on('click', '#kw-deathnote-toggle-destroyed', async (event) => {
@@ -808,6 +875,10 @@ function renderSettingsPanel() {
                 <div class="killer-within-settings__field">
                     <span>Notebook defaults</span>
                     <small>If a cause is omitted, Death Note entries default to heart attack. If time is omitted, they trigger on the next assistant message.</small>
+                </div>
+                <div class="killer-within-settings__field">
+                    <span>Name discovery</span>
+                    <div id="kw-deathnote-name-manager"></div>
                 </div>
                 <div class="killer-within-settings__field">
                     <span>Notebook inventory</span>

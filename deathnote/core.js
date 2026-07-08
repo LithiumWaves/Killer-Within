@@ -81,6 +81,7 @@ function createDefaultChatState() {
         hasNotebook: true,
         ownership: createDefaultOwnershipState(),
         shinigamiLink: createDefaultShinigamiLinkState(),
+        nameKnowledge: createDefaultNameKnowledgeState(),
         inventory: createDefaultInventoryState(),
         notebookText: '',
         notebookPages: [''],
@@ -114,6 +115,12 @@ function createDefaultShinigamiLinkState() {
         avatar: '',
         notebookItemId: 'death-note-main',
         linkedAt: null,
+    };
+}
+
+function createDefaultNameKnowledgeState() {
+    return {
+        known: [],
     };
 }
 
@@ -174,6 +181,10 @@ function normalizeUserAccess(value, fallback = NOTEBOOK_USER_ACCESS.FULL) {
     return fallback;
 }
 
+function normalizeKnowledgeKey(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
 function normalizeTransferredAt(value) {
     if (value === null || value === undefined || value === '') {
         return null;
@@ -196,6 +207,54 @@ function normalizeOwnershipState(value) {
         holder: normalizeActorRef(ownership.holder, defaults.holder.type, defaults.holder.name),
         userAccess: normalizeUserAccess(ownership.userAccess, defaults.userAccess),
         lastTransferredAt: normalizeTransferredAt(ownership.lastTransferredAt),
+    };
+}
+
+function getActorKnowledgeKey(actor) {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    const id = normalizeKnowledgeKey(normalized.id);
+    if (id) {
+        return `id:${id}`;
+    }
+
+    const name = normalizeKnowledgeKey(normalized.name);
+    if (name) {
+        return `name:${name}`;
+    }
+
+    return '';
+}
+
+function normalizeKnownNameEntry(value, index) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(entry.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = String(entry.key || getActorKnowledgeKey(actor) || `known-name-${index + 1}`).trim();
+    return {
+        key,
+        actor,
+        source: String(entry.source || 'manual').trim().toLowerCase() || 'manual',
+        learnedAt: normalizeTransferredAt(entry.learnedAt),
+    };
+}
+
+function normalizeNameKnowledgeState(value) {
+    const knowledge = value && typeof value === 'object' ? value : {};
+    const knownRaw = Array.isArray(knowledge.known) ? knowledge.known : [];
+    const seen = new Set();
+    const known = [];
+
+    for (let index = 0; index < knownRaw.length; index += 1) {
+        const entry = normalizeKnownNameEntry(knownRaw[index], index);
+        if (!entry.key || seen.has(entry.key)) {
+            continue;
+        }
+
+        seen.add(entry.key);
+        known.push(entry);
+    }
+
+    return {
+        known,
     };
 }
 
@@ -225,10 +284,74 @@ function cloneActorRef(actor, fallbackType = NOTEBOOK_ACTOR_TYPES.NONE, fallback
     };
 }
 
+function hashNameSeed(value) {
+    const source = String(value || '');
+    let hash = 0;
+    for (let index = 0; index < source.length; index += 1) {
+        hash = ((hash * 31) + source.charCodeAt(index)) >>> 0;
+    }
+
+    return hash >>> 0;
+}
+
+function scrambleCharacterName(name, seedValue) {
+    const source = String(name || '').trim();
+    if (!source) {
+        return 'Unknown person';
+    }
+
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const seed = hashNameSeed(`${seedValue || source}::${source}`);
+    let result = '';
+    let alphaIndex = 0;
+
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source.charAt(index);
+        const code = source.charCodeAt(index);
+        const isUpper = code >= 65 && code <= 90;
+        const isLower = code >= 97 && code <= 122;
+        if (!isUpper && !isLower) {
+            result += char;
+            continue;
+        }
+
+        const shifted = alphabet.charAt((seed + (alphaIndex * 11) + code) % alphabet.length);
+        result += isLower ? shifted.toLowerCase() : shifted;
+        alphaIndex += 1;
+    }
+
+    return result || 'Unknown person';
+}
+
 function actorRefsMatch(left, right) {
     return left.type === right.type
         && left.id === right.id
         && left.name === right.name;
+}
+
+function getCharacterRosterActors() {
+    const context = getContext();
+    const characters = context && Array.isArray(context.characters) ? context.characters : [];
+    const roster = [];
+    const seen = new Set();
+
+    for (let index = 0; index < characters.length; index += 1) {
+        const character = characters[index];
+        const actor = normalizeActorRef({
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: character && character.avatar ? character.avatar : '',
+            name: character && character.name ? character.name : '',
+        }, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+        const key = getActorKnowledgeKey(actor);
+        if (!key || seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        roster.push(actor);
+    }
+
+    return roster;
 }
 
 function normalizeInventoryScrap(value, index, fallbackOwner, fallbackHolder) {
@@ -547,6 +670,7 @@ export function getChatState() {
 
     state.ownership = normalizeOwnershipState(state.ownership);
     state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
+    state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
 
     if (state.inventory.notebook.destroyed) {
@@ -576,10 +700,135 @@ export function getNotebookOwnership() {
     return state.ownership;
 }
 
+export function getNameKnowledgeState() {
+    const state = getChatState();
+    state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
+    return state.nameKnowledge;
+}
+
 export function getLinkedShinigami() {
     const state = getChatState();
     state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
     return state.shinigamiLink;
+}
+
+export function isActorNameKnown(actor) {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (
+        normalized.type === NOTEBOOK_ACTOR_TYPES.USER
+        || normalized.type === NOTEBOOK_ACTOR_TYPES.WORLD
+        || normalized.type === NOTEBOOK_ACTOR_TYPES.NONE
+    ) {
+        return true;
+    }
+
+    const key = getActorKnowledgeKey(normalized);
+    if (!key) {
+        return true;
+    }
+
+    const knowledge = getNameKnowledgeState();
+    return knowledge.known.some((entry) => entry.key === key);
+}
+
+export function getActorDisplayName(actor, fallback = 'Unknown') {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!normalized.name) {
+        if (normalized.type === NOTEBOOK_ACTOR_TYPES.USER) {
+            return 'User';
+        }
+
+        if (normalized.type === NOTEBOOK_ACTOR_TYPES.WORLD) {
+            return 'World';
+        }
+
+        return fallback;
+    }
+
+    if (isActorNameKnown(normalized)) {
+        return normalized.name;
+    }
+
+    return scrambleCharacterName(normalized.name, normalized.id || normalized.name);
+}
+
+export function getCharacterNameDirectory() {
+    const roster = getCharacterRosterActors();
+    return roster.map((actor) => {
+        return {
+            actor,
+            key: getActorKnowledgeKey(actor),
+            known: isActorNameKnown(actor),
+            displayName: getActorDisplayName(actor, 'Unknown character'),
+            trueName: String(actor.name || '').trim(),
+        };
+    });
+}
+
+export function learnCharacterName(actor, options = {}) {
+    const state = getChatState();
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKnowledgeKey(normalized);
+    if (!key) {
+        return false;
+    }
+
+    const existing = state.nameKnowledge.known.find((entry) => entry.key === key);
+    if (existing) {
+        const nextLearnedAt = normalizeTransferredAt(options.timestamp);
+        existing.learnedAt = nextLearnedAt === null
+            ? (existing.learnedAt === null ? Date.now() : existing.learnedAt)
+            : nextLearnedAt;
+        return false;
+    }
+
+    const learnedAt = normalizeTransferredAt(options.timestamp);
+    const timestamp = learnedAt === null ? Date.now() : learnedAt;
+
+    state.nameKnowledge.known.push(normalizeKnownNameEntry({
+        key,
+        actor: normalized,
+        source: options.source || 'manual',
+        learnedAt: timestamp,
+    }, state.nameKnowledge.known.length));
+
+    pushInventoryHistory(state, {
+        action: 'learn_name',
+        itemId: key,
+        detail: String(options.reason || '').trim() || `${normalized.name || 'A character'}'s true name was learned.`,
+        actor: normalized,
+        target: state.ownership.holder,
+        timestamp,
+    });
+    return true;
+}
+
+export function forgetCharacterName(actor, options = {}) {
+    const state = getChatState();
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKnowledgeKey(normalized);
+    if (!key) {
+        return false;
+    }
+
+    const before = state.nameKnowledge.known.length;
+    state.nameKnowledge.known = state.nameKnowledge.known.filter((entry) => entry.key !== key);
+    if (state.nameKnowledge.known.length === before) {
+        return false;
+    }
+
+    pushInventoryHistory(state, {
+        action: 'forget_name',
+        itemId: key,
+        detail: String(options.reason || '').trim() || `${normalized.name || 'A character'}'s name was hidden again.`,
+        actor: normalized,
+        target: state.ownership.holder,
+        timestamp: (() => {
+            const value = normalizeTransferredAt(options.timestamp);
+            return value === null ? Date.now() : value;
+        })(),
+    });
+    return true;
 }
 
 export function getDeathNoteInventory() {
@@ -608,7 +857,10 @@ export function linkNotebookShinigami(actor, options = {}) {
         },
         avatar,
         notebookItemId: String(options.notebookItemId || state.inventory.notebook.itemId || 'death-note-main').trim(),
-        linkedAt: normalizeTransferredAt(options.linkedAt) ?? Date.now(),
+        linkedAt: (() => {
+            const value = normalizeTransferredAt(options.linkedAt);
+            return value === null ? Date.now() : value;
+        })(),
     });
 
     pushInventoryHistory(state, {
@@ -636,7 +888,10 @@ export function unlinkNotebookShinigami(options = {}) {
         detail: String(options.reason || '').trim() || `${current.actor.name || 'Linked Shinigami'} unlinked from the notebook.`,
         actor: current.actor,
         target: state.ownership.holder,
-        timestamp: normalizeTransferredAt(options.timestamp) ?? Date.now(),
+        timestamp: (() => {
+            const value = normalizeTransferredAt(options.timestamp);
+            return value === null ? Date.now() : value;
+        })(),
     });
     return true;
 }

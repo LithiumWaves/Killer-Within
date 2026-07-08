@@ -75,6 +75,13 @@
     overflow-wrap: anywhere;
 }
 
+.kw-deathnote-name-state {
+    font-size: 0.9em;
+    opacity: 0.78;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
 .kw-thoughts {
     margin-top: 0.65rem;
     padding: 0.5rem 0.75rem;

@@ -4,6 +4,7 @@ import {
     NOTEBOOK_USER_ACCESS,
 } from './config.js';
 import {
+    getCharacterNameDirectory,
     getChatState,
     getDeathNoteInventory,
     getNotebookOwnership,
@@ -188,6 +189,39 @@ function buildDeathNoteInjection() {
     ].join('\n');
 }
 
+function buildNameKnowledgeInjection() {
+    const settings = getSettings();
+    if (!settings.enabled) {
+        return '';
+    }
+
+    const directory = getCharacterNameDirectory();
+    const hidden = directory.filter((entry) => !entry.known);
+    if (!hidden.length) {
+        return '';
+    }
+
+    const lines = [
+        '[Name Knowledge Context]',
+        'Some character names are not yet known to the user.',
+        'For any character marked HIDDEN below, do not casually reveal or confirm their true name in user-facing dialogue, narration, labels, or exposition until the scene explicitly establishes that the user learned it.',
+        'When referring to a hidden-name character from the user-facing perspective, prefer the masked label or an in-scene descriptor instead.',
+        '',
+        'Character name knowledge:',
+    ];
+
+    for (const entry of directory) {
+        if (entry.known) {
+            lines.push(`- KNOWN | ${entry.trueName}`);
+            continue;
+        }
+
+        lines.push(`- HIDDEN | masked label: ${entry.displayName} | true name: ${entry.trueName}`);
+    }
+
+    return lines.join('\n');
+}
+
 export function getDeathNotePromptInjectionMessage() {
     const injection = buildDeathNoteInjection();
     if (!injection) {
@@ -203,6 +237,27 @@ export function getDeathNotePromptInjectionMessage() {
         extra: {
             [MESSAGE_EXTRA_KEY]: {
                 injected: true,
+            },
+        },
+    };
+}
+
+export function getNameKnowledgePromptInjectionMessage() {
+    const injection = buildNameKnowledgeInjection();
+    if (!injection) {
+        return null;
+    }
+
+    return {
+        name: 'Name Knowledge',
+        is_user: false,
+        is_system: true,
+        send_date: Date.now(),
+        mes: injection,
+        extra: {
+            [MESSAGE_EXTRA_KEY]: {
+                injected: true,
+                nameKnowledge: true,
             },
         },
     };
