@@ -21,6 +21,16 @@ function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
 
+function getWidgetSize(isOpen) {
+    if (!isOpen) {
+        return { width: 92, height: 132 };
+    }
+
+    const width = Math.min(window.innerWidth * 0.86, 780);
+    const height = Math.min(window.innerHeight * 0.7, 520);
+    return { width, height };
+}
+
 function getDefaultPosition() {
     const width = 92;
     const height = 132;
@@ -177,7 +187,18 @@ function ensureWidget() {
         document.body.append(root);
     }
 
-    const { x, y } = resolvePosition();
+    const { width, height } = getWidgetSize(Boolean(settings.isOpen));
+    const maxX = Math.max(0, window.innerWidth - width);
+    const maxY = Math.max(0, window.innerHeight - height);
+
+    const resolved = resolvePosition();
+    const x = clamp(resolved.x, 0, maxX);
+    const y = clamp(resolved.y, 0, maxY);
+
+    if (resolved.x !== x || resolved.y !== y) {
+        setPosition(x, y);
+    }
+
     root.style.left = `${Math.round(x)}px`;
     root.style.top = `${Math.round(y)}px`;
     root.classList.toggle('kw-deathnote--open', Boolean(settings.isOpen));
