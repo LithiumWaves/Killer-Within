@@ -13,6 +13,7 @@ import {
     normalizeCharacterKey,
     resolvePromptMacro,
 } from './core.js';
+import { filterMessagesVisibleToPresenceCharacter } from '../presence/core.js';
 import { state } from './state.js';
 
 export function getThoughtEntries({
@@ -85,13 +86,13 @@ export function buildThoughtPrompt() {
     ].join('\n');
 }
 
-function getRelevantChatMessages(limit = RAW_THOUGHT_CONTEXT_LIMIT) {
+function getRelevantChatMessages(limit = RAW_THOUGHT_CONTEXT_LIMIT, characterName = '') {
     const context = getContext();
     const chat = Array.isArray(context?.chat) ? context.chat : [];
-
-    return chat
+    const filtered = chat
         .filter((message) => !message?.extra?.[MESSAGE_EXTRA_KEY]?.injected)
         .slice(-Math.max(0, Number(limit) || 0));
+    return filterMessagesVisibleToPresenceCharacter(filtered, characterName);
 }
 
 function formatChatMessageForThoughtContext(message, index) {
@@ -101,8 +102,8 @@ function formatChatMessageForThoughtContext(message, index) {
     return `[${index + 1}] ${role} | ${name}\n${body}`;
 }
 
-function buildConversationContextBlock(limit = RAW_THOUGHT_CONTEXT_LIMIT) {
-    const messages = getRelevantChatMessages(limit);
+function buildConversationContextBlock(limit = RAW_THOUGHT_CONTEXT_LIMIT, characterName = '') {
+    const messages = getRelevantChatMessages(limit, characterName);
 
     if (!messages.length) {
         return 'No recent visible chat messages are available yet.';
@@ -140,6 +141,7 @@ function buildIdentityContextBlock() {
 }
 
 export function buildThoughtRawRequest() {
+    const activeCharacterName = resolvePromptMacro('char');
     return {
         systemPrompt: [
             'You are generating a hidden internal monologue for the current character.',
@@ -156,12 +158,13 @@ export function buildThoughtRawRequest() {
             buildIdentityContextBlock(),
             '',
             'Recent visible conversation context:',
-            buildConversationContextBlock(),
+            buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, activeCharacterName),
         ].join('\n'),
     };
 }
 
 export function buildThoughtHybridPrompt() {
+    const activeCharacterName = resolvePromptMacro('char');
     return [
         buildThoughtPrompt(),
         '',
@@ -169,7 +172,7 @@ export function buildThoughtHybridPrompt() {
         buildIdentityContextBlock(),
         '',
         'Recent visible conversation context:',
-        buildConversationContextBlock(),
+        buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, activeCharacterName),
     ].join('\n');
 }
 
@@ -195,6 +198,9 @@ function buildManualThoughtPrompt(messageIndex) {
 }
 
 export function buildManualThoughtRawRequest(messageIndex) {
+    const context = getContext();
+    const message = context?.chat?.[messageIndex];
+    const characterName = String(message?.name || '').trim();
     return {
         systemPrompt: [
             'You are reconstructing the hidden internal monologue for a character reply that already exists.',
@@ -210,12 +216,15 @@ export function buildManualThoughtRawRequest(messageIndex) {
             buildIdentityContextBlock(),
             '',
             'Recent visible conversation context:',
-            buildConversationContextBlock(),
+            buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, characterName),
         ].join('\n'),
     };
 }
 
 export function buildManualThoughtHybridPrompt(messageIndex) {
+    const context = getContext();
+    const message = context?.chat?.[messageIndex];
+    const characterName = String(message?.name || '').trim();
     return [
         buildManualThoughtPrompt(messageIndex),
         '',
@@ -223,7 +232,7 @@ export function buildManualThoughtHybridPrompt(messageIndex) {
         buildIdentityContextBlock(),
         '',
         'Recent visible conversation context:',
-        buildConversationContextBlock(),
+        buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, characterName),
     ].join('\n');
 }
 
