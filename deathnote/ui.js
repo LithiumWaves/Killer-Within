@@ -520,12 +520,13 @@ function bindWidgetUi() {
             if (visibleChanged) {
                 queueFocusRestore(pageIndex, pageSide, 'end');
                 refreshDeathNoteUi();
-            }
+            } else {
                 textarea.dataset.pageIndex = String(pageIndex);
+            }
+
             scheduleSettingsSave();
-            refreshDeathNoteUi();
             scheduleChatSave(state);
-        .on('click', `#${FLOATING_ID} .kw-deathnote__font-button`, (event) => {
+        })
         .off('click', `#${FLOATING_ID} .kw-deathnote__font-button`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__font-button`, (event) => {
             event.preventDefault();
