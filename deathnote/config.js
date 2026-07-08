@@ -28,7 +28,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     closedFloatingX: null,
     closedFloatingY: null,
     inventoryCollapsed: false,
-    inventoryNotebookExpanded: true,
+    inventorySelectedItemKey: 'notebook',
     draftText: '',
     fontMode: 'print',
     currentPageIndex: 0,
