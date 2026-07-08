@@ -102,6 +102,19 @@ export function getAssistantThought(message) {
     return message?.extra?.[MESSAGE_EXTRA_KEY]?.thought ?? '';
 }
 
+export function getThoughtMetadata(message) {
+    return message?.extra?.[MESSAGE_EXTRA_KEY] ?? null;
+}
+
+export function isThoughtEnabledInContext(message) {
+    const metadata = getThoughtMetadata(message);
+    if (!metadata?.thought) {
+        return false;
+    }
+
+    return metadata.enabledInContext !== false;
+}
+
 export function getMessageCharacterKey(message) {
     return normalizeCharacterKey(
         message?.extra?.[MESSAGE_EXTRA_KEY]?.characterName

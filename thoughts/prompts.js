@@ -9,12 +9,17 @@ import {
     getContext,
     getMessageCharacterKey,
     getSettings,
+    isThoughtEnabledInContext,
     normalizeCharacterKey,
     resolvePromptMacro,
 } from './core.js';
 import { state } from './state.js';
 
-export function getThoughtHistory(limit = getSettings().maxInjectedThoughts, characterKey = getActiveCharacterKey()) {
+export function getThoughtEntries({
+    limit = Number.MAX_SAFE_INTEGER,
+    characterKey = '',
+    selectedOnly = true,
+} = {}) {
     const context = getContext();
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     const targetCharacterKey = normalizeCharacterKey(characterKey);
@@ -26,18 +31,32 @@ export function getThoughtHistory(limit = getSettings().maxInjectedThoughts, cha
                 return false;
             }
 
+            if (selectedOnly && !isThoughtEnabledInContext(message)) {
+                return false;
+            }
+
             if (!targetCharacterKey) {
                 return true;
             }
 
             return getMessageCharacterKey(message) === targetCharacterKey;
         })
-        .slice(-Math.max(0, Number(limit) || 0))
         .map(({ message, index }) => ({
             index,
             name: message?.name || 'Character',
+            characterKey: getMessageCharacterKey(message),
             thought: getAssistantThought(message),
-        }));
+            selected: isThoughtEnabledInContext(message),
+        }))
+        .slice(-Math.max(0, Number(limit) || 0));
+}
+
+export function getThoughtHistory(limit = getSettings().maxInjectedThoughts, characterKey = getActiveCharacterKey()) {
+    return getThoughtEntries({
+        limit,
+        characterKey,
+        selectedOnly: true,
+    });
 }
 
 export function buildThoughtHistoryBlock(limit, characterKey = getActiveCharacterKey()) {

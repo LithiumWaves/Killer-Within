@@ -38,3 +38,60 @@
 .kw-thought-button {
     margin-right: 0.2rem;
 }
+
+.kw-memory-manager {
+    display: grid;
+    gap: 0.75rem;
+    max-height: 24rem;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+.kw-memory-manager__empty {
+    opacity: 0.75;
+    font-style: italic;
+}
+
+.kw-memory-group {
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 30%, transparent);
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 6%, transparent);
+}
+
+.kw-memory-group__summary {
+    cursor: pointer;
+    padding: 0.6rem 0.75rem;
+    font-weight: 600;
+    user-select: none;
+}
+
+.kw-memory-group__entries {
+    display: grid;
+    gap: 0.6rem;
+    padding: 0 0.75rem 0.75rem;
+}
+
+.kw-memory-entry {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.6rem;
+    border-radius: 0.65rem;
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 8%, transparent);
+}
+
+.kw-memory-entry__toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.kw-memory-entry__meta {
+    opacity: 0.75;
+    font-size: 0.9em;
+}
+
+.kw-memory-entry__body {
+    white-space: pre-wrap;
+    opacity: 0.92;
+}

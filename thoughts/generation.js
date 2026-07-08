@@ -101,6 +101,7 @@ export async function generateThoughtForMessage(messageIndex, afterChange) {
             thought,
             createdAt: Date.now(),
             characterName: message?.name || '',
+            enabledInContext: true,
             generatedManually: true,
         };
 
@@ -139,6 +140,7 @@ export async function attachPendingThoughtToLatestMessage(afterChange) {
         thought: state.pendingThought.text,
         createdAt: state.pendingThought.createdAt,
         characterName: match.message?.name || '',
+        enabledInContext: true,
     };
 
     state.pendingThought = null;

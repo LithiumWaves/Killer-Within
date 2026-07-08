@@ -1,11 +1,13 @@
-import { PANEL_ID, MODULE_NAME } from './config.js';
+import { MESSAGE_EXTRA_KEY, PANEL_ID } from './config.js';
 import {
     getAssistantThought,
     getContext,
     getSettings,
     notify,
+    persistChatChanges,
     scheduleSettingsSave,
 } from './core.js';
+import { getThoughtEntries } from './prompts.js';
 import { state } from './state.js';
 
 function escapeHtml(text) {
@@ -107,6 +109,68 @@ function renderThoughtButtons() {
     $('.mes').each((_, element) => renderThoughtButtonForElement(element));
 }
 
+function buildMemoryManagerHtml() {
+    const entries = getThoughtEntries({
+        selectedOnly: false,
+    });
+
+    if (!entries.length) {
+        return '<div class="kw-memory-manager__empty">No thought memories stored in this chat yet.</div>';
+    }
+
+    const groups = new Map();
+
+    for (const entry of entries) {
+        const key = entry.characterKey || entry.name || 'Character';
+        const existing = groups.get(key) ?? {
+            name: entry.name || 'Character',
+            entries: [],
+        };
+        existing.entries.push(entry);
+        groups.set(key, existing);
+    }
+
+    return Array.from(groups.values())
+        .map((group) => {
+            const items = group.entries
+                .slice()
+                .reverse()
+                .map((entry) => `
+                    <label class="kw-memory-entry">
+                        <span class="kw-memory-entry__toggle">
+                            <input
+                                type="checkbox"
+                                class="kw-memory-toggle"
+                                data-mesid="${entry.index}"
+                                ${entry.selected ? 'checked' : ''}
+                            />
+                            <span>Use in context</span>
+                        </span>
+                        <span class="kw-memory-entry__meta">Message ${entry.index + 1}</span>
+                        <span class="kw-memory-entry__body">${escapeHtml(entry.thought)}</span>
+                    </label>
+                `)
+                .join('');
+
+            return `
+                <details class="kw-memory-group" open>
+                    <summary class="kw-memory-group__summary">${escapeHtml(group.name)}</summary>
+                    <div class="kw-memory-group__entries">${items}</div>
+                </details>
+            `;
+        })
+        .join('');
+}
+
+function renderMemoryManager() {
+    const target = $('#kw-thoughts-memory-manager');
+    if (!target.length) {
+        return;
+    }
+
+    target.html(buildMemoryManagerHtml());
+}
+
 export function queueThoughtRender() {
     if (state.renderQueued) {
         return;
@@ -117,6 +181,7 @@ export function queueThoughtRender() {
         state.renderQueued = false;
         renderThoughts();
         renderThoughtButtons();
+        renderMemoryManager();
     });
 }
 
@@ -133,6 +198,7 @@ function syncSettingsUi() {
     $('#kw-thoughts-main-prompt').prop('checked', settings.includeThoughtsInMainPrompt);
     $('#kw-thoughts-pending').prop('checked', settings.includePendingThoughtInMainPrompt);
     $('#kw-thoughts-prompt').val(settings.thoughtPrompt);
+    renderMemoryManager();
 }
 
 function bindSettingsUi() {
@@ -167,6 +233,26 @@ function bindSettingsUi() {
         getSettings().thoughtPrompt = String($(event.currentTarget).val() || '').trim();
         scheduleSettingsSave();
     });
+
+    $(document)
+        .off('change', '.kw-memory-toggle')
+        .on('change', '.kw-memory-toggle', async (event) => {
+            const mesId = Number($(event.currentTarget).data('mesid'));
+            if (!Number.isInteger(mesId)) {
+                return;
+            }
+
+            const context = getContext();
+            const message = context?.chat?.[mesId];
+            const metadata = message?.extra?.[MESSAGE_EXTRA_KEY];
+            if (!metadata?.thought) {
+                return;
+            }
+
+            metadata.enabledInContext = Boolean($(event.currentTarget).prop('checked'));
+            await persistChatChanges();
+            queueThoughtRender();
+        });
 }
 
 export function renderSettingsPanel() {
@@ -209,6 +295,10 @@ export function renderSettingsPanel() {
                     <span>Thought generation prompt</span>
                     <textarea id="kw-thoughts-prompt" class="text_pole" rows="10"></textarea>
                 </label>
+                <div class="killer-within-settings__field">
+                    <span>Thought memories in this chat</span>
+                    <div id="kw-thoughts-memory-manager" class="kw-memory-manager"></div>
+                </div>
             </div>
         </div>
     `);
