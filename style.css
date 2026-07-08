@@ -182,11 +182,12 @@
 
 .kw-deathnote__page-right {
     min-width: 0;
-    padding: 9.35% 5.2% 4.3% 4.45%;
+    padding: 0;
     color: #171717;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 0.35rem;
+    position: relative;
+    overflow: hidden;
+    background: var(--kw-dn-paper-bg);
+    margin-left: -1px;
 }
 
 .kw-deathnote__paper {
@@ -206,7 +207,6 @@
         var(--kw-dn-paper-bg);
     background-size: 100% var(--kw-dn-line-height), 100% 100%;
     background-position: 0 calc(var(--kw-dn-line-height) - 2px), 0 0;
-    border-radius: 0.1rem;
     box-sizing: border-box;
 }
 
@@ -215,6 +215,10 @@
     justify-content: end;
     gap: 0.35rem;
     padding-right: 0.15rem;
+    position: absolute;
+    top: 0.55rem;
+    right: 0.75rem;
+    z-index: 2;
 }
 
 .kw-deathnote__font-button {
@@ -246,7 +250,7 @@
     font-family: var(--kw-dn-font-family);
     font-size: var(--kw-dn-font-size);
     line-height: var(--kw-dn-line-height);
-    padding: var(--kw-dn-editor-top) 0 0 var(--kw-dn-editor-left);
+    padding: calc(var(--kw-dn-editor-top) + 2.8rem) 0 0 calc(var(--kw-dn-editor-left) + 1.1rem);
     margin: 0;
     caret-color: #111;
     box-sizing: border-box;
