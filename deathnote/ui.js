@@ -212,9 +212,22 @@ function ensureWidget() {
 
     root.style.left = `${Math.round(x)}px`;
     root.style.top = `${Math.round(y)}px`;
+    root.style.display = 'block';
+    root.style.visibility = 'visible';
+    root.style.opacity = '1';
+    root.style.pointerEvents = 'auto';
     root.classList.toggle('kw-deathnote--open', Boolean(settings.isOpen));
 
     root.innerHTML = buildWidgetHtml();
+
+    if (!globalThis.__kwDeathNoteRenderLogged) {
+        globalThis.__kwDeathNoteRenderLogged = true;
+        console.info('[killer_within_deathnote] render', {
+            x: Math.round(x),
+            y: Math.round(y),
+            open: Boolean(settings.isOpen),
+        });
+    }
     return root;
 }
 
