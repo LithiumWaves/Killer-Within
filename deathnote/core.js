@@ -119,6 +119,7 @@ function createDefaultInventoryState() {
             updatedAt: null,
         },
         scraps: [],
+        touchers: [],
         history: [],
     };
 }
@@ -241,6 +242,23 @@ function normalizeInventoryHistoryEntry(value, index) {
     };
 }
 
+function normalizeInventoryToucher(value, index) {
+    const toucher = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(toucher.actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    const source = String(toucher.source || 'manual').trim().toLowerCase();
+    const itemId = String(toucher.itemId || '').trim();
+    const active = toucher.active !== false;
+    return {
+        id: String(toucher.id || `death-note-toucher-${index + 1}`).trim() || `death-note-toucher-${index + 1}`,
+        actor,
+        source: source || 'manual',
+        itemId,
+        active,
+        createdAt: normalizeTransferredAt(toucher.createdAt),
+        updatedAt: normalizeTransferredAt(toucher.updatedAt),
+    };
+}
+
 function normalizeInventoryState(value, ownership, hasNotebook) {
     const defaults = createDefaultInventoryState();
     const inventory = value && typeof value === 'object' ? value : {};
@@ -263,6 +281,9 @@ function normalizeInventoryState(value, ownership, hasNotebook) {
         scraps: Array.isArray(inventory.scraps)
             ? inventory.scraps.map((scrap, index) => normalizeInventoryScrap(scrap, index, fallbackOwner, fallbackHolder))
             : [],
+        touchers: Array.isArray(inventory.touchers)
+            ? inventory.touchers.map((toucher, index) => normalizeInventoryToucher(toucher, index))
+            : [],
         history: Array.isArray(inventory.history)
             ? inventory.history
                 .slice(-INVENTORY_HISTORY_LIMIT)
@@ -273,6 +294,11 @@ function normalizeInventoryState(value, ownership, hasNotebook) {
 
 function isUserActor(actor) {
     return normalizeActorType(actor?.type, NOTEBOOK_ACTOR_TYPES.NONE) === NOTEBOOK_ACTOR_TYPES.USER;
+}
+
+function isValidActorRef(actor) {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    return normalized.type !== NOTEBOOK_ACTOR_TYPES.NONE || Boolean(normalized.name) || Boolean(normalized.id);
 }
 
 function getUserAccessRank(value) {
@@ -348,6 +374,90 @@ function pushInventoryHistory(state, {
     if (state.inventory.history.length > INVENTORY_HISTORY_LIMIT) {
         state.inventory.history = state.inventory.history.slice(-INVENTORY_HISTORY_LIMIT);
     }
+}
+
+function getActorIdentityKey(actor) {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    return [
+        normalized.type || NOTEBOOK_ACTOR_TYPES.NONE,
+        normalized.id || '',
+        normalized.name || '',
+    ].join('::');
+}
+
+function pushPresenceParticipant(collection, actor, source, itemId) {
+    const normalizedActor = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!isValidActorRef(normalizedActor)) {
+        return;
+    }
+
+    const key = getActorIdentityKey(normalizedActor);
+    if (!collection.has(key)) {
+        collection.set(key, {
+            actor: cloneActorRef(normalizedActor, normalizedActor.type, normalizedActor.name),
+            sources: [],
+            canSeeShinigami: true,
+        });
+    }
+
+    const participant = collection.get(key);
+    const sourceValue = String(source || 'contact').trim() || 'contact';
+    const normalizedItemId = String(itemId || '').trim();
+    const duplicate = participant.sources.some((entry) => entry.source === sourceValue && entry.itemId === normalizedItemId);
+    if (!duplicate) {
+        participant.sources.push({
+            source: sourceValue,
+            itemId: normalizedItemId,
+        });
+    }
+}
+
+function buildDeathNotePresenceParticipants(state) {
+    const participants = new Map();
+    syncInventoryWithOwnership(state);
+
+    if (state.hasNotebook) {
+        pushPresenceParticipant(
+            participants,
+            state.ownership.holder,
+            'notebook_holder',
+            state.inventory.notebook.itemId,
+        );
+    }
+
+    if (
+        state.ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL
+        || state.ownership.userAccess === NOTEBOOK_USER_ACCESS.TOUCH
+    ) {
+        pushPresenceParticipant(
+            participants,
+            {
+                type: NOTEBOOK_ACTOR_TYPES.USER,
+                id: '',
+                name: 'User',
+            },
+            state.ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL ? 'user_full_access' : 'user_touch_access',
+            state.inventory.notebook.itemId,
+        );
+    }
+
+    for (const scrap of state.inventory.scraps) {
+        if (!scrap || !scrap.active) {
+            continue;
+        }
+
+        pushPresenceParticipant(participants, scrap.holder, 'scrap_holder', scrap.id);
+    }
+
+    for (const toucher of state.inventory.touchers) {
+        if (!toucher || !toucher.active) {
+            continue;
+        }
+
+        pushPresenceParticipant(participants, toucher.actor, toucher.source || 'manual_touch', toucher.itemId);
+    }
+
+    return Array.from(participants.values());
 }
 
 function buildNextOwnership(current, raw) {
@@ -442,6 +552,11 @@ export function getDeathNoteInventory() {
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
     syncInventoryWithOwnership(state);
     return state.inventory;
+}
+
+export function getNotebookTouchers() {
+    const state = getChatState();
+    return buildDeathNotePresenceParticipants(state);
 }
 
 export function setNotebookOwnership(nextOwnership = {}) {
@@ -674,6 +789,158 @@ export function removeNotebookScrap(scrapId, options = {}) {
 
 export function getUserHeldNotebookScraps() {
     return getDeathNoteInventory().scraps.filter((scrap) => scrap?.active && isUserActor(scrap.holder));
+}
+
+export function addNotebookToucher(actor, options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const normalizedActor = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!isValidActorRef(normalizedActor)) {
+        return null;
+    }
+
+    const source = String(options.source || 'manual_touch').trim().toLowerCase() || 'manual_touch';
+    const itemId = String(options.itemId || '').trim();
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    const existing = state.inventory.touchers.find((entry) => {
+        return entry
+            && entry.active
+            && getActorIdentityKey(entry.actor) === getActorIdentityKey(normalizedActor)
+            && String(entry.source || '').trim().toLowerCase() === source
+            && String(entry.itemId || '').trim() === itemId;
+    });
+
+    if (existing) {
+        existing.updatedAt = timestamp;
+        return existing;
+    }
+
+    const toucher = normalizeInventoryToucher({
+        id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        actor: normalizedActor,
+        source,
+        itemId,
+        active: true,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+    }, state.inventory.touchers.length);
+
+    state.inventory.touchers.push(toucher);
+    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    pushInventoryHistory(state, {
+        action: 'add_toucher',
+        itemId,
+        detail: String(options.reason || '').trim() || `${normalizedActor.name || normalizedActor.type} touched the Death Note.`,
+        actor: normalizedActor,
+        target: state.ownership.holder,
+        timestamp,
+    });
+    return toucher;
+}
+
+export function removeNotebookToucher(actor, options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const normalizedActor = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!isValidActorRef(normalizedActor)) {
+        return false;
+    }
+
+    const sourceFilter = String(options.source || '').trim().toLowerCase();
+    const itemIdFilter = String(options.itemId || '').trim();
+    let changed = false;
+    for (const toucher of state.inventory.touchers) {
+        if (!toucher || !toucher.active) {
+            continue;
+        }
+
+        if (getActorIdentityKey(toucher.actor) !== getActorIdentityKey(normalizedActor)) {
+            continue;
+        }
+
+        if (sourceFilter && String(toucher.source || '').trim().toLowerCase() !== sourceFilter) {
+            continue;
+        }
+
+        if (itemIdFilter && String(toucher.itemId || '').trim() !== itemIdFilter) {
+            continue;
+        }
+
+        toucher.active = false;
+        toucher.updatedAt = normalizeTransferredAt(options.timestamp) ?? Date.now();
+        changed = true;
+    }
+
+    if (!changed) {
+        return false;
+    }
+
+    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    pushInventoryHistory(state, {
+        action: 'remove_toucher',
+        itemId: itemIdFilter,
+        detail: String(options.reason || '').trim() || `${normalizedActor.name || normalizedActor.type} no longer touches the Death Note.`,
+        actor: normalizedActor,
+        target: state.ownership.holder,
+        timestamp: normalizeTransferredAt(options.timestamp) ?? Date.now(),
+    });
+    return true;
+}
+
+export function clearNotebookTouchers(options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    let changed = false;
+    const sourceFilter = String(options.source || '').trim().toLowerCase();
+    const itemIdFilter = String(options.itemId || '').trim();
+
+    for (const toucher of state.inventory.touchers) {
+        if (!toucher || !toucher.active) {
+            continue;
+        }
+
+        if (sourceFilter && String(toucher.source || '').trim().toLowerCase() !== sourceFilter) {
+            continue;
+        }
+
+        if (itemIdFilter && String(toucher.itemId || '').trim() !== itemIdFilter) {
+            continue;
+        }
+
+        toucher.active = false;
+        toucher.updatedAt = normalizeTransferredAt(options.timestamp) ?? Date.now();
+        changed = true;
+    }
+
+    if (!changed) {
+        return false;
+    }
+
+    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    pushInventoryHistory(state, {
+        action: 'clear_touchers',
+        itemId: itemIdFilter,
+        detail: String(options.reason || '').trim() || 'Cleared active Death Note touchers.',
+        actor: state.ownership.holder,
+        target: state.ownership.owner,
+        timestamp: normalizeTransferredAt(options.timestamp) ?? Date.now(),
+    });
+    return true;
+}
+
+export function getDeathNotePresenceState() {
+    const state = getChatState();
+    const inventory = getDeathNoteInventory();
+    const touchers = buildDeathNotePresenceParticipants(state);
+    const userToucher = touchers.find((entry) => isUserActor(entry.actor));
+
+    return {
+        notebookPresent: Boolean(state.hasNotebook),
+        notebookDestroyed: Boolean(inventory.notebook.destroyed),
+        touchers,
+        userCanSeeShinigami: Boolean(userToucher),
+        userTouchSources: userToucher ? userToucher.sources : [],
+    };
 }
 
 function normalizeRemaining(value) {
