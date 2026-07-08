@@ -15,6 +15,7 @@ import {
     getPromptInjectionMessage,
     normalizeThoughtResult,
 } from './prompts.js';
+import { getDeathNotePromptInjectionMessage } from '../deathnote/prompts.js';
 import { state } from './state.js';
 
 async function requestThoughtGeneration(context, settings, rawRequest, hybridPrompt) {
@@ -169,12 +170,16 @@ export function installInterceptor() {
             }
         }
 
-        const injectionMessage = getPromptInjectionMessage();
-        if (!injectionMessage) {
-            return;
+        const deathNoteInjection = getDeathNotePromptInjectionMessage();
+        if (deathNoteInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, deathNoteInjection);
         }
 
-        const insertAt = Math.max(chat.length - 1, 0);
-        chat.splice(insertAt, 0, injectionMessage);
+        const thoughtsInjection = getPromptInjectionMessage();
+        if (thoughtsInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, thoughtsInjection);
+        }
     };
 }

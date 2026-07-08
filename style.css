@@ -95,3 +95,271 @@
     white-space: pre-wrap;
     opacity: 0.92;
 }
+
+.kw-deathnote {
+    position: fixed;
+    z-index: 9999;
+    width: 92px;
+    height: 132px;
+    touch-action: auto;
+}
+
+.kw-deathnote__stage {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    perspective: 1200px;
+}
+
+.kw-deathnote__cover {
+    width: 100%;
+    height: 100%;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 35%, transparent);
+    border-radius: 0.65rem;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    cursor: grab;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    transform-origin: left center;
+    transform: rotateY(0deg);
+    transition: transform 220ms ease, box-shadow 220ms ease;
+    touch-action: none;
+}
+
+.kw-deathnote--open .kw-deathnote__cover {
+    cursor: pointer;
+    transform: rotateY(-165deg);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.25);
+}
+
+.kw-deathnote__book {
+    position: absolute;
+    top: -10px;
+    left: 20px;
+    width: min(86vw, 780px);
+    max-width: 780px;
+    height: min(70vh, 520px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(10px) scale(0.98);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.kw-deathnote--open {
+    width: min(86vw, 780px);
+    max-width: 780px;
+    height: min(70vh, 520px);
+}
+
+.kw-deathnote--open .kw-deathnote__book {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0) scale(1);
+}
+
+.kw-deathnote__spread {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-radius: 0.9rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 35%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #111) 78%, #000);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+.kw-deathnote__page {
+    height: 100%;
+    position: relative;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor, #111) 90%, #000);
+}
+
+.kw-deathnote__page--left {
+    border-right: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 25%, transparent);
+    display: grid;
+    place-items: center;
+    padding: 0.5rem;
+}
+
+.kw-deathnote__rules {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0.55rem;
+    filter: contrast(1.02) saturate(0.98);
+}
+
+.kw-deathnote__page--right {
+    padding: 0.65rem;
+}
+
+.kw-deathnote__paper {
+    width: 100%;
+    height: 100%;
+    border-radius: 0.75rem;
+    padding: 0.9rem;
+    overflow: auto;
+    color: var(--SmartThemeBodyTextColor, #e6e6e6);
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            rgba(255, 255, 255, 0.03) 0px,
+            rgba(255, 255, 255, 0.03) 28px,
+            rgba(0, 0, 0, 0.08) 29px
+        ),
+        color-mix(in srgb, var(--SmartThemeBodyColor, #111) 92%, #000);
+}
+
+.kw-deathnote__paper-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.85rem;
+}
+
+.kw-deathnote__title {
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.92;
+}
+
+.kw-deathnote__header-controls {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: end;
+}
+
+.kw-deathnote__row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.kw-deathnote__row--compact {
+    font-size: 0.9em;
+    opacity: 0.9;
+}
+
+.kw-deathnote__form {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.kw-deathnote__field {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.kw-deathnote__actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.kw-deathnote__write {
+    flex: 1;
+    min-width: 9rem;
+}
+
+.kw-deathnote__close {
+    min-width: 6rem;
+}
+
+.kw-deathnote__entries-title {
+    font-weight: 600;
+    margin-bottom: 0.45rem;
+    opacity: 0.9;
+}
+
+.kw-deathnote__entries-empty {
+    opacity: 0.75;
+    font-style: italic;
+}
+
+.kw-deathnote__entries-list {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.kw-deathnote__entry {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.55rem;
+    padding: 0.65rem;
+    border-radius: 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 22%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 7%, transparent);
+}
+
+.kw-deathnote__entry--triggered {
+    opacity: 0.78;
+    background: color-mix(in srgb, #7b0000 20%, transparent);
+    border-color: color-mix(in srgb, #7b0000 35%, transparent);
+}
+
+.kw-deathnote__entry-target {
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+}
+
+.kw-deathnote__entry-cause {
+    white-space: pre-wrap;
+    opacity: 0.92;
+}
+
+.kw-deathnote__entry-meta {
+    font-size: 0.9em;
+    opacity: 0.82;
+    margin-top: 0.35rem;
+}
+
+.kw-deathnote__entry-actions {
+    display: flex;
+    align-items: start;
+}
+
+.kw-deathnote__entry-remove {
+    width: 2.1rem;
+    height: 2.1rem;
+    display: grid;
+    place-items: center;
+    padding: 0;
+}
+
+.kw-deathnote__debug {
+    margin-top: 1rem;
+    border-top: 1px dashed color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 25%, transparent);
+    padding-top: 0.85rem;
+}
+
+.kw-deathnote__debug-summary {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.kw-deathnote__debug-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+}
+
+.kw-deathnote__debug-pre {
+    white-space: pre-wrap;
+    font-size: 0.85em;
+    opacity: 0.9;
+    margin: 0;
+    padding: 0.65rem;
+    border-radius: 0.65rem;
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, #888) 6%, transparent);
+    max-height: 12rem;
+    overflow: auto;
+}
