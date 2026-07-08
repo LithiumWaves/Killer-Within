@@ -167,7 +167,7 @@
 
 .kw-deathnote__page-right {
     min-width: 0;
-    padding: 9.5% 5.2% 4% 4.2%;
+    padding: 9.1% 5.2% 4% 4.35%;
     color: #171717;
 }
 
@@ -230,12 +230,16 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    font-family: "Segoe Script", "Segoe Print", "Bradley Hand", "Lucida Handwriting", "Comic Sans MS", cursive;
-    font-size: 20px;
-    line-height: 32px;
-    padding: 0;
+    font-family: "Segoe Print", "Bradley Hand", "Lucida Handwriting", "Segoe Script", "Comic Sans MS", cursive;
+    font-size: 18px;
+    line-height: 31px;
+    padding: 3px 0 0 2px;
     margin: 0;
     caret-color: #111;
+    box-sizing: border-box;
+    letter-spacing: 0.01em;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
 }
 
 .kw-deathnote__actions {
