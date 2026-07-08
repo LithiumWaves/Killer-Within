@@ -72,6 +72,10 @@ async function syncAllLinkedShinigamiMessages() {
     return changed;
 }
 
+export async function syncLinkedShinigamiVisibility() {
+    return await syncAllLinkedShinigamiMessages();
+}
+
 export function setupPresenceExtension() {
     const context = getPresenceContext();
     const eventSource = context?.eventSource;

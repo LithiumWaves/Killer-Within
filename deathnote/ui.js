@@ -1,11 +1,29 @@
-import { FLOATING_ID } from './config.js';
+import { FLOATING_ID, NOTEBOOK_ACTOR_TYPES, NOTEBOOK_USER_ACCESS } from './config.js';
 import {
+    addNotebookToucher,
+    clearNotebookTouchers,
+    createNotebookScrap,
+    destroyNotebook,
+    getChatState,
+    getContext,
+    getDeathNoteInventory,
+    getLinkedShinigami,
     getNotebookPages,
+    getNotebookOwnership,
     getSettings,
+    linkNotebookShinigami,
+    notify,
     persistChatChanges,
+    removeNotebookScrap,
     scheduleSettingsSave,
+    setNotebookOwnership,
     setNotebookPages,
+    setUserNotebookAccess,
+    transferNotebookScrap,
+    transferNotebookTo,
+    unlinkNotebookShinigami,
 } from './core.js';
+import { syncLinkedShinigamiVisibility } from '../presence/index.js';
 
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
@@ -184,6 +202,425 @@ function queueFocusRestore(pageIndex, side, mode = 'end') {
     };
 }
 
+function encodeActorValue(actor) {
+    return encodeURIComponent(JSON.stringify({
+        type: String(actor && actor.type ? actor.type : NOTEBOOK_ACTOR_TYPES.NONE),
+        id: String(actor && actor.id ? actor.id : ''),
+        name: String(actor && actor.name ? actor.name : ''),
+    }));
+}
+
+function decodeActorValue(value, fallback = null) {
+    const source = String(value || '').trim();
+    if (!source) {
+        return fallback;
+    }
+
+    try {
+        const parsed = JSON.parse(decodeURIComponent(source));
+        return {
+            type: String(parsed && parsed.type ? parsed.type : NOTEBOOK_ACTOR_TYPES.NONE).trim().toLowerCase() || NOTEBOOK_ACTOR_TYPES.NONE,
+            id: String(parsed && parsed.id ? parsed.id : '').trim(),
+            name: String(parsed && parsed.name ? parsed.name : '').trim(),
+        };
+    } catch (_error) {
+        return fallback;
+    }
+}
+
+function actorIdentityKey(actor) {
+    const source = actor && typeof actor === 'object' ? actor : {};
+    return [
+        String(source.type || NOTEBOOK_ACTOR_TYPES.NONE).trim().toLowerCase(),
+        String(source.id || '').trim(),
+        String(source.name || '').trim(),
+    ].join('::');
+}
+
+function formatActorLabel(actor) {
+    const source = actor && typeof actor === 'object' ? actor : {};
+    const type = String(source.type || NOTEBOOK_ACTOR_TYPES.NONE).trim().toLowerCase();
+    const name = String(source.name || '').trim();
+
+    if (type === NOTEBOOK_ACTOR_TYPES.USER) {
+        return name || 'User';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI) {
+        return name ? `${name} (Shinigami)` : 'Shinigami';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.WORLD) {
+        return name || 'World';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        return name || 'Character';
+    }
+
+    return name || 'Unknown';
+}
+
+function getAvailableCharacterActors() {
+    const context = getContext();
+    const characters = context && Array.isArray(context.characters) ? context.characters : [];
+    const seen = new Set();
+    const actors = [];
+
+    for (const character of characters) {
+        const actor = {
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: String(character && character.avatar ? character.avatar : '').trim(),
+            name: String(character && character.name ? character.name : '').trim(),
+        };
+        if (!actor.name && !actor.id) {
+            continue;
+        }
+
+        const key = actorIdentityKey(actor);
+        if (seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        actors.push(actor);
+    }
+
+    return actors;
+}
+
+function getActorChoices(options = {}) {
+    const includeUser = options.includeUser !== false;
+    const includeCharacters = options.includeCharacters !== false;
+    const includeWorld = Boolean(options.includeWorld);
+    const currentActor = options.currentActor && typeof options.currentActor === 'object' ? options.currentActor : null;
+    const seen = new Set();
+    const actors = [];
+
+    if (includeUser) {
+        actors.push({
+            type: NOTEBOOK_ACTOR_TYPES.USER,
+            id: '',
+            name: 'User',
+        });
+    }
+
+    if (includeCharacters) {
+        actors.push(...getAvailableCharacterActors());
+    }
+
+    if (includeWorld) {
+        actors.push({
+            type: NOTEBOOK_ACTOR_TYPES.WORLD,
+            id: '',
+            name: 'World',
+        });
+    }
+
+    if (currentActor) {
+        actors.push(currentActor);
+    }
+
+    return actors.filter((actor) => {
+        const key = actorIdentityKey(actor);
+        if (seen.has(key)) {
+            return false;
+        }
+
+        seen.add(key);
+        return true;
+    });
+}
+
+function renderActorOptions(actors, selectedActor, includeEmpty = false, emptyLabel = 'None') {
+    const options = [];
+    if (includeEmpty) {
+        options.push(`<option value="">${escapeHtml(emptyLabel)}</option>`);
+    }
+
+    const selectedKey = selectedActor ? actorIdentityKey(selectedActor) : '';
+    for (const actor of Array.isArray(actors) ? actors : []) {
+        const isSelected = selectedKey && actorIdentityKey(actor) === selectedKey;
+        options.push(`
+            <option value="${escapeHtml(encodeActorValue(actor))}" ${isSelected ? 'selected' : ''}>
+                ${escapeHtml(formatActorLabel(actor))}
+            </option>
+        `);
+    }
+
+    return options.join('');
+}
+
+function formatAccessLabel(access) {
+    if (access === NOTEBOOK_USER_ACCESS.FULL) {
+        return 'Full notebook';
+    }
+
+    if (access === NOTEBOOK_USER_ACCESS.SCRAP) {
+        return 'Scrap only';
+    }
+
+    if (access === NOTEBOOK_USER_ACCESS.TOUCH) {
+        return 'Touch only';
+    }
+
+    return 'No access';
+}
+
+function renderUserAccessOptions(selectedAccess) {
+    const options = [
+        { value: NOTEBOOK_USER_ACCESS.FULL, label: 'Full notebook' },
+        { value: NOTEBOOK_USER_ACCESS.SCRAP, label: 'Scrap only' },
+        { value: NOTEBOOK_USER_ACCESS.TOUCH, label: 'Touch only' },
+        { value: NOTEBOOK_USER_ACCESS.NONE, label: 'None' },
+    ];
+
+    return options.map((option) => {
+        return `
+            <option value="${option.value}" ${selectedAccess === option.value ? 'selected' : ''}>
+                ${option.label}
+            </option>
+        `;
+    }).join('');
+}
+
+function renderNotebookManagerHtml() {
+    const ownership = getNotebookOwnership();
+    const inventory = getDeathNoteInventory();
+    const actors = getActorChoices({
+        currentActor: ownership.holder,
+        includeWorld: true,
+    });
+
+    return `
+        <div class="kw-deathnote-manager">
+            <div class="kw-deathnote-manager__summary">
+                <span><b>Owner:</b> ${escapeHtml(formatActorLabel(ownership.owner))}</span>
+                <span><b>Holder:</b> ${escapeHtml(formatActorLabel(ownership.holder))}</span>
+                <span><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
+                <span><b>Status:</b> ${inventory.notebook.destroyed ? 'Destroyed / missing' : 'In play'}</span>
+            </div>
+            <div class="kw-deathnote-manager__grid">
+                <label class="killer-within-settings__field">
+                    <span>Notebook owner</span>
+                    <select id="kw-deathnote-owner" class="text_pole">
+                        ${renderActorOptions(actors, ownership.owner)}
+                    </select>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Current holder</span>
+                    <select id="kw-deathnote-holder" class="text_pole">
+                        ${renderActorOptions(actors, ownership.holder)}
+                    </select>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>User access</span>
+                    <select id="kw-deathnote-user-access" class="text_pole">
+                        ${renderUserAccessOptions(ownership.userAccess)}
+                    </select>
+                </label>
+            </div>
+            <div class="kw-deathnote-manager__actions">
+                <button
+                    type="button"
+                    id="kw-deathnote-toggle-destroyed"
+                    class="menu_button"
+                >${inventory.notebook.destroyed ? 'Restore notebook' : 'Destroy notebook'}</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderLinkManagerHtml() {
+    const linked = getLinkedShinigami();
+    const actors = getActorChoices({
+        includeUser: false,
+        includeCharacters: true,
+        currentActor: linked.active ? {
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: linked.avatar || linked.actor.id,
+            name: linked.actor.name,
+        } : null,
+    });
+    const selectedActor = linked.active ? {
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: linked.avatar || linked.actor.id,
+        name: linked.actor.name,
+    } : null;
+
+    return `
+        <div class="kw-deathnote-manager">
+            <div class="kw-deathnote-manager__summary">
+                <span><b>Linked Shinigami:</b> ${escapeHtml(linked.active ? (linked.actor.name || linked.avatar || 'Linked') : 'None')}</span>
+            </div>
+            <div class="kw-deathnote-manager__actions">
+                <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                    <span>Character card to link</span>
+                    <select id="kw-deathnote-shinigami-select" class="text_pole">
+                        ${renderActorOptions(actors, selectedActor, true, 'Select a character')}
+                    </select>
+                </label>
+                <button type="button" id="kw-deathnote-link-shinigami" class="menu_button">Link</button>
+                <button type="button" id="kw-deathnote-unlink-shinigami" class="menu_button" ${linked.active ? '' : 'disabled'}>Clear link</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderScrapManagerHtml() {
+    const inventory = getDeathNoteInventory();
+    const actors = getActorChoices({
+        currentActor: inventory.scraps.length ? inventory.scraps[0].holder : null,
+        includeWorld: true,
+    });
+    const scraps = inventory.scraps.filter((scrap) => scrap && scrap.active);
+
+    if (!scraps.length) {
+        return `
+            <div class="kw-deathnote-manager">
+                <div class="kw-memory-manager__empty">No active scraps.</div>
+                <div class="kw-deathnote-manager__actions">
+                    <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                        <span>New scrap holder</span>
+                        <select id="kw-deathnote-new-scrap-holder" class="text_pole">
+                            ${renderActorOptions(actors, null)}
+                        </select>
+                    </label>
+                    <button type="button" id="kw-deathnote-create-scrap" class="menu_button">Create scrap</button>
+                </div>
+            </div>
+        `;
+    }
+
+    const rows = scraps.map((scrap) => {
+        const choices = getActorChoices({
+            currentActor: scrap.holder,
+            includeWorld: true,
+        });
+        return `
+            <div class="kw-deathnote-item">
+                <div class="kw-deathnote-item__meta">
+                    <b>${escapeHtml(scrap.label)}</b>
+                    <span>${escapeHtml(scrap.noteText || 'Blank scrap')}</span>
+                </div>
+                <select
+                    class="text_pole kw-deathnote-scrap-holder"
+                    data-scrap-id="${escapeHtml(scrap.id)}"
+                >
+                    ${renderActorOptions(choices, scrap.holder)}
+                </select>
+                <button
+                    type="button"
+                    class="menu_button kw-deathnote-remove-scrap"
+                    data-scrap-id="${escapeHtml(scrap.id)}"
+                >Remove</button>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="kw-deathnote-manager">
+            <div class="kw-deathnote-manager__list">${rows}</div>
+            <div class="kw-deathnote-manager__actions">
+                <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                    <span>New scrap holder</span>
+                    <select id="kw-deathnote-new-scrap-holder" class="text_pole">
+                        ${renderActorOptions(actors, null)}
+                    </select>
+                </label>
+                <button type="button" id="kw-deathnote-create-scrap" class="menu_button">Create scrap</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderToucherManagerHtml() {
+    const state = getChatState();
+    const touchers = state.inventory.touchers.filter((entry) => entry && entry.active);
+    const derived = getChatState().inventory.touchers.filter((entry) => entry && entry.active);
+    const actors = getActorChoices({
+        includeWorld: false,
+    });
+    const currentTouchers = getNotebookTouchersSummary();
+    const manualRows = touchers.length
+        ? touchers.map((toucher) => {
+            return `
+                <div class="kw-deathnote-item">
+                    <div class="kw-deathnote-item__meta">
+                        <b>${escapeHtml(formatActorLabel(toucher.actor))}</b>
+                        <span>${escapeHtml(String(toucher.source || 'manual_touch'))}</span>
+                    </div>
+                </div>
+            `;
+        }).join('')
+        : '<div class="kw-memory-manager__empty">No explicit manual touchers.</div>';
+
+    return `
+        <div class="kw-deathnote-manager">
+            <div class="kw-deathnote-manager__summary">
+                <span><b>Current viewers:</b> ${escapeHtml(currentTouchers || 'None')}</span>
+            </div>
+            <div class="kw-deathnote-manager__list">${manualRows}</div>
+            <div class="kw-deathnote-manager__actions">
+                <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                    <span>Add manual toucher</span>
+                    <select id="kw-deathnote-new-toucher" class="text_pole">
+                        ${renderActorOptions(actors, null, true, 'Select a character')}
+                    </select>
+                </label>
+                <button type="button" id="kw-deathnote-add-toucher" class="menu_button">Add toucher</button>
+                <button type="button" id="kw-deathnote-clear-touchers" class="menu_button" ${derived.length ? '' : 'disabled'}>Clear manual touchers</button>
+            </div>
+        </div>
+    `;
+}
+
+function getNotebookTouchersSummary() {
+    const state = getChatState();
+    const touchers = state && state.inventory && Array.isArray(state.inventory.touchers) ? state.inventory.touchers.filter((entry) => entry && entry.active) : [];
+    const inventory = getDeathNoteInventory();
+    const derived = [];
+
+    if (inventory.notebook && inventory.notebook.exists) {
+        derived.push(formatActorLabel(inventory.notebook.holder));
+    }
+
+    for (const scrap of inventory.scraps) {
+        if (!scrap || !scrap.active) {
+            continue;
+        }
+
+        derived.push(formatActorLabel(scrap.holder));
+    }
+
+    for (const toucher of touchers) {
+        derived.push(formatActorLabel(toucher.actor));
+    }
+
+    return Array.from(new Set(derived.filter(Boolean))).join(', ');
+}
+
+async function commitInventoryMutation(mutate, successMessage = '') {
+    try {
+        const result = await mutate();
+        if (!result) {
+            return false;
+        }
+
+        await persistChatChanges();
+        await syncLinkedShinigamiVisibility();
+        refreshDeathNoteUi();
+        if (successMessage) {
+            notify('success', successMessage);
+        }
+        return true;
+    } catch (error) {
+        console.error('[killer_within_deathnote] Inventory manager action failed', error);
+        notify('error', 'Death Note manager action failed.');
+        return false;
+    }
+}
+
 function getSettingsHost() {
     return $('#extensions_settings2, #extensions_settings').first();
 }
@@ -191,6 +628,10 @@ function getSettingsHost() {
 function syncSettingsUi() {
     const settings = getSettings();
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
+    $('#kw-deathnote-notebook-manager').html(renderNotebookManagerHtml());
+    $('#kw-deathnote-link-manager').html(renderLinkManagerHtml());
+    $('#kw-deathnote-scrap-manager').html(renderScrapManagerHtml());
+    $('#kw-deathnote-toucher-manager').html(renderToucherManagerHtml());
 }
 
 function bindSettingsUi() {
@@ -200,6 +641,148 @@ function bindSettingsUi() {
         scheduleSettingsSave();
         refreshDeathNoteUi();
     });
+
+    $(document)
+        .off('change', '#kw-deathnote-owner')
+        .on('change', '#kw-deathnote-owner', async (event) => {
+            const ownership = getNotebookOwnership();
+            const actor = decodeActorValue($(event.currentTarget).val(), ownership.owner);
+            await commitInventoryMutation(() => {
+                return setNotebookOwnership({
+                    owner: actor,
+                    holder: ownership.holder,
+                    userAccess: ownership.userAccess,
+                    lastTransferredAt: ownership.lastTransferredAt,
+                });
+            }, 'Notebook owner updated.');
+        })
+        .off('change', '#kw-deathnote-holder')
+        .on('change', '#kw-deathnote-holder', async (event) => {
+            const ownership = getNotebookOwnership();
+            const inventory = getDeathNoteInventory();
+            const actor = decodeActorValue($(event.currentTarget).val(), ownership.holder);
+            await commitInventoryMutation(() => {
+                return transferNotebookTo(actor, {
+                    owner: ownership.owner,
+                    userAccess: ownership.userAccess,
+                    exists: !inventory.notebook.destroyed,
+                    reason: `Notebook transferred to ${actor.name || actor.type} via manager.`,
+                });
+            }, 'Notebook holder updated.');
+        })
+        .off('change', '#kw-deathnote-user-access')
+        .on('change', '#kw-deathnote-user-access', async (event) => {
+            const nextAccess = String($(event.currentTarget).val() || NOTEBOOK_USER_ACCESS.NONE).trim().toLowerCase();
+            await commitInventoryMutation(() => setUserNotebookAccess(nextAccess, {
+                reason: `User access changed to ${nextAccess} via manager.`,
+            }), 'User access updated.');
+        })
+        .off('click', '#kw-deathnote-toggle-destroyed')
+        .on('click', '#kw-deathnote-toggle-destroyed', async (event) => {
+            event.preventDefault();
+            const ownership = getNotebookOwnership();
+            const inventory = getDeathNoteInventory();
+            if (inventory.notebook.destroyed) {
+                await commitInventoryMutation(() => {
+                    return transferNotebookTo(ownership.holder, {
+                        owner: ownership.owner,
+                        userAccess: ownership.userAccess,
+                        exists: true,
+                        reason: 'Notebook restored via manager.',
+                    });
+                }, 'Notebook restored.');
+                return;
+            }
+
+            await commitInventoryMutation(() => destroyNotebook({
+                reason: 'Notebook destroyed via manager.',
+            }), 'Notebook destroyed.');
+        })
+        .off('click', '#kw-deathnote-link-shinigami')
+        .on('click', '#kw-deathnote-link-shinigami', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($('#kw-deathnote-shinigami-select').val(), null);
+            if (!actor) {
+                notify('warning', 'Select a character to link as the notebook Shinigami.');
+                return;
+            }
+
+            await commitInventoryMutation(() => {
+                return linkNotebookShinigami({
+                    type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
+                    id: actor.id,
+                    name: actor.name,
+                }, {
+                    avatar: actor.id,
+                    name: actor.name,
+                    reason: `${actor.name || 'Selected character'} linked via manager.`,
+                });
+            }, 'Linked Shinigami updated.');
+        })
+        .off('click', '#kw-deathnote-unlink-shinigami')
+        .on('click', '#kw-deathnote-unlink-shinigami', async (event) => {
+            event.preventDefault();
+            await commitInventoryMutation(() => unlinkNotebookShinigami({
+                reason: 'Linked Shinigami cleared via manager.',
+            }), 'Linked Shinigami cleared.');
+        })
+        .off('click', '#kw-deathnote-create-scrap')
+        .on('click', '#kw-deathnote-create-scrap', async (event) => {
+            event.preventDefault();
+            const holder = decodeActorValue($('#kw-deathnote-new-scrap-holder').val(), getNotebookOwnership().holder);
+            await commitInventoryMutation(() => createNotebookScrap({
+                holder,
+                label: `Scrap ${getDeathNoteInventory().scraps.filter((scrap) => scrap && scrap.active).length + 1}`,
+                reason: `Scrap created for ${holder.name || holder.type} via manager.`,
+            }), 'Notebook scrap created.');
+        })
+        .off('change', '.kw-deathnote-scrap-holder')
+        .on('change', '.kw-deathnote-scrap-holder', async (event) => {
+            const scrapId = String($(event.currentTarget).data('scrapId') || '').trim();
+            const holder = decodeActorValue($(event.currentTarget).val(), null);
+            if (!scrapId || !holder) {
+                return;
+            }
+
+            await commitInventoryMutation(() => transferNotebookScrap(scrapId, holder, {
+                reason: `${holder.name || holder.type} now holds ${scrapId}.`,
+            }), 'Scrap holder updated.');
+        })
+        .off('click', '.kw-deathnote-remove-scrap')
+        .on('click', '.kw-deathnote-remove-scrap', async (event) => {
+            event.preventDefault();
+            const scrapId = String($(event.currentTarget).data('scrapId') || '').trim();
+            if (!scrapId) {
+                return;
+            }
+
+            await commitInventoryMutation(() => removeNotebookScrap(scrapId, {
+                reason: `${scrapId} removed via manager.`,
+            }), 'Scrap removed.');
+        })
+        .off('click', '#kw-deathnote-add-toucher')
+        .on('click', '#kw-deathnote-add-toucher', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($('#kw-deathnote-new-toucher').val(), null);
+            if (!actor) {
+                notify('warning', 'Select a character to add as a toucher.');
+                return;
+            }
+
+            await commitInventoryMutation(() => addNotebookToucher(actor, {
+                source: 'manual_touch',
+                itemId: getDeathNoteInventory().notebook.itemId,
+                reason: `${actor.name || actor.type} manually marked as touching the Death Note.`,
+            }), 'Manual toucher added.');
+        })
+        .off('click', '#kw-deathnote-clear-touchers')
+        .on('click', '#kw-deathnote-clear-touchers', async (event) => {
+            event.preventDefault();
+            await commitInventoryMutation(() => clearNotebookTouchers({
+                source: 'manual_touch',
+                reason: 'Manual Death Note touchers cleared via manager.',
+            }), 'Manual touchers cleared.');
+        });
 }
 
 function renderSettingsPanel() {
@@ -225,6 +808,22 @@ function renderSettingsPanel() {
                 <div class="killer-within-settings__field">
                     <span>Notebook defaults</span>
                     <small>If a cause is omitted, Death Note entries default to heart attack. If time is omitted, they trigger on the next assistant message.</small>
+                </div>
+                <div class="killer-within-settings__field">
+                    <span>Notebook inventory</span>
+                    <div id="kw-deathnote-notebook-manager"></div>
+                </div>
+                <div class="killer-within-settings__field">
+                    <span>Linked Shinigami</span>
+                    <div id="kw-deathnote-link-manager"></div>
+                </div>
+                <div class="killer-within-settings__field">
+                    <span>Notebook scraps</span>
+                    <div id="kw-deathnote-scrap-manager"></div>
+                </div>
+                <div class="killer-within-settings__field">
+                    <span>Touchers and visibility</span>
+                    <div id="kw-deathnote-toucher-manager"></div>
                 </div>
             </div>
         </div>
