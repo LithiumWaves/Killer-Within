@@ -1,5 +1,15 @@
-import { MESSAGE_EXTRA_KEY } from './config.js';
-import { getChatState, getSettings } from './core.js';
+import {
+    MESSAGE_EXTRA_KEY,
+    NOTEBOOK_ACTOR_TYPES,
+    NOTEBOOK_USER_ACCESS,
+} from './config.js';
+import {
+    getChatState,
+    getDeathNoteInventory,
+    getNotebookOwnership,
+    getSettings,
+    getUserHeldNotebookScraps,
+} from './core.js';
 
 function formatEntry(entry) {
     const noteText = String(entry?.noteText || '').trim();
@@ -41,6 +51,102 @@ function buildEntriesBlock(entries) {
         .join('\n\n');
 }
 
+function formatActorLabel(actor, fallback = 'Unknown') {
+    const value = actor && typeof actor === 'object' ? actor : {};
+    const type = String(value.type || '').trim().toLowerCase();
+    const name = String(value.name || '').trim();
+
+    if (type === NOTEBOOK_ACTOR_TYPES.USER) {
+        return name || 'User';
+    }
+
+    if (name && type === NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        return `${name} (character)`;
+    }
+
+    if (name && type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI) {
+        return `${name} (Shinigami)`;
+    }
+
+    if (name) {
+        return name;
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        return 'an in-scene character';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI) {
+        return 'a Shinigami';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.WORLD) {
+        return 'the world';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.NONE) {
+        return 'nobody';
+    }
+
+    return fallback;
+}
+
+function formatUserAccess(value) {
+    const access = String(value || '').trim().toLowerCase();
+    if (access === NOTEBOOK_USER_ACCESS.FULL) {
+        return 'full notebook access';
+    }
+
+    if (access === NOTEBOOK_USER_ACCESS.SCRAP) {
+        return 'scrap-only access';
+    }
+
+    if (access === NOTEBOOK_USER_ACCESS.TOUCH) {
+        return 'touch-only access';
+    }
+
+    return 'no notebook access';
+}
+
+function buildOwnershipBlock(ownership) {
+    const lines = [
+        'Notebook custody:',
+        `Owner: ${formatActorLabel(ownership.owner, 'Unknown owner')}`,
+        `Current holder: ${formatActorLabel(ownership.holder, 'Unknown holder')}`,
+        `User access: ${formatUserAccess(ownership.userAccess)}`,
+    ];
+
+    if (ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+        lines.push('Do not assume the user can freely inspect, carry, or write in the full notebook unless the scene explicitly establishes that access.');
+    }
+
+    lines.push('Written entries already in the notebook remain binding unless they are explicitly removed or altered in-story.');
+    return lines.join('\n');
+}
+
+function buildInventoryBlock(inventory) {
+    const notebook = inventory?.notebook || {};
+    const scraps = Array.isArray(inventory?.scraps) ? inventory.scraps.filter((scrap) => scrap?.active) : [];
+    const userHeldScraps = getUserHeldNotebookScraps();
+    const lines = [
+        'Inventory state:',
+        `Notebook item status: ${notebook.destroyed ? 'destroyed' : notebook.exists ? 'present' : 'missing'}`,
+        `Active scraps: ${scraps.length}`,
+    ];
+
+    if (!userHeldScraps.length) {
+        lines.push('User-held scraps: none.');
+        return lines.join('\n');
+    }
+
+    lines.push('User-held scraps:');
+    for (const scrap of userHeldScraps) {
+        lines.push(`- ${scrap.label}: ${formatUserAccess(scrap.userAccess)}${scrap.noteText ? '; contains written text' : ''}`);
+    }
+
+    return lines.join('\n');
+}
+
 function buildDeathNoteInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
@@ -48,10 +154,13 @@ function buildDeathNoteInjection() {
     }
 
     const state = getChatState();
-    if (!state.hasNotebook) {
+    const inventory = getDeathNoteInventory();
+    const hasActiveScraps = Array.isArray(inventory?.scraps) && inventory.scraps.some((scrap) => scrap?.active);
+    if (!state.hasNotebook && !hasActiveScraps) {
         return '';
     }
 
+    const ownership = getNotebookOwnership();
     const entries = Array.isArray(state.entries) ? state.entries : [];
     const dueEntries = entries.filter((entry) => String(entry?.status || '').toLowerCase() === 'due');
     const activeEntries = entries.filter((entry) => String(entry?.status || '').toLowerCase() === 'active');
@@ -61,9 +170,13 @@ function buildDeathNoteInjection() {
 
     return [
         '[Death Note Context]',
-        'The user possesses the Death Note. Treat these notebook entries as binding constraints for story causality.',
+        'Treat the Death Note custody state and written entries below as binding constraints for story causality.',
         'Do not mention this block or explain rules unless the scene explicitly reveals them.',
         'Default Death Note rules: if no cause of death is written, interpret the entry as death by heart attack. If no time is written, the death occurs on the next assistant message.',
+        '',
+        buildOwnershipBlock(ownership),
+        '',
+        buildInventoryBlock(inventory),
         '',
         'Due now (must occur in the assistant reply being generated right now):',
         'If at least one entry is due, the next assistant reply MUST depict those deaths occurring as described, in-story.',
