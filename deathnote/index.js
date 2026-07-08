@@ -1,4 +1,5 @@
 import {
+    autoLearnCharacterNameFromMessage,
     autoTrackDeathNoteMemoryMessage,
     getSettings,
     reconcileEntriesFromNotebookText,
@@ -18,15 +19,16 @@ export function setupDeathNoteExtension() {
             onAssistantMessage: resolveDueEntriesForAssistantMessage,
             onMessageAdded: async (messageIndex, details = {}) => {
                 const assistantResult = details && details.assistantResult ? details.assistantResult : null;
-                const changed = autoTrackDeathNoteMemoryMessage(messageIndex, {
+                const memoryTracked = autoTrackDeathNoteMemoryMessage(messageIndex, {
                     resolvedEntries: assistantResult && Array.isArray(assistantResult.resolvedEntries)
                         ? assistantResult.resolvedEntries
                         : [],
                 });
-                if (changed) {
+                const nameLearned = autoLearnCharacterNameFromMessage(messageIndex);
+                if (memoryTracked) {
                     await syncLinkedShinigamiVisibility();
                 }
-                return changed;
+                return memoryTracked || nameLearned;
             },
             onUiRefresh: refreshDeathNoteUi,
         });

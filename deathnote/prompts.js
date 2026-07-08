@@ -204,8 +204,10 @@ function buildNameKnowledgeInjection() {
     const lines = [
         '[Name Knowledge Context]',
         'Some character names are not yet known to the user.',
-        'For any character marked HIDDEN below, do not casually reveal or confirm their true name in user-facing dialogue, narration, labels, or exposition until the scene explicitly establishes that the user learned it.',
-        'When referring to a hidden-name character from the user-facing perspective, prefer the masked label or an in-scene descriptor instead.',
+        'For any character marked HIDDEN below, do not reveal, confirm, or casually use their true name in user-facing dialogue, narration, labels, or exposition until the scene explicitly establishes that the user learned it.',
+        'When referring to a hidden-name character from the user-facing perspective, use the masked label below or a descriptive in-scene reference instead.',
+        'Third-person narration that merely contains a true name is not itself a valid introduction. Only explicit direct introductions, such as "I am <name>" or "My name is <name>", count as learning that name.',
+        'A hidden true name must not appear in narration like "<true name> smiled" before it is learned.',
         '',
         'Character name knowledge:',
     ];

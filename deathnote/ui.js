@@ -6,9 +6,11 @@ import {
     destroyNotebook,
     forgetCharacterName,
     getActorDisplayName,
+    getCharacterActorForMessage,
     getChatState,
     getCharacterNameDirectory,
     getContext,
+    getCurrentChatCharacterActors,
     getDeathNoteInventory,
     getLinkedShinigami,
     getNotebookPages,
@@ -272,7 +274,7 @@ function renderNameKnowledgeManagerHtml() {
     if (!directory.length) {
         return `
             <div class="kw-deathnote-manager">
-                <div class="kw-memory-manager__empty">No character cards are available in this chat.</div>
+                <div class="kw-memory-manager__empty">No current chat participants are available for name discovery.</div>
             </div>
         `;
     }
@@ -297,7 +299,8 @@ function renderNameKnowledgeManagerHtml() {
     return `
         <div class="kw-deathnote-manager">
             <div class="kw-deathnote-manager__summary">
-                <span><b>Unknown names stay scrambled</b> until you learn them for story purposes.</span>
+                <span><b>Unknown names stay scrambled</b> until the user explicitly learns them.</span>
+                <span><b>Scope:</b> Current chat participants only</span>
             </div>
             <div class="kw-deathnote-manager__list">${rows}</div>
         </div>
@@ -335,6 +338,64 @@ function getMessageAuthorLabel(name) {
     }
 
     return rawName;
+}
+
+function getMessageNameHost($message) {
+    const selectors = [
+        '.name_text',
+        '.mes_name',
+        '.mes_name_text',
+        '.avatar-name',
+        '.mes_header .name',
+    ];
+
+    for (const selector of selectors) {
+        const host = $message.find(selector).first();
+        if (host.length) {
+            return host;
+        }
+    }
+
+    return $();
+}
+
+function renderMaskedChatMessageNames() {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+
+    $('.mes').each((_, element) => {
+        const $message = $(element);
+        const mesIdRaw = $message.attr('mesid') ?? $message.data('mesid');
+        const mesId = Number(mesIdRaw);
+        if (!Number.isInteger(mesId) || mesId < 0 || mesId >= chat.length) {
+            return;
+        }
+
+        const message = chat[mesId];
+        const actor = getCharacterActorForMessage(message);
+        const host = getMessageNameHost($message);
+        if (!host.length) {
+            return;
+        }
+
+        const storedOriginal = String(host.attr('data-kw-original-name') || '').trim();
+        const original = storedOriginal || String(host.text() || '').trim();
+        if (!storedOriginal && original) {
+            host.attr('data-kw-original-name', original);
+        }
+
+        if (!actor) {
+            if (storedOriginal && host.text().trim() !== storedOriginal) {
+                host.text(storedOriginal);
+            }
+            return;
+        }
+
+        const displayName = getActorDisplayName(actor, original || 'Character');
+        if (displayName && host.text().trim() !== displayName) {
+            host.text(displayName);
+        }
+    });
 }
 
 function renderMemoryManagerHtml() {
@@ -375,31 +436,7 @@ function renderMemoryManagerHtml() {
 }
 
 function getAvailableCharacterActors() {
-    const context = getContext();
-    const characters = context && Array.isArray(context.characters) ? context.characters : [];
-    const seen = new Set();
-    const actors = [];
-
-    for (const character of characters) {
-        const actor = {
-            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
-            id: String(character && character.avatar ? character.avatar : '').trim(),
-            name: String(character && character.name ? character.name : '').trim(),
-        };
-        if (!actor.name && !actor.id) {
-            continue;
-        }
-
-        const key = actorIdentityKey(actor);
-        if (seen.has(key)) {
-            continue;
-        }
-
-        seen.add(key);
-        actors.push(actor);
-    }
-
-    return actors;
+    return getCurrentChatCharacterActors();
 }
 
 function getActorChoices(options = {}) {
@@ -1568,6 +1605,7 @@ export function refreshDeathNoteUi() {
     renderSettingsPanel();
     syncSettingsUi();
     ensureWidget();
+    requestAnimationFrame(() => renderMaskedChatMessageNames());
 }
 
 export function setupDeathNoteUi() {
@@ -1575,5 +1613,6 @@ export function setupDeathNoteUi() {
     syncSettingsUi();
     ensureWidget();
     bindWidgetUi();
+    requestAnimationFrame(() => renderMaskedChatMessageNames());
 }
 

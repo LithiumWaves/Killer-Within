@@ -185,6 +185,10 @@ function normalizeKnowledgeKey(value) {
     return String(value || '').trim().toLowerCase();
 }
 
+function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function normalizeTransferredAt(value) {
     if (value === null || value === undefined || value === '') {
         return null;
@@ -220,6 +224,23 @@ function getActorKnowledgeKey(actor) {
     const name = normalizeKnowledgeKey(normalized.name);
     if (name) {
         return `name:${name}`;
+    }
+
+    return '';
+}
+
+function resolveContextMacro(name) {
+    const context = getContext();
+    const macro = `{{${String(name || '').trim()}}}`;
+    try {
+        if (typeof context?.substituteParams === 'function') {
+            const resolved = String(context.substituteParams(macro) || '').trim();
+            if (resolved && resolved !== macro) {
+                return resolved;
+            }
+        }
+    } catch (_error) {
+        // Ignore macro resolution failures and fall back to empty.
     }
 
     return '';
@@ -352,6 +373,145 @@ function getCharacterRosterActors() {
     }
 
     return roster;
+}
+
+function getMessageForceAvatarFile(message) {
+    const raw = String(message && message.force_avatar ? message.force_avatar : '').trim();
+    if (!raw) {
+        return '';
+    }
+
+    try {
+        const url = new URL(raw, globalThis.window && globalThis.window.location ? globalThis.window.location.origin : 'http://localhost');
+        return String(url.searchParams.get('file') || '').trim();
+    } catch (_error) {
+        return '';
+    }
+}
+
+function matchRosterActor(roster, identity) {
+    const search = normalizeKnowledgeKey(identity);
+    if (!search) {
+        return null;
+    }
+
+    return roster.find((actor) => {
+        const actorName = normalizeKnowledgeKey(actor && actor.name ? actor.name : '');
+        const actorId = normalizeKnowledgeKey(actor && actor.id ? actor.id : '');
+        return actorName === search || actorId === search;
+    }) || null;
+}
+
+function collectCurrentChatActors() {
+    const context = getContext();
+    const roster = getCharacterRosterActors();
+    const collected = [];
+    const seen = new Set();
+
+    const pushActor = (actor) => {
+        const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+        const key = getActorIdentityKey(normalized);
+        if (!key || seen.has(key) || (!normalized.name && !normalized.id)) {
+            return;
+        }
+
+        seen.add(key);
+        collected.push(normalized);
+    };
+
+    const activeCharacter = resolveContextMacro('char');
+    const activeMatch = matchRosterActor(roster, activeCharacter);
+    if (activeMatch) {
+        pushActor(activeMatch);
+    }
+
+    const groupId = context && context.groupId != null ? String(context.groupId) : '';
+    const groups = context && Array.isArray(context.groups) ? context.groups : [];
+    const activeGroup = groups.find((group) => String(group && group.id != null ? group.id : '') === groupId);
+    const groupMembers = activeGroup && Array.isArray(activeGroup.members) ? activeGroup.members : [];
+    for (const member of groupMembers) {
+        if (typeof member === 'string') {
+            const match = matchRosterActor(roster, member);
+            if (match) {
+                pushActor(match);
+            }
+            continue;
+        }
+
+        const candidate = member && typeof member === 'object' ? member : {};
+        const match = matchRosterActor(roster, candidate.avatar || candidate.id || candidate.name || '');
+        if (match) {
+            pushActor(match);
+            continue;
+        }
+
+        pushActor({
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: String(candidate.avatar || candidate.id || '').trim(),
+            name: String(candidate.name || '').trim(),
+        });
+    }
+
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    for (const message of chat) {
+        if (!message || message.is_user || message.is_system) {
+            continue;
+        }
+
+        const searches = [
+            String(message.original_avatar || '').trim(),
+            getMessageForceAvatarFile(message),
+            String(message.name || '').trim(),
+        ];
+
+        let matched = null;
+        for (const search of searches) {
+            matched = matchRosterActor(roster, search);
+            if (matched) {
+                pushActor(matched);
+                break;
+            }
+        }
+
+        if (matched) {
+            continue;
+        }
+
+        pushActor({
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: String(message.original_avatar || getMessageForceAvatarFile(message) || '').trim(),
+            name: String(message.name || '').trim(),
+        });
+    }
+
+    return collected;
+}
+
+function buildFlexibleNamePattern(name) {
+    return escapeRegExp(String(name || '').trim()).replace(/\s+/g, '\\s+');
+}
+
+function getExplicitSelfIntroductionReason(message, actor) {
+    const body = String(message && message.mes ? message.mes : '').trim();
+    const name = String(actor && actor.name ? actor.name : '').trim();
+    if (!body || !name) {
+        return '';
+    }
+
+    const namePattern = buildFlexibleNamePattern(name);
+    const patterns = [
+        new RegExp(`\\b(?:i\\s+am|i'm|im)\\s+${namePattern}\\b`, 'i'),
+        new RegExp(`\\bmy\\s+name\\s+is\\s+${namePattern}\\b`, 'i'),
+        new RegExp(`\\b(?:you\\s+can\\s+)?call\\s+me\\s+${namePattern}\\b`, 'i'),
+    ];
+
+    for (const pattern of patterns) {
+        if (pattern.test(body)) {
+            return 'self_introduction';
+        }
+    }
+
+    return '';
 }
 
 function normalizeInventoryScrap(value, index, fallbackOwner, fallbackHolder) {
@@ -753,7 +913,7 @@ export function getActorDisplayName(actor, fallback = 'Unknown') {
 }
 
 export function getCharacterNameDirectory() {
-    const roster = getCharacterRosterActors();
+    const roster = collectCurrentChatActors();
     return roster.map((actor) => {
         return {
             actor,
@@ -763,6 +923,37 @@ export function getCharacterNameDirectory() {
             trueName: String(actor.name || '').trim(),
         };
     });
+}
+
+export function getCurrentChatCharacterActors() {
+    return collectCurrentChatActors();
+}
+
+export function getCharacterActorForMessage(message) {
+    if (!message || message.is_user || message.is_system) {
+        return null;
+    }
+
+    const roster = collectCurrentChatActors();
+    const searches = [
+        String(message.original_avatar || '').trim(),
+        getMessageForceAvatarFile(message),
+        String(message.name || '').trim(),
+    ];
+
+    for (const search of searches) {
+        const match = matchRosterActor(roster, search);
+        if (match) {
+            return match;
+        }
+    }
+
+    const fallback = normalizeActorRef({
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: String(message.original_avatar || getMessageForceAvatarFile(message) || '').trim(),
+        name: String(message.name || '').trim(),
+    }, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    return fallback.name || fallback.id ? fallback : null;
 }
 
 export function learnCharacterName(actor, options = {}) {
@@ -829,6 +1020,32 @@ export function forgetCharacterName(actor, options = {}) {
         })(),
     });
     return true;
+}
+
+export function autoLearnCharacterNameFromMessage(messageIndex, options = {}) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    const actor = getCharacterActorForMessage(message);
+    if (!actor || isActorNameKnown(actor)) {
+        return false;
+    }
+
+    const reason = getExplicitSelfIntroductionReason(message, actor);
+    if (!reason) {
+        return false;
+    }
+
+    return learnCharacterName(actor, {
+        source: 'auto',
+        timestamp: options.timestamp,
+        reason: `${actor.name || 'Character'} explicitly introduced themself in dialogue.`,
+    });
 }
 
 export function getDeathNoteInventory() {
