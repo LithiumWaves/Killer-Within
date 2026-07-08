@@ -105,7 +105,7 @@
     --kw-dn-font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
     --kw-dn-font-size: 18px;
     --kw-dn-line-height: 31px;
-    --kw-dn-editor-top: 10px;
+    --kw-dn-editor-top: 12px;
     --kw-dn-editor-left: 4px;
     --kw-dn-paper-bg: #f6f6f2;
     --kw-dn-rule-color: rgba(114, 145, 171, 0.34);
@@ -116,7 +116,7 @@
     --kw-dn-font-family: "Segoe Script", "Lucida Handwriting", "Bradley Hand", cursive;
     --kw-dn-font-size: 19px;
     --kw-dn-line-height: 31px;
-    --kw-dn-editor-top: 8px;
+    --kw-dn-editor-top: 10px;
     --kw-dn-editor-left: 3px;
 }
 
