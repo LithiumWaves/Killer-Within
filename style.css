@@ -99,8 +99,8 @@
 .kw-deathnote {
     position: fixed;
     z-index: 2147483647;
-    width: 220px;
-    height: 310px;
+    width: 240px;
+    height: 340px;
     touch-action: auto;
     --kw-dn-font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
     --kw-dn-font-size: 18px;
@@ -178,22 +178,6 @@
     pointer-events: none;
 }
 
-.kw-deathnote__cover::after {
-    content: "";
-    position: absolute;
-    top: 6px;
-    right: -8px;
-    width: 10px;
-    height: calc(100% - 12px);
-    background:
-        linear-gradient(90deg, rgba(255, 255, 255, 0.85), rgba(230, 230, 230, 0.92));
-    box-shadow:
-        inset 1px 0 0 rgba(0, 0, 0, 0.08),
-        inset -1px 0 0 rgba(255, 255, 255, 0.45);
-    opacity: 0.72;
-    pointer-events: none;
-}
-
 .kw-deathnote__cover-art {
     position: absolute;
     inset: 0;
@@ -202,7 +186,7 @@
     display: block;
     object-fit: contain;
     object-position: center;
-    padding: 6px 10px 6px 2px;
+    padding: 8px 12px 8px 4px;
     box-sizing: border-box;
     filter:
         contrast(1.04)

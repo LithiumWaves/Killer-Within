@@ -9,8 +9,8 @@ import {
 
 const PAGE_PLACEHOLDER = '[NAME] [METHOD OF DEATH] [TIME]';
 const PAGE_TURN_MS = 240;
-const CLOSED_WIDTH = 220;
-const CLOSED_HEIGHT = 310;
+const CLOSED_WIDTH = 240;
+const CLOSED_HEIGHT = 340;
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
