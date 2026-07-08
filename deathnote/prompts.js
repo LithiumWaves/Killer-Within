@@ -5,7 +5,6 @@ import {
 } from './config.js';
 import {
     getContext,
-    getCharacterNameDirectory,
     getChatState,
     getDeathNoteInventory,
     getNotebookOwnership,
@@ -193,42 +192,6 @@ function buildDeathNoteInjection() {
     ].join('\n');
 }
 
-function buildNameKnowledgeInjection() {
-    const settings = getSettings();
-    if (!settings.enabled) {
-        return '';
-    }
-
-    const directory = getCharacterNameDirectory();
-    const hidden = directory.filter((entry) => !entry.known);
-    if (!hidden.length) {
-        return '';
-    }
-
-    const lines = [
-        '[Name Knowledge Context]',
-        'Some character names are not yet known to the user.',
-        'For any character marked HIDDEN below, do not reveal, confirm, or casually use their true name in user-facing dialogue, narration, labels, or exposition until the scene explicitly establishes that the user learned it.',
-        'When referring to a hidden-name character from the user-facing perspective, use the masked label below or a descriptive in-scene reference instead.',
-        'Third-person narration that merely contains a true name is not itself a valid introduction. Only explicit direct introductions, such as "I am <name>" or "My name is <name>", count as learning that name.',
-        'If another character explicitly says a hidden true name inside quoted dialogue, that also counts as learning that name.',
-        'A hidden true name must not appear in narration like "<true name> smiled" before it is learned.',
-        '',
-        'Character name knowledge:',
-    ];
-
-    for (const entry of directory) {
-        if (entry.known) {
-            lines.push(`- KNOWN | ${entry.trueName}`);
-            continue;
-        }
-
-        lines.push(`- HIDDEN | masked label: ${entry.displayName} | true name: ${entry.trueName}`);
-    }
-
-    return lines.join('\n');
-}
-
 function buildIdentityTheftInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
@@ -276,27 +239,6 @@ export function getDeathNotePromptInjectionMessage() {
         extra: {
             [MESSAGE_EXTRA_KEY]: {
                 injected: true,
-            },
-        },
-    };
-}
-
-export function getNameKnowledgePromptInjectionMessage() {
-    const injection = buildNameKnowledgeInjection();
-    if (!injection) {
-        return null;
-    }
-
-    return {
-        name: 'Name Knowledge',
-        is_user: false,
-        is_system: true,
-        send_date: Date.now(),
-        mes: injection,
-        extra: {
-            [MESSAGE_EXTRA_KEY]: {
-                injected: true,
-                nameKnowledge: true,
             },
         },
     };

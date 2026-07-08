@@ -503,9 +503,13 @@ function buildFlexibleNamePattern(name) {
 }
 
 function getExplicitSelfIntroductionReason(message, actor) {
-    const body = String(message && message.mes ? message.mes : '').trim();
     const name = String(actor && actor.name ? actor.name : '').trim();
-    if (!body || !name) {
+    if (!name) {
+        return '';
+    }
+
+    const quotedSections = getQuotedDialogueSections(message && message.mes ? message.mes : '');
+    if (!quotedSections.length) {
         return '';
     }
 
@@ -516,9 +520,11 @@ function getExplicitSelfIntroductionReason(message, actor) {
         new RegExp(`\\b(?:you\\s+can\\s+)?call\\s+me\\s+${namePattern}\\b`, 'i'),
     ];
 
-    for (const pattern of patterns) {
-        if (pattern.test(body)) {
-            return 'self_introduction';
+    for (const section of quotedSections) {
+        for (const pattern of patterns) {
+            if (pattern.test(section)) {
+                return 'self_introduction';
+            }
         }
     }
 
