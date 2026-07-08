@@ -73,13 +73,28 @@ export function notify(type, message) {
 
 function createDefaultChatState() {
     return {
-        version: 1,
+        version: 2,
         hasNotebook: true,
         notebookText: '',
+        notebookPages: [''],
         entries: [],
         lastAssistantMessageCountedAt: null,
         lastGenerationCountedAt: null,
     };
+}
+
+function normalizeNotebookPages(pages, fallbackText = '') {
+    if (!Array.isArray(pages) || !pages.length) {
+        return [String(fallbackText ?? '')];
+    }
+
+    const normalized = pages.map((page) => String(page ?? ''));
+    return normalized.length ? normalized : [String(fallbackText ?? '')];
+}
+
+function syncNotebookTextFromPages(state) {
+    state.notebookPages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
+    state.notebookText = state.notebookPages.join('');
 }
 
 export function getChatState() {
@@ -103,6 +118,9 @@ export function getChatState() {
     if (!Object.hasOwn(state, 'notebookText')) {
         state.notebookText = '';
     }
+
+    state.notebookPages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
+    syncNotebookTextFromPages(state);
 
     return state;
 }
@@ -181,17 +199,42 @@ export function setNotebookText(text) {
     const state = getChatState();
     const value = String(text ?? '');
 
-    if (state.notebookText === value) {
+    if (state.notebookText === value && Array.isArray(state.notebookPages) && state.notebookPages.length === 1 && state.notebookPages[0] === value) {
         return false;
     }
 
     state.notebookText = value;
+    state.notebookPages = [value];
+    reconcileEntriesFromNotebookPages();
+    return true;
+}
+
+export function getNotebookPages() {
+    const state = getChatState();
+    state.notebookPages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
+    return state.notebookPages;
+}
+
+export function setNotebookPages(pages) {
+    const state = getChatState();
+    const normalized = normalizeNotebookPages(pages, state.notebookText ?? '');
+    const nextText = normalized.join('');
+    const sameLength = Array.isArray(state.notebookPages) && state.notebookPages.length === normalized.length;
+    const samePages = sameLength && normalized.every((page, index) => state.notebookPages[index] === page);
+
+    if (samePages && state.notebookText === nextText) {
+        return false;
+    }
+
+    state.notebookPages = normalized;
+    state.notebookText = nextText;
     reconcileEntriesFromNotebookText();
     return true;
 }
 
-export function reconcileEntriesFromNotebookText() {
+export function reconcileEntriesFromNotebookPages() {
     const state = getChatState();
+    syncNotebookTextFromPages(state);
     const lines = String(state.notebookText ?? '')
         .split('\n')
         .map((line) => line.trim())
@@ -230,6 +273,10 @@ export function reconcileEntriesFromNotebookText() {
     }
 
     state.entries = retained;
+}
+
+export function reconcileEntriesFromNotebookText() {
+    reconcileEntriesFromNotebookPages();
 }
 
 export function removeDeathEntry(entryId) {

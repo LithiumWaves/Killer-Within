@@ -179,7 +179,7 @@
     display: grid;
 }
 
-.kw-deathnote__inside-cover {
+.kw-deathnote__page-left {
     min-width: 0;
     position: relative;
     overflow: hidden;
@@ -195,7 +195,7 @@
         inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
-.kw-deathnote__inside-cover::after {
+.kw-deathnote__page-left::after {
     content: "";
     position: absolute;
     top: 0;
@@ -205,6 +205,18 @@
     background:
         linear-gradient(90deg, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.08) 42%, rgba(255, 255, 255, 0.05) 100%);
     pointer-events: none;
+}
+
+.kw-deathnote__page-left .kw-deathnote__paper {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+.kw-deathnote__paper--left {
+    box-shadow:
+        inset -18px 0 24px rgba(0, 0, 0, 0.08),
+        inset 1px 0 0 rgba(255, 255, 255, 0.34);
 }
 
 .kw-deathnote__inside-cover-panel {
@@ -320,6 +332,7 @@
 
 .kw-deathnote__toolbar {
     display: flex;
+    align-items: center;
     justify-content: end;
     gap: 0.35rem;
     padding-right: 0.15rem;
@@ -327,6 +340,32 @@
     top: 0.55rem;
     right: 0.75rem;
     z-index: 2;
+}
+
+.kw-deathnote__page-indicator {
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(0, 0, 0, 0.48);
+    margin: 0 0.15rem;
+}
+
+.kw-deathnote__page-nav {
+    border: 0;
+    background: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.66);
+    padding: 0.18rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.kw-deathnote__page-nav.is-disabled,
+.kw-deathnote__page-nav:disabled {
+    opacity: 0.35;
+    cursor: default;
 }
 
 .kw-deathnote__font-button {
@@ -365,4 +404,43 @@
     letter-spacing: 0.01em;
     white-space: pre-wrap;
     overflow-wrap: break-word;
+    overflow: hidden;
+    scrollbar-width: none;
+}
+
+.kw-deathnote__entry-textarea::-webkit-scrollbar {
+    display: none;
+}
+
+.kw-deathnote__page-text {
+    min-height: 100%;
+    padding: calc(var(--kw-dn-editor-top) + 2.8rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);
+    font-family: var(--kw-dn-font-family);
+    font-size: var(--kw-dn-font-size);
+    line-height: var(--kw-dn-line-height);
+    letter-spacing: 0.01em;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: inherit;
+    box-sizing: border-box;
+}
+
+.kw-deathnote__page-left .kw-deathnote__page-text {
+    opacity: 0.9;
+}
+
+.kw-deathnote__page-text:empty::before {
+    content: "[BLANK PAGE]";
+    opacity: 0.26;
+    font-style: italic;
+}
+
+.kw-deathnote__measure {
+    position: fixed;
+    left: -99999px;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: pre-wrap;
+    box-sizing: border-box;
 }

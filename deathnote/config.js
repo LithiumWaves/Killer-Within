@@ -11,5 +11,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
     floatingY: null,
     draftText: '',
     fontMode: 'print',
+    currentPageIndex: 0,
 });
 
