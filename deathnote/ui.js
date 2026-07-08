@@ -126,12 +126,12 @@ function buildWidgetHtml() {
 
     return `
         <div class="kw-deathnote__stage">
-            <button
-                type="button"
+            <img
                 class="kw-deathnote__cover kw-deathnote__drag-handle kw-deathnote__toggle"
-                aria-label="Death Note"
-                style="background-image:url('${coverUrl}')"
-            ></button>
+                src="${coverUrl}"
+                alt="Death Note"
+                draggable="false"
+            />
 
             <div
                 class="kw-deathnote__spread"
