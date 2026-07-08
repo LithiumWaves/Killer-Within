@@ -917,6 +917,192 @@ export function getLinkedShinigamiPresenceBinding() {
     };
 }
 
+export function getDeathNoteMemoryAudienceActors() {
+    const state = getChatState();
+    return buildDeathNotePresenceParticipants(state)
+        .map((entry) => entry && entry.actor ? entry.actor : null)
+        .filter((actor) => {
+            return actor
+                && (
+                    actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+                    || actor.type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI
+                );
+        });
+}
+
+export function isDeathNoteMemoryMessage(message) {
+    const extra = message && message.extra ? message.extra[MESSAGE_EXTRA_KEY] : null;
+    return Boolean(extra && extra.memoryTracked && extra.memoryTracked.tracked);
+}
+
+function isMessageAuthoredByLinkedShinigami(message, shinigamiLink) {
+    if (!message || !shinigamiLink || !shinigamiLink.active) {
+        return false;
+    }
+
+    const messageName = normalizeKnowledgeKey(message.name);
+    const linkName = normalizeKnowledgeKey(shinigamiLink.actor && shinigamiLink.actor.name);
+    const linkAvatar = normalizeKnowledgeKey(shinigamiLink.avatar || (shinigamiLink.actor && shinigamiLink.actor.id));
+
+    if (!messageName) {
+        return false;
+    }
+
+    return Boolean(
+        (linkName && messageName === linkName)
+        || (linkAvatar && messageName === linkAvatar)
+    );
+}
+
+function getAutoTrackKeywordMatch(text) {
+    const source = String(text || '').trim();
+    if (!source) {
+        return '';
+    }
+
+    const patterns = [
+        { reason: 'death_note_keyword', regex: /\bdeath\s+note\b/i },
+        { reason: 'shinigami_keyword', regex: /\bshinigami\b/i },
+        { reason: 'notebook_contact_keyword', regex: /\b(?:touched?|holding|held|picked up|grasped|took)\b[\s\S]{0,40}\b(?:notebook|death note|scrap|page)\b/i },
+        { reason: 'scrap_keyword', regex: /\b(?:scrap|torn page|page scrap)\b/i },
+    ];
+
+    for (const pattern of patterns) {
+        if (pattern.regex.test(source)) {
+            return pattern.reason;
+        }
+    }
+
+    return '';
+}
+
+export function getAutoTrackDeathNoteMemoryReason(messageIndex, options = {}) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return '';
+    }
+
+    const message = chat[index];
+    if (!message || message.is_system || isDeathNoteMemoryMessage(message)) {
+        return '';
+    }
+
+    const state = getChatState();
+    const resolvedEntries = Array.isArray(options.resolvedEntries) ? options.resolvedEntries : [];
+    if (resolvedEntries.length > 0) {
+        return 'resolved_entry';
+    }
+
+    if (isMessageAuthoredByLinkedShinigami(message, state.shinigamiLink)) {
+        return 'linked_shinigami';
+    }
+
+    return getAutoTrackKeywordMatch(message.mes);
+}
+
+export function setDeathNoteMemoryTracked(messageIndex, tracked = true, options = {}) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    if (!message || message.is_system) {
+        return false;
+    }
+
+    message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
+    message.extra[MESSAGE_EXTRA_KEY] = message.extra[MESSAGE_EXTRA_KEY] && typeof message.extra[MESSAGE_EXTRA_KEY] === 'object'
+        ? message.extra[MESSAGE_EXTRA_KEY]
+        : {};
+
+    if (tracked) {
+        const timestamp = normalizeTransferredAt(options.timestamp);
+        message.extra[MESSAGE_EXTRA_KEY].memoryTracked = {
+            tracked: true,
+            source: String(options.source || 'manual').trim().toLowerCase() || 'manual',
+            reason: String(options.reason || '').trim().toLowerCase(),
+            updatedAt: timestamp === null ? Date.now() : timestamp,
+        };
+        return true;
+    }
+
+    if (!message.extra[MESSAGE_EXTRA_KEY].memoryTracked) {
+        return false;
+    }
+
+    delete message.extra[MESSAGE_EXTRA_KEY].memoryTracked;
+    if (!Object.keys(message.extra[MESSAGE_EXTRA_KEY]).length) {
+        delete message.extra[MESSAGE_EXTRA_KEY];
+    }
+
+    if (!Object.keys(message.extra).length) {
+        delete message.extra;
+    }
+
+    return true;
+}
+
+export function autoTrackDeathNoteMemoryMessage(messageIndex, options = {}) {
+    const reason = getAutoTrackDeathNoteMemoryReason(messageIndex, options);
+    if (!reason) {
+        return false;
+    }
+
+    return setDeathNoteMemoryTracked(messageIndex, true, {
+        source: 'auto',
+        reason,
+        timestamp: options.timestamp,
+    });
+}
+
+export function getTrackedDeathNoteMemories(limit = 12) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const entries = [];
+    for (let index = 0; index < chat.length; index += 1) {
+        const message = chat[index];
+        if (!isDeathNoteMemoryMessage(message)) {
+            continue;
+        }
+
+        entries.push({
+            index,
+            name: String(message && message.name ? message.name : '').trim() || (message && message.is_user ? 'User' : 'Message'),
+            body: String(message && message.mes ? message.mes : '').trim(),
+        });
+    }
+
+    const max = Math.max(0, Number(limit) || 0);
+    return max ? entries.slice(-max) : entries;
+}
+
+export function getRecentChatMemoryCandidates(limit = 12) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const entries = [];
+    for (let index = 0; index < chat.length; index += 1) {
+        const message = chat[index];
+        if (!message || message.is_system) {
+            continue;
+        }
+
+        entries.push({
+            index,
+            name: String(message && message.name ? message.name : '').trim() || (message && message.is_user ? 'User' : 'Message'),
+            body: String(message && message.mes ? message.mes : '').trim(),
+            tracked: isDeathNoteMemoryMessage(message),
+        });
+    }
+
+    const max = Math.max(0, Number(limit) || 0);
+    return max ? entries.slice(-max).reverse() : entries.reverse();
+}
+
 export function setNotebookOwnership(nextOwnership = {}) {
     const state = getChatState();
     const current = normalizeOwnershipState(state.ownership);

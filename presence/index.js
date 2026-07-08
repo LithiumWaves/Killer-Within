@@ -1,10 +1,16 @@
-import { getLinkedShinigamiPresenceBinding } from '../deathnote/core.js';
+import {
+    getDeathNoteMemoryAudienceActors,
+    getLinkedShinigamiPresenceBinding,
+    isDeathNoteMemoryMessage,
+} from '../deathnote/core.js';
 import {
     getPresenceContext,
     isMessageAuthoredByPresenceCharacter,
     isPresenceActive,
     setMessagePresenceAudience,
 } from './core.js';
+
+const NO_MEMORY_VIEWER_ID = 'killer_within_no_memory_viewer';
 
 function getShinigamiAudience(binding) {
     const audience = [];
@@ -54,6 +60,45 @@ async function syncLinkedShinigamiMessage(messageIndex) {
     return await setMessagePresenceAudience(index, getShinigamiAudience(binding));
 }
 
+function getDeathNoteMemoryAudience() {
+    const actors = getDeathNoteMemoryAudienceActors();
+    const audience = [];
+    for (const actor of actors) {
+        const identity = String(actor && (actor.id || actor.name) ? (actor.id || actor.name) : '').trim();
+        if (!identity || audience.includes(identity)) {
+            continue;
+        }
+
+        audience.push(identity);
+    }
+
+    if (!audience.length) {
+        audience.push(NO_MEMORY_VIEWER_ID);
+    }
+
+    return audience;
+}
+
+async function syncTrackedDeathNoteMemoryMessage(messageIndex) {
+    if (!isPresenceActive()) {
+        return false;
+    }
+
+    const context = getPresenceContext();
+    const chat = Array.isArray(context && context.chat ? context.chat : null) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    if (!message || !isDeathNoteMemoryMessage(message)) {
+        return false;
+    }
+
+    return await setMessagePresenceAudience(index, getDeathNoteMemoryAudience());
+}
+
 async function syncAllLinkedShinigamiMessages() {
     if (!isPresenceActive()) {
         return false;
@@ -73,7 +118,22 @@ async function syncAllLinkedShinigamiMessages() {
 }
 
 export async function syncLinkedShinigamiVisibility() {
-    return await syncAllLinkedShinigamiMessages();
+    if (!isPresenceActive()) {
+        return false;
+    }
+
+    const context = getPresenceContext();
+    const chat = Array.isArray(context && context.chat ? context.chat : null) ? context.chat : [];
+    let changed = false;
+    for (let index = 0; index < chat.length; index += 1) {
+        const linkedChange = await syncLinkedShinigamiMessage(index);
+        const memoryChange = await syncTrackedDeathNoteMemoryMessage(index);
+        if (linkedChange || memoryChange) {
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 export function setupPresenceExtension() {
@@ -85,18 +145,20 @@ export function setupPresenceExtension() {
     }
 
     eventSource.on(eventTypes.APP_READY, async () => {
-        await syncAllLinkedShinigamiMessages();
+        await syncLinkedShinigamiVisibility();
     });
 
     eventSource.on(eventTypes.CHAT_CHANGED, async () => {
-        await syncAllLinkedShinigamiMessages();
+        await syncLinkedShinigamiVisibility();
     });
 
     eventSource.on(eventTypes.MESSAGE_RECEIVED, async (messageIndex) => {
         await syncLinkedShinigamiMessage(messageIndex);
+        await syncTrackedDeathNoteMemoryMessage(messageIndex);
     });
 
     eventSource.on(eventTypes.MESSAGE_SENT, async (messageIndex) => {
         await syncLinkedShinigamiMessage(messageIndex);
+        await syncTrackedDeathNoteMemoryMessage(messageIndex);
     });
 }

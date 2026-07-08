@@ -13,6 +13,7 @@ import {
     getLinkedShinigami,
     getNotebookPages,
     getNotebookOwnership,
+    getRecentChatMemoryCandidates,
     getSettings,
     learnCharacterName,
     linkNotebookShinigami,
@@ -20,6 +21,7 @@ import {
     persistChatChanges,
     removeNotebookScrap,
     scheduleSettingsSave,
+    setDeathNoteMemoryTracked,
     setNotebookOwnership,
     setNotebookPages,
     setUserNotebookAccess,
@@ -296,6 +298,76 @@ function renderNameKnowledgeManagerHtml() {
         <div class="kw-deathnote-manager">
             <div class="kw-deathnote-manager__summary">
                 <span><b>Unknown names stay scrambled</b> until you learn them for story purposes.</span>
+            </div>
+            <div class="kw-deathnote-manager__list">${rows}</div>
+        </div>
+    `;
+}
+
+function summarizeMessageBody(text) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!value) {
+        return '(empty)';
+    }
+
+    return value.length > 120 ? `${value.slice(0, 117)}...` : value;
+}
+
+function getMessageAuthorLabel(name) {
+    const rawName = String(name || '').trim();
+    if (!rawName) {
+        return 'Message';
+    }
+
+    if (rawName.toLowerCase() === 'user') {
+        return 'User';
+    }
+
+    const actor = getAvailableCharacterActors().find((entry) => {
+        const actorName = String(entry && entry.name ? entry.name : '').trim().toLowerCase();
+        const actorId = String(entry && entry.id ? entry.id : '').trim().toLowerCase();
+        const target = rawName.toLowerCase();
+        return actorName === target || actorId === target;
+    });
+
+    if (actor) {
+        return formatActorLabel(actor);
+    }
+
+    return rawName;
+}
+
+function renderMemoryManagerHtml() {
+    const messages = getRecentChatMemoryCandidates(10);
+    if (!messages.length) {
+        return `
+            <div class="kw-deathnote-manager">
+                <div class="kw-memory-manager__empty">No recent chat messages are available.</div>
+            </div>
+        `;
+    }
+
+    const rows = messages.map((entry) => {
+        return `
+            <div class="kw-deathnote-item">
+                <div class="kw-deathnote-item__meta">
+                    <b>Message ${entry.index + 1} | ${escapeHtml(getMessageAuthorLabel(entry.name))}</b>
+                    <span>${escapeHtml(summarizeMessageBody(entry.body))}</span>
+                </div>
+                <span class="kw-deathnote-name-state">${entry.tracked ? 'Tracked' : 'Normal'}</span>
+                <button
+                    type="button"
+                    class="menu_button ${entry.tracked ? 'kw-deathnote-untrack-memory' : 'kw-deathnote-track-memory'}"
+                    data-message-index="${entry.index}"
+                >${entry.tracked ? 'Untrack' : 'Track'}</button>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="kw-deathnote-manager">
+            <div class="kw-deathnote-manager__summary">
+                <span><b>Tracked messages</b> are forgotten by characters who no longer touch the notebook or one of its scraps.</span>
             </div>
             <div class="kw-deathnote-manager__list">${rows}</div>
         </div>
@@ -670,6 +742,7 @@ function syncSettingsUi() {
     const settings = getSettings();
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
+    $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
     $('#kw-deathnote-notebook-manager').html(renderNotebookManagerHtml());
     $('#kw-deathnote-link-manager').html(renderLinkManagerHtml());
     $('#kw-deathnote-scrap-manager').html(renderScrapManagerHtml());
@@ -743,6 +816,30 @@ function bindSettingsUi() {
             await commitInventoryMutation(() => forgetCharacterName(actor, {
                 reason: `${actor.name || 'Character'} hidden again via manager.`,
             }), 'Character name hidden again.');
+        })
+        .off('click', '.kw-deathnote-track-memory')
+        .on('click', '.kw-deathnote-track-memory', async (event) => {
+            event.preventDefault();
+            const messageIndex = Number($(event.currentTarget).data('messageIndex'));
+            if (!Number.isInteger(messageIndex)) {
+                return;
+            }
+
+            await commitInventoryMutation(() => setDeathNoteMemoryTracked(messageIndex, true, {
+                source: 'manual',
+            }), 'Death Note memory tracking enabled.');
+        })
+        .off('click', '.kw-deathnote-untrack-memory')
+        .on('click', '.kw-deathnote-untrack-memory', async (event) => {
+            event.preventDefault();
+            const messageIndex = Number($(event.currentTarget).data('messageIndex'));
+            if (!Number.isInteger(messageIndex)) {
+                return;
+            }
+
+            await commitInventoryMutation(() => setDeathNoteMemoryTracked(messageIndex, false, {
+                source: 'manual',
+            }), 'Death Note memory tracking removed.');
         })
         .off('click', '#kw-deathnote-toggle-destroyed')
         .on('click', '#kw-deathnote-toggle-destroyed', async (event) => {
@@ -879,6 +976,10 @@ function renderSettingsPanel() {
                 <div class="killer-within-settings__field">
                     <span>Name discovery</span>
                     <div id="kw-deathnote-name-manager"></div>
+                </div>
+                <div class="killer-within-settings__field">
+                    <span>Death Note memories</span>
+                    <div id="kw-deathnote-memory-manager"></div>
                 </div>
                 <div class="killer-within-settings__field">
                     <span>Notebook inventory</span>
