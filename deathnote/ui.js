@@ -162,6 +162,43 @@ function queueFocusRestore(pageIndex, side, mode = 'end') {
     };
 }
 
+function updatePageWithOverflow(textarea, pages, pageIndex, value) {
+    const nextPages = ensurePageCapacity(pages, pageIndex);
+    const result = [...nextPages];
+
+    if (measureFits(textarea, value)) {
+        result[pageIndex] = value;
+        return {
+            pages: result,
+            overflowed: false,
+        };
+    }
+
+    let cursor = pageIndex;
+    let carry = String(value || '');
+
+    while (true) {
+        const currentExisting = cursor === pageIndex ? '' : String(result[cursor] || '');
+        const combined = `${carry}${currentExisting}`;
+
+        if (measureFits(textarea, combined)) {
+            result[cursor] = combined;
+            break;
+        }
+
+        const splitIndex = findPageBreakIndex(textarea, combined);
+        result[cursor] = combined.slice(0, splitIndex);
+        carry = combined.slice(splitIndex);
+        cursor += 1;
+        result.push(...ensurePageCapacity(result, cursor).slice(result.length));
+    }
+
+    return {
+        pages: result,
+        overflowed: cursor > pageIndex,
+    };
+}
+
 function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
     const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
@@ -210,7 +247,7 @@ function buildWidgetHtml() {
                     aria-label="Close notebook"
                 ></button>
                 <div class="kw-deathnote__spine-handle kw-deathnote__drag-handle" aria-hidden="true"></div>
-                <div class="kw-deathnote__page-left" aria-label="Death Note left page">
+                <div class="kw-deathnote__page-left ${visible.leftPageIndex !== null ? 'kw-deathnote__page-left--paper' : 'kw-deathnote__page-left--cover'}" aria-label="Death Note left page">
                     ${leftPageHtml}
                     <button
                         type="button"
@@ -510,12 +547,8 @@ function bindWidgetUi() {
             const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
             const rawValue = $(textarea).val();
             const value = String(rawValue === undefined || rawValue === null ? '' : rawValue);
-            const tailText = pages.slice(pageIndex + 1).join('');
-            const repaginated = paginateNotebookText(textarea, `${value}${tailText}`);
-            const nextPages = [
-                ...pages.slice(0, pageIndex),
-                ...repaginated,
-            ];
+            const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
+            const nextPages = update.pages;
             const changed = setNotebookPages(nextPages);
 
             if (!changed) {
@@ -524,7 +557,9 @@ function bindWidgetUi() {
 
             const activeTrimmed = String(nextPages[pageIndex] || '') !== value;
             const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
-            const visibleChanged = beforeVisible.left !== afterVisible.left || beforeVisible.right !== afterVisible.right;
+            const otherSideChanged = pageSide === 'left'
+                ? beforeVisible.right !== afterVisible.right
+                : beforeVisible.left !== afterVisible.left;
 
             if (activeTrimmed) {
                 const nextPageIndex = pageIndex + 1;
@@ -537,7 +572,7 @@ function bindWidgetUi() {
                 return;
             }
 
-            if (visibleChanged) {
+            if (otherSideChanged) {
                 queueFocusRestore(pageIndex, pageSide, 'end');
                 refreshDeathNoteUi();
             } else {
