@@ -23,17 +23,20 @@ function clamp(value, min, max) {
 
 function getWidgetSize(isOpen) {
     if (!isOpen) {
-        return { width: 92, height: 132 };
+        return { width: 148, height: 210 };
     }
 
-    const width = Math.min(window.innerWidth * 0.86, 780);
-    const height = Math.min(window.innerHeight * 0.7, 520);
+    const aspectRatio = 992 / 744;
+    const maxWidth = Math.min(window.innerWidth * 0.9, 960);
+    const maxHeight = Math.min(window.innerHeight * 0.78, 720);
+    const width = Math.min(maxWidth, maxHeight * aspectRatio);
+    const height = width / aspectRatio;
     return { width, height };
 }
 
 function getDefaultPosition() {
-    const width = 92;
-    const height = 132;
+    const width = 148;
+    const height = 210;
     const margin = 16;
 
     const x = Math.max(margin, window.innerWidth - width - margin);
@@ -117,7 +120,7 @@ function renderDebugHtml() {
 
 function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
-    const rulesUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
+    const interiorUrl = new URL('../assets/deathnote/interior.png', import.meta.url).toString();
     const state = getChatState();
     const settings = getSettings();
 
@@ -130,10 +133,13 @@ function buildWidgetHtml() {
                 style="background-image:url('${coverUrl}')"
             ></button>
 
-            <div class="kw-deathnote__spread" role="dialog" aria-label="Death Note notebook">
-                <div class="kw-deathnote__inside-cover">
-                    <img class="kw-deathnote__rules" src="${rulesUrl}" alt="Death Note rules" />
-                </div>
+            <div
+                class="kw-deathnote__spread"
+                role="dialog"
+                aria-label="Death Note notebook"
+                style="background-image:url('${interiorUrl}')"
+            >
+                <div class="kw-deathnote__inside-cover" aria-hidden="true"></div>
                 <div class="kw-deathnote__page-right">
                     <div class="kw-deathnote__paper">
                         <div class="kw-deathnote__paper-header kw-deathnote__drag-handle">
