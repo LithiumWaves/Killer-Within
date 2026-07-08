@@ -256,10 +256,18 @@
 
 .kw-deathnote__page-left--paper {
     background: var(--kw-dn-paper-bg);
+    color: #171717;
     box-shadow:
         inset -18px 0 24px rgba(0, 0, 0, 0.08),
         inset 1px 0 0 rgba(255, 255, 255, 0.34),
         inset 8px 0 16px rgba(255, 255, 255, 0.08);
+}
+
+.kw-deathnote__page-left--paper .kw-deathnote__paper,
+.kw-deathnote__page-left--paper .kw-deathnote__entry-textarea,
+.kw-deathnote__page-left--paper .kw-deathnote__page-text {
+    color: #171717;
+    opacity: 1;
 }
 
 .kw-deathnote__page-left::after {
@@ -454,13 +462,14 @@
     font-family: var(--kw-dn-font-family);
     font-size: var(--kw-dn-font-size);
     line-height: var(--kw-dn-line-height);
-    padding: calc(var(--kw-dn-editor-top) + 2.8rem) 0 0 calc(var(--kw-dn-editor-left) + 1.1rem);
+    padding: calc(var(--kw-dn-editor-top) + 2.8rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);
     margin: 0;
     caret-color: #111;
     box-sizing: border-box;
     letter-spacing: 0.01em;
     white-space: pre-wrap;
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     overflow: hidden;
     scrollbar-width: none;
     position: relative;
@@ -479,7 +488,8 @@
     line-height: var(--kw-dn-line-height);
     letter-spacing: 0.01em;
     white-space: pre-wrap;
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     color: inherit;
     box-sizing: border-box;
 }
