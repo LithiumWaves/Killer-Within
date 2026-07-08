@@ -99,8 +99,8 @@
 .kw-deathnote {
     position: fixed;
     z-index: 2147483647;
-    width: 148px;
-    height: 210px;
+    width: 170px;
+    height: 240px;
     touch-action: auto;
 }
 
@@ -135,13 +135,8 @@
 }
 
 .kw-deathnote--open .kw-deathnote__cover {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 50%;
-    height: 100%;
-    cursor: pointer;
-    transform: rotateY(-55deg);
+    opacity: 0;
+    pointer-events: none;
 }
 
 .kw-deathnote--open {
@@ -243,7 +238,7 @@
     color: inherit;
     font: inherit;
     font-size: 1rem;
-    line-height: 28px;
+    line-height: 32px;
     padding: 0;
     margin: 0;
 }

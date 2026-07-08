@@ -23,7 +23,7 @@ function clamp(value, min, max) {
 
 function getWidgetSize(isOpen) {
     if (!isOpen) {
-        return { width: 148, height: 210 };
+        return { width: 170, height: 240 };
     }
 
     const aspectRatio = 992 / 744;
@@ -35,8 +35,8 @@ function getWidgetSize(isOpen) {
 }
 
 function getDefaultPosition() {
-    const width = 148;
-    const height = 210;
+    const width = 170;
+    const height = 240;
     const margin = 16;
 
     const x = Math.max(margin, window.innerWidth - width - margin);
