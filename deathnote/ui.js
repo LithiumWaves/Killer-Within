@@ -365,6 +365,48 @@ function getMessageNameHost($message) {
     return $();
 }
 
+function getMessageNameHosts($message) {
+    const selectors = [
+        '.name_text',
+        '.ch_name',
+        '.mes_name',
+        '.mes_name_text',
+        '.mes_header_name',
+        '.avatar-name',
+        '.mes_title',
+        '.mes_header .name',
+        '.mes_header',
+        '.mes_block',
+    ];
+    const hosts = [];
+    const seen = new Set();
+
+    for (const selector of selectors) {
+        $message.find(selector).each((_, element) => {
+            if (!element || seen.has(element)) {
+                return;
+            }
+
+            seen.add(element);
+            hosts.push(element);
+        });
+    }
+
+    if (!hosts.length) {
+        const fallback = getMessageNameHost($message);
+        fallback.each((_, element) => {
+            if (!element || seen.has(element)) {
+                return;
+            }
+
+            seen.add(element);
+            hosts.push(element);
+        });
+    }
+
+    return hosts;
+}
+
 function escapeRegExpForUi(value) {
     return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -396,6 +438,14 @@ function replaceMatchingTextNodes(root, originalName, displayName) {
             continue;
         }
 
+        if (!trimmed.toLowerCase().startsWith(String(originalName || '').trim().toLowerCase())) {
+            continue;
+        }
+
+        if (trimmed.length > Math.max(String(originalName || '').trim().length + 48, 80)) {
+            continue;
+        }
+
         const replaced = replaceLeadingName(text, originalName, displayName);
         if (replaced !== text) {
             node.textContent = replaced;
@@ -420,42 +470,41 @@ function renderMaskedChatMessageNames() {
 
         const message = chat[mesId];
         const actor = getCharacterActorForMessage(message);
-        const host = getMessageNameHost($message);
         const originalName = String(
             message && (message.name || (actor && actor.name) || '')
                 ? (message.name || (actor && actor.name) || '')
                 : ''
         ).trim();
         const displayName = actor ? getActorDisplayName(actor, originalName || 'Character') : '';
+        const hosts = getMessageNameHosts($message);
 
-        if (!host.length) {
+        if (!hosts.length) {
             return;
         }
 
         if (!actor || !displayName || !originalName) {
-            host.each((__, node) => {
+            for (const node of hosts) {
                 const element = node;
                 const storedOriginal = String(element && element.getAttribute ? element.getAttribute('data-kw-original-name') || '' : '').trim();
                 if (!storedOriginal) {
-                    return;
+                    continue;
                 }
 
                 const currentText = String(element.textContent || '');
-                const restored = replaceLeadingName(currentText, currentText.trim(), storedOriginal) || storedOriginal;
                 if (currentText.trim() === storedOriginal) {
-                    return;
+                    continue;
                 }
 
-                if (currentText.trim() && currentText.trim().startsWith(displayName)) {
+                if (displayName && currentText.trim() && currentText.trim().startsWith(displayName)) {
                     element.textContent = replaceLeadingName(currentText, displayName, storedOriginal);
                 } else {
                     replaceMatchingTextNodes(element, displayName, storedOriginal);
                 }
-            });
+            }
             return;
         }
 
-        host.each((__, node) => {
+        for (const node of hosts) {
             const element = node;
             const storedOriginal = String(element && element.getAttribute ? element.getAttribute('data-kw-original-name') || '' : '').trim();
             const baseline = storedOriginal || originalName;
@@ -467,11 +516,11 @@ function renderMaskedChatMessageNames() {
             const replaced = replaceLeadingName(currentText, baseline, displayName);
             if (replaced !== currentText) {
                 element.textContent = replaced;
-                return;
+                continue;
             }
 
             replaceMatchingTextNodes(element, baseline, displayName);
-        });
+        }
     });
 }
 
