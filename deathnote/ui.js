@@ -82,6 +82,18 @@ function buildWidgetHtml() {
             >
                 <div class="kw-deathnote__inside-cover kw-deathnote__drag-handle kw-deathnote__toggle" aria-label="Close notebook"></div>
                 <div class="kw-deathnote__page-right">
+                    <div class="kw-deathnote__toolbar">
+                        <button
+                            type="button"
+                            class="kw-deathnote__font-button ${settings.fontMode === 'print' ? 'is-active' : ''}"
+                            data-font-mode="print"
+                        >Print</button>
+                        <button
+                            type="button"
+                            class="kw-deathnote__font-button ${settings.fontMode === 'script' ? 'is-active' : ''}"
+                            data-font-mode="script"
+                        >Script</button>
+                    </div>
                     <div class="kw-deathnote__paper">
                         <textarea
                             class="kw-deathnote__entry-textarea"
@@ -131,6 +143,8 @@ function ensureWidget() {
     root.style.opacity = '1';
     root.style.pointerEvents = 'auto';
     root.classList.toggle('kw-deathnote--open', Boolean(settings.isOpen));
+    root.classList.toggle('kw-deathnote--font-print', settings.fontMode !== 'script');
+    root.classList.toggle('kw-deathnote--font-script', settings.fontMode === 'script');
 
     root.innerHTML = buildWidgetHtml();
     return root;
@@ -273,6 +287,14 @@ function bindWidgetUi() {
                 state.saveTimer = null;
                 await persistChatChanges();
             }, 450);
+        })
+        .off('click', `#${FLOATING_ID} .kw-deathnote__font-button`)
+        .on('click', `#${FLOATING_ID} .kw-deathnote__font-button`, (event) => {
+            event.preventDefault();
+            const fontMode = String($(event.currentTarget).data('fontMode') || 'print').trim().toLowerCase();
+            getSettings().fontMode = fontMode === 'script' ? 'script' : 'print';
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
         });
 }
 

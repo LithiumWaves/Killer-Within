@@ -10,5 +10,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
     floatingX: null,
     floatingY: null,
     draftText: '',
+    fontMode: 'print',
 });
 
