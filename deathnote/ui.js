@@ -65,6 +65,19 @@ function setPosition(x, y) {
     scheduleSettingsSave();
 }
 
+function getTogglePosition(left, top, isOpening) {
+    const currentSize = getWidgetSize(!isOpening ? true : false);
+    const nextSize = getWidgetSize(isOpening);
+    const rightEdge = left + currentSize.width;
+    const nextX = clamp(rightEdge - nextSize.width, 0, Math.max(0, window.innerWidth - nextSize.width));
+    const nextY = clamp(top, 0, Math.max(0, window.innerHeight - nextSize.height));
+
+    return {
+        x: Math.round(nextX),
+        y: Math.round(nextY),
+    };
+}
+
 function getSpreadCount(pages) {
     const totalPages = Math.max(1, Array.isArray(pages) ? pages.length : 0);
     return Math.max(1, 1 + Math.ceil(Math.max(0, totalPages - 1) / 2));
@@ -458,7 +471,14 @@ function bindWidgetUi() {
 
                     if (!state.moved && state.toggleOnTap) {
                         const settings = getSettings();
-                        settings.isOpen = !settings.isOpen;
+                        const isOpening = !settings.isOpen;
+                        if (root) {
+                            const rectFinal = root.getBoundingClientRect();
+                            const nextPosition = getTogglePosition(rectFinal.left, rectFinal.top, isOpening);
+                            settings.floatingX = nextPosition.x;
+                            settings.floatingY = nextPosition.y;
+                        }
+                        settings.isOpen = isOpening;
                         scheduleSettingsSave();
                         refreshDeathNoteUi();
                     }
