@@ -135,8 +135,7 @@
 }
 
 .kw-deathnote--open .kw-deathnote__cover {
-    opacity: 0;
-    pointer-events: none;
+    display: none;
 }
 
 .kw-deathnote--open {
@@ -147,12 +146,8 @@
 
 .kw-deathnote__spread {
     height: 100%;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(6px) scale(0.985);
-    transition: opacity 200ms ease, transform 200ms ease;
+    display: none;
     width: 100%;
-    display: grid;
     grid-template-columns: 1fr 1fr;
     border-radius: 0;
     overflow: hidden;
@@ -163,9 +158,7 @@
 }
 
 .kw-deathnote--open .kw-deathnote__spread {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0) scale(1);
+    display: grid;
 }
 
 .kw-deathnote__inside-cover {
