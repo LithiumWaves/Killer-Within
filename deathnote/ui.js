@@ -72,7 +72,10 @@ function getSpreadCount(pages) {
 
 function getClampedSpreadIndex(pages) {
     const settings = getSettings();
-    const fallback = Number(settings.currentSpreadIndex ?? settings.currentPageIndex) || 0;
+    const rawIndex = settings.currentSpreadIndex !== undefined && settings.currentSpreadIndex !== null
+        ? settings.currentSpreadIndex
+        : settings.currentPageIndex;
+    const fallback = Number(rawIndex) || 0;
     const maxIndex = Math.max(0, getSpreadCount(pages) - 1);
     const next = clamp(fallback, 0, maxIndex);
     if (next !== settings.currentSpreadIndex) {
@@ -238,7 +241,10 @@ function buildWidgetHtml() {
 function ensureWidget() {
     const settings = getSettings();
     if (!settings.enabled) {
-        document.getElementById(FLOATING_ID)?.remove();
+        const existing = document.getElementById(FLOATING_ID);
+        if (existing) {
+            existing.remove();
+        }
         return null;
     }
 
@@ -369,8 +375,8 @@ function bindWidgetUi() {
                 return;
             }
 
-            const e = event.originalEvent ?? event;
-            if (!e?.isPrimary) {
+            const e = event.originalEvent || event;
+            if (!e || !e.isPrimary) {
                 return;
             }
 
@@ -482,7 +488,8 @@ function bindWidgetUi() {
             const settings = getSettings();
             const currentSpreadIndex = getClampedSpreadIndex(pages);
             const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
-            const value = String($(textarea).val() ?? '');
+            const rawValue = $(textarea).val();
+            const value = String(rawValue === undefined || rawValue === null ? '' : rawValue);
             const tailText = pages.slice(pageIndex + 1).join('');
             const repaginated = paginateNotebookText(textarea, `${value}${tailText}`);
             const nextPages = [
@@ -552,7 +559,11 @@ function bindWidgetUi() {
                 runPageTurn('next', () => {
                     setNotebookPages(expanded);
                     settings.currentSpreadIndex = nextSpreadIndex;
-                    queueFocusRestore(nextVisible.leftPageIndex ?? nextVisible.rightPageIndex, nextVisible.leftPageIndex === null ? 'right' : 'left', 'end');
+                    queueFocusRestore(
+                        nextVisible.leftPageIndex === null ? nextVisible.rightPageIndex : nextVisible.leftPageIndex,
+                        nextVisible.leftPageIndex === null ? 'right' : 'left',
+                        'end',
+                    );
                     scheduleSettingsSave();
                     persistChatChanges();
                 });
@@ -563,7 +574,7 @@ function bindWidgetUi() {
 let measureElement = null;
 
 function getMeasureElement() {
-    if (measureElement?.isConnected) {
+    if (measureElement && measureElement.isConnected) {
         return measureElement;
     }
 
@@ -632,7 +643,7 @@ function findPageBreakIndex(textarea, text) {
 }
 
 function paginateNotebookText(textarea, text) {
-    const source = String(text ?? '');
+    const source = String(text === undefined || text === null ? '' : text);
     if (!source) {
         return [''];
     }
