@@ -123,49 +123,54 @@ function buildWidgetHtml() {
 
     return `
         <div class="kw-deathnote__stage">
-            <button type="button" class="kw-deathnote__cover3d kw-deathnote__drag-handle kw-deathnote__toggle" aria-label="Death Note">
-                <div class="kw-deathnote__cover-face kw-deathnote__cover-face--front" style="background-image:url('${coverUrl}')"></div>
-                <div class="kw-deathnote__cover-face kw-deathnote__cover-face--back">
+            <button
+                type="button"
+                class="kw-deathnote__cover kw-deathnote__drag-handle kw-deathnote__toggle"
+                aria-label="Death Note"
+                style="background-image:url('${coverUrl}')"
+            ></button>
+
+            <div class="kw-deathnote__spread" role="dialog" aria-label="Death Note notebook">
+                <div class="kw-deathnote__inside-cover">
                     <img class="kw-deathnote__rules" src="${rulesUrl}" alt="Death Note rules" />
                 </div>
-            </button>
-
-            <div class="kw-deathnote__page-right" role="dialog" aria-label="Death Note notebook page">
-                <div class="kw-deathnote__paper">
-                    <div class="kw-deathnote__paper-header kw-deathnote__drag-handle">
-                        <div class="kw-deathnote__title">Death Note</div>
-                        <div class="kw-deathnote__header-controls">
-                            <label class="kw-deathnote__row kw-deathnote__row--compact">
-                                <input class="kw-deathnote__has-notebook" type="checkbox" ${state.hasNotebook ? 'checked' : ''} />
-                                <span>In possession</span>
-                            </label>
-                            <label class="kw-deathnote__row kw-deathnote__row--compact">
-                                <input class="kw-deathnote__debug-toggle" type="checkbox" ${settings.debug ? 'checked' : ''} />
-                                <span>Debug</span>
-                            </label>
+                <div class="kw-deathnote__page-right">
+                    <div class="kw-deathnote__paper">
+                        <div class="kw-deathnote__paper-header kw-deathnote__drag-handle">
+                            <div class="kw-deathnote__title">Death Note</div>
+                            <div class="kw-deathnote__header-controls">
+                                <label class="kw-deathnote__row kw-deathnote__row--compact">
+                                    <input class="kw-deathnote__has-notebook" type="checkbox" ${state.hasNotebook ? 'checked' : ''} />
+                                    <span>In possession</span>
+                                </label>
+                                <label class="kw-deathnote__row kw-deathnote__row--compact">
+                                    <input class="kw-deathnote__debug-toggle" type="checkbox" ${settings.debug ? 'checked' : ''} />
+                                    <span>Debug</span>
+                                </label>
+                            </div>
                         </div>
-                    </div>
 
-                    <form class="kw-deathnote__form">
-                        <textarea
-                            class="kw-deathnote__entry-textarea"
-                            name="entryText"
-                            rows="5"
-                            autocomplete="off"
-                            spellcheck="false"
-                        >${escapeHtml(String(settings.draftText || ''))}</textarea>
-                        <div class="kw-deathnote__actions">
-                            <button type="submit" class="kw-deathnote__write menu_button">Write</button>
-                            <button type="button" class="kw-deathnote__close menu_button">Close</button>
+                        <form class="kw-deathnote__form">
+                            <textarea
+                                class="kw-deathnote__entry-textarea"
+                                name="entryText"
+                                rows="5"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >${escapeHtml(String(settings.draftText || ''))}</textarea>
+                            <div class="kw-deathnote__actions">
+                                <button type="submit" class="kw-deathnote__write menu_button">Write</button>
+                                <button type="button" class="kw-deathnote__close menu_button">Close</button>
+                            </div>
+                        </form>
+
+                        <div class="kw-deathnote__entries">
+                            <div class="kw-deathnote__entries-title">Written names</div>
+                            <div class="kw-deathnote__entries-list">${renderEntriesHtml()}</div>
                         </div>
-                    </form>
 
-                    <div class="kw-deathnote__entries">
-                        <div class="kw-deathnote__entries-title">Written names</div>
-                        <div class="kw-deathnote__entries-list">${renderEntriesHtml()}</div>
+                        ${renderDebugHtml()}
                     </div>
-
-                    ${renderDebugHtml()}
                 </div>
             </div>
         </div>
@@ -313,6 +318,9 @@ function bindWidgetUi() {
         moved: false,
         toggleOnTap: false,
         pointerId: null,
+        handlersInstalled: false,
+        moveHandler: null,
+        upHandler: null,
     };
 
     $(document)
@@ -328,6 +336,7 @@ function bindWidgetUi() {
                 return;
             }
 
+            event.preventDefault();
             const rect = root.getBoundingClientRect();
             state.dragging = true;
             state.moved = false;
@@ -338,69 +347,85 @@ function bindWidgetUi() {
             state.originX = rect.left;
             state.originY = rect.top;
 
-            try {
-                e.currentTarget?.setPointerCapture?.(e.pointerId);
-            } catch (error) {
-                void error;
-            }
-        })
-        .off('pointermove', `#${FLOATING_ID} .kw-deathnote__drag-handle`)
-        .on('pointermove', `#${FLOATING_ID} .kw-deathnote__drag-handle`, (event) => {
-            if (!state.dragging) {
-                return;
-            }
+            const installHandlers = () => {
+                if (state.handlersInstalled) {
+                    return;
+                }
 
-            const root = document.getElementById(FLOATING_ID);
-            if (!root) {
-                return;
-            }
+                state.handlersInstalled = true;
 
-            const e = event.originalEvent ?? event;
-            if (state.pointerId !== null && e.pointerId !== state.pointerId) {
-                return;
-            }
+                state.moveHandler = (rawEvent) => {
+                    if (!state.dragging) {
+                        return;
+                    }
 
-            const dx = e.clientX - state.startX;
-            const dy = e.clientY - state.startY;
-            const moved = Math.abs(dx) + Math.abs(dy) > 4;
-            if (moved) {
-                state.moved = true;
-            }
+                    const root = document.getElementById(FLOATING_ID);
+                    if (!root) {
+                        return;
+                    }
 
-            const maxX = Math.max(0, window.innerWidth - root.offsetWidth);
-            const maxY = Math.max(0, window.innerHeight - root.offsetHeight);
+                    const eMove = rawEvent;
+                    if (state.pointerId !== null && eMove.pointerId !== state.pointerId) {
+                        return;
+                    }
 
-            const nextX = clamp(state.originX + dx, 0, maxX);
-            const nextY = clamp(state.originY + dy, 0, maxY);
+                    const dx = eMove.clientX - state.startX;
+                    const dy = eMove.clientY - state.startY;
+                    const moved = Math.abs(dx) + Math.abs(dy) > 4;
+                    if (moved) {
+                        state.moved = true;
+                    }
 
-            root.style.left = `${Math.round(nextX)}px`;
-            root.style.top = `${Math.round(nextY)}px`;
-        })
-        .off('pointerup pointercancel', `#${FLOATING_ID} .kw-deathnote__drag-handle`)
-        .on('pointerup pointercancel', `#${FLOATING_ID} .kw-deathnote__drag-handle`, async () => {
-            if (!state.dragging) {
-                return;
-            }
+                    const rectNow = root.getBoundingClientRect();
+                    const maxX = Math.max(0, window.innerWidth - rectNow.width);
+                    const maxY = Math.max(0, window.innerHeight - rectNow.height);
 
-            const root = document.getElementById(FLOATING_ID);
-            if (!root) {
-                state.dragging = false;
-                state.pointerId = null;
-                return;
-            }
+                    const nextX = clamp(state.originX + dx, 0, maxX);
+                    const nextY = clamp(state.originY + dy, 0, maxY);
 
-            state.dragging = false;
-            state.pointerId = null;
+                    root.style.left = `${Math.round(nextX)}px`;
+                    root.style.top = `${Math.round(nextY)}px`;
+                };
 
-            const rect = root.getBoundingClientRect();
-            setPosition(Math.round(rect.left), Math.round(rect.top));
+                state.upHandler = async (rawEvent) => {
+                    if (!state.dragging) {
+                        return;
+                    }
 
-            if (!state.moved && state.toggleOnTap) {
-                const settings = getSettings();
-                settings.isOpen = !settings.isOpen;
-                scheduleSettingsSave();
-                refreshDeathNoteUi();
-            }
+                    const eUp = rawEvent;
+                    if (state.pointerId !== null && eUp.pointerId !== state.pointerId) {
+                        return;
+                    }
+
+                    const root = document.getElementById(FLOATING_ID);
+
+                    state.dragging = false;
+                    state.pointerId = null;
+
+                    if (root) {
+                        const rectFinal = root.getBoundingClientRect();
+                        setPosition(Math.round(rectFinal.left), Math.round(rectFinal.top));
+                    }
+
+                    window.removeEventListener('pointermove', state.moveHandler, true);
+                    window.removeEventListener('pointerup', state.upHandler, true);
+                    window.removeEventListener('pointercancel', state.upHandler, true);
+                    state.handlersInstalled = false;
+
+                    if (!state.moved && state.toggleOnTap) {
+                        const settings = getSettings();
+                        settings.isOpen = !settings.isOpen;
+                        scheduleSettingsSave();
+                        refreshDeathNoteUi();
+                    }
+                };
+
+                window.addEventListener('pointermove', state.moveHandler, true);
+                window.addEventListener('pointerup', state.upHandler, true);
+                window.addEventListener('pointercancel', state.upHandler, true);
+            };
+
+            installHandlers();
         })
         .off('submit', `#${FLOATING_ID} .kw-deathnote__form`)
         .on('submit', `#${FLOATING_ID} .kw-deathnote__form`, async (event) => {
