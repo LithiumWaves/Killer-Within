@@ -309,6 +309,30 @@ function formatActorLabel(actor) {
     return name || 'Unknown';
 }
 
+function formatActorInventoryLabel(actor) {
+    const source = actor && typeof actor === 'object' ? actor : {};
+    const type = String(source.type || NOTEBOOK_ACTOR_TYPES.NONE).trim().toLowerCase();
+    const name = String(source.name || '').trim();
+
+    if (type === NOTEBOOK_ACTOR_TYPES.USER) {
+        return 'User';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.WORLD) {
+        return 'World';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI) {
+        return name ? `${name} (Shinigami)` : 'Shinigami';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        return name || 'Character';
+    }
+
+    return name || 'Unknown';
+}
+
 function renderNameKnowledgeManagerHtml() {
     const directory = getCharacterNameDirectory();
     if (!directory.length) {
@@ -734,7 +758,7 @@ function getActorChoices(options = {}) {
     });
 }
 
-function renderActorOptions(actors, selectedActor, includeEmpty = false, emptyLabel = 'None') {
+function renderActorOptions(actors, selectedActor, includeEmpty = false, emptyLabel = 'None', labelFormatter = formatActorLabel) {
     const options = [];
     if (includeEmpty) {
         options.push(`<option value="">${escapeHtml(emptyLabel)}</option>`);
@@ -745,7 +769,7 @@ function renderActorOptions(actors, selectedActor, includeEmpty = false, emptyLa
         const isSelected = selectedKey && actorIdentityKey(actor) === selectedKey;
         options.push(`
             <option value="${escapeHtml(encodeActorValue(actor))}" ${isSelected ? 'selected' : ''}>
-                ${escapeHtml(formatActorLabel(actor))}
+                ${escapeHtml(labelFormatter(actor))}
             </option>
         `);
     }
@@ -860,7 +884,7 @@ function renderInventoryGridSlots(inventory, selectedKey, coverUrl) {
 function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }) {
     const notebookAvailable = !inventory.notebook.destroyed;
     const canOpenNotebook = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
-    const linkedLabel = linked.active ? getActorDisplayName(linked.actor, linked.avatar || 'Linked') : 'No link';
+    const linkedLabel = linked.active ? formatActorInventoryLabel(linked.actor) : 'No link';
     const linkChoices = getActorChoices({
         includeUser: false,
         includeCharacters: true,
@@ -909,7 +933,7 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                     id="kw-dn-inventory-shinigami-select"
                     class="text_pole kw-dn-inventory__context-select"
                 >
-                    ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami')}
+                    ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
                 </select>
                 <button
                     type="button"
@@ -928,9 +952,13 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
 }
 
 function renderScrapSelectionPanel(scrap) {
+    const selectedRecipient = scrap.holder && scrap.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+        ? scrap.holder
+        : null;
     const actors = getActorChoices({
-        currentActor: scrap.holder,
-        includeWorld: true,
+        currentActor: selectedRecipient,
+        includeUser: false,
+        includeWorld: false,
     });
 
     return `
@@ -940,14 +968,14 @@ function renderScrapSelectionPanel(scrap) {
                     <div class="kw-dn-inventory__item-eyebrow">Scrap</div>
                     <div class="kw-dn-inventory__context-title">${escapeHtml(scrap.label)}</div>
                 </div>
-                <div class="kw-dn-inventory__context-meta">${escapeHtml(formatActorLabel(scrap.holder))}</div>
+                <div class="kw-dn-inventory__context-meta">${escapeHtml(formatActorInventoryLabel(scrap.holder))}</div>
             </div>
             <div class="kw-dn-inventory__context-link">
                 <select
                     class="text_pole kw-dn-inventory__context-select kw-dn-inventory__scrap-select"
                     data-scrap-id="${escapeHtml(scrap.id)}"
                 >
-                    ${renderActorOptions(actors, scrap.holder)}
+                    ${renderActorOptions(actors, selectedRecipient, true, 'Choose recipient', formatActorInventoryLabel)}
                 </select>
                 <button
                     type="button"
