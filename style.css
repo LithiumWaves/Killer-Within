@@ -105,17 +105,18 @@
     --kw-dn-font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
     --kw-dn-font-size: 18px;
     --kw-dn-line-height: 31px;
-    --kw-dn-editor-top: 6px;
+    --kw-dn-editor-top: 10px;
     --kw-dn-editor-left: 4px;
     --kw-dn-paper-bg: #f6f6f2;
-    --kw-dn-rule-color: rgba(123, 148, 171, 0.45);
+    --kw-dn-rule-color: rgba(114, 145, 171, 0.34);
+    --kw-dn-rule-position: calc(var(--kw-dn-line-height) - 3px);
 }
 
 .kw-deathnote--font-script {
     --kw-dn-font-family: "Segoe Script", "Lucida Handwriting", "Bradley Hand", cursive;
     --kw-dn-font-size: 19px;
     --kw-dn-line-height: 31px;
-    --kw-dn-editor-top: 4px;
+    --kw-dn-editor-top: 8px;
     --kw-dn-editor-left: 3px;
 }
 
@@ -188,6 +189,9 @@
     overflow: hidden;
     background: var(--kw-dn-paper-bg);
     margin-left: -1px;
+    box-shadow:
+        inset 18px 0 28px rgba(0, 0, 0, 0.12),
+        inset 1px 0 0 rgba(255, 255, 255, 0.32);
 }
 
 .kw-deathnote__paper {
@@ -197,16 +201,31 @@
     overflow: auto;
     color: inherit;
     background:
+        radial-gradient(circle at 20% 12%, rgba(255, 255, 255, 0.34) 0, rgba(255, 255, 255, 0) 30%),
+        radial-gradient(circle at 82% 78%, rgba(0, 0, 0, 0.035) 0, rgba(0, 0, 0, 0) 28%),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.25), rgba(0, 0, 0, 0.015)),
         repeating-linear-gradient(
             to bottom,
             transparent 0,
-            transparent calc(var(--kw-dn-line-height) - 2px),
-            var(--kw-dn-rule-color) calc(var(--kw-dn-line-height) - 2px),
-            var(--kw-dn-rule-color) var(--kw-dn-line-height)
+            transparent calc(var(--kw-dn-rule-position) - 1px),
+            var(--kw-dn-rule-color) calc(var(--kw-dn-rule-position) - 1px),
+            var(--kw-dn-rule-color) var(--kw-dn-rule-position),
+            transparent var(--kw-dn-rule-position),
+            transparent var(--kw-dn-line-height)
         ),
         var(--kw-dn-paper-bg);
-    background-size: 100% var(--kw-dn-line-height), 100% 100%;
-    background-position: 0 calc(var(--kw-dn-line-height) - 2px), 0 0;
+    background-size:
+        100% 100%,
+        100% 100%,
+        100% 100%,
+        100% var(--kw-dn-line-height),
+        100% 100%;
+    background-position:
+        0 0,
+        0 0,
+        0 0,
+        0 0,
+        0 0;
     box-sizing: border-box;
 }
 
