@@ -40,6 +40,8 @@ const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
+let chatNameMaskObserver = null;
+let chatNameMaskQueued = false;
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -343,10 +345,14 @@ function getMessageAuthorLabel(name) {
 function getMessageNameHost($message) {
     const selectors = [
         '.name_text',
+        '.ch_name',
         '.mes_name',
         '.mes_name_text',
+        '.mes_header_name',
         '.avatar-name',
+        '.mes_title',
         '.mes_header .name',
+        '.mes_header',
     ];
 
     for (const selector of selectors) {
@@ -357,6 +363,47 @@ function getMessageNameHost($message) {
     }
 
     return $();
+}
+
+function escapeRegExpForUi(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceLeadingName(text, originalName, displayName) {
+    const source = String(text || '');
+    const original = String(originalName || '').trim();
+    const next = String(displayName || '').trim();
+    if (!source || !original || !next || original === next) {
+        return source;
+    }
+
+    const escaped = escapeRegExpForUi(original).replace(/\s+/g, '\\s+');
+    return source.replace(new RegExp(`^(${escaped})(?=\\b|\\s|$)`, 'i'), next);
+}
+
+function replaceMatchingTextNodes(root, originalName, displayName) {
+    if (!root || !originalName || !displayName || originalName === displayName) {
+        return false;
+    }
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let changed = false;
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = String(node && node.textContent ? node.textContent : '');
+        const trimmed = text.trim();
+        if (!trimmed) {
+            continue;
+        }
+
+        const replaced = replaceLeadingName(text, originalName, displayName);
+        if (replaced !== text) {
+            node.textContent = replaced;
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 function renderMaskedChatMessageNames() {
@@ -374,28 +421,100 @@ function renderMaskedChatMessageNames() {
         const message = chat[mesId];
         const actor = getCharacterActorForMessage(message);
         const host = getMessageNameHost($message);
+        const originalName = String(
+            message && (message.name || (actor && actor.name) || '')
+                ? (message.name || (actor && actor.name) || '')
+                : ''
+        ).trim();
+        const displayName = actor ? getActorDisplayName(actor, originalName || 'Character') : '';
+
         if (!host.length) {
             return;
         }
 
-        const storedOriginal = String(host.attr('data-kw-original-name') || '').trim();
-        const original = storedOriginal || String(host.text() || '').trim();
-        if (!storedOriginal && original) {
-            host.attr('data-kw-original-name', original);
-        }
+        if (!actor || !displayName || !originalName) {
+            host.each((__, node) => {
+                const element = node;
+                const storedOriginal = String(element && element.getAttribute ? element.getAttribute('data-kw-original-name') || '' : '').trim();
+                if (!storedOriginal) {
+                    return;
+                }
 
-        if (!actor) {
-            if (storedOriginal && host.text().trim() !== storedOriginal) {
-                host.text(storedOriginal);
-            }
+                const currentText = String(element.textContent || '');
+                const restored = replaceLeadingName(currentText, currentText.trim(), storedOriginal) || storedOriginal;
+                if (currentText.trim() === storedOriginal) {
+                    return;
+                }
+
+                if (currentText.trim() && currentText.trim().startsWith(displayName)) {
+                    element.textContent = replaceLeadingName(currentText, displayName, storedOriginal);
+                } else {
+                    replaceMatchingTextNodes(element, displayName, storedOriginal);
+                }
+            });
             return;
         }
 
-        const displayName = getActorDisplayName(actor, original || 'Character');
-        if (displayName && host.text().trim() !== displayName) {
-            host.text(displayName);
-        }
+        host.each((__, node) => {
+            const element = node;
+            const storedOriginal = String(element && element.getAttribute ? element.getAttribute('data-kw-original-name') || '' : '').trim();
+            const baseline = storedOriginal || originalName;
+            if (!storedOriginal && element && element.setAttribute) {
+                element.setAttribute('data-kw-original-name', baseline);
+            }
+
+            const currentText = String(element && element.textContent ? element.textContent : '');
+            const replaced = replaceLeadingName(currentText, baseline, displayName);
+            if (replaced !== currentText) {
+                element.textContent = replaced;
+                return;
+            }
+
+            replaceMatchingTextNodes(element, baseline, displayName);
+        });
     });
+}
+
+function queueMaskedChatNameRender() {
+    if (chatNameMaskQueued) {
+        return;
+    }
+
+    chatNameMaskQueued = true;
+    requestAnimationFrame(() => {
+        chatNameMaskQueued = false;
+        renderMaskedChatMessageNames();
+    });
+}
+
+function ensureChatNameMaskObserver() {
+    if (chatNameMaskObserver) {
+        return;
+    }
+
+    const root = document.querySelector('#chat') || document.querySelector('#chat_container') || document.body;
+    if (!root || typeof MutationObserver === 'undefined') {
+        return;
+    }
+
+    chatNameMaskObserver = new MutationObserver(() => {
+        queueMaskedChatNameRender();
+    });
+
+    chatNameMaskObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+    });
+}
+
+function teardownChatNameMaskObserver() {
+    if (!chatNameMaskObserver) {
+        return;
+    }
+
+    chatNameMaskObserver.disconnect();
+    chatNameMaskObserver = null;
 }
 
 function renderMemoryManagerHtml() {
@@ -1605,7 +1724,8 @@ export function refreshDeathNoteUi() {
     renderSettingsPanel();
     syncSettingsUi();
     ensureWidget();
-    requestAnimationFrame(() => renderMaskedChatMessageNames());
+    ensureChatNameMaskObserver();
+    queueMaskedChatNameRender();
 }
 
 export function setupDeathNoteUi() {
@@ -1613,6 +1733,7 @@ export function setupDeathNoteUi() {
     syncSettingsUi();
     ensureWidget();
     bindWidgetUi();
-    requestAnimationFrame(() => renderMaskedChatMessageNames());
+    ensureChatNameMaskObserver();
+    queueMaskedChatNameRender();
 }
 
