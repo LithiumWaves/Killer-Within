@@ -82,6 +82,278 @@
     letter-spacing: 0.05em;
 }
 
+#kw-deathnote-inventory {
+    position: fixed;
+    left: 18px;
+    bottom: 18px;
+    z-index: 2147483645;
+    width: min(28rem, calc(100vw - 36px));
+    pointer-events: none;
+}
+
+.kw-dn-inventory__shell {
+    display: grid;
+    justify-items: start;
+    gap: 0.7rem;
+}
+
+.kw-dn-inventory__toggle {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem 0.95rem;
+    border: 1px solid rgba(132, 29, 32, 0.65);
+    border-radius: 0.9rem;
+    background:
+        linear-gradient(180deg, rgba(34, 34, 34, 0.96), rgba(11, 11, 11, 0.98)),
+        linear-gradient(135deg, rgba(114, 17, 20, 0.2), rgba(255, 255, 255, 0));
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.32);
+    color: #f2ece0;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.kw-dn-inventory__toggle-count {
+    min-width: 1.9rem;
+    padding: 0.16rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(132, 29, 32, 0.78);
+    text-align: center;
+}
+
+.kw-dn-inventory__panel {
+    pointer-events: auto;
+    width: 100%;
+    display: grid;
+    gap: 0.95rem;
+    padding: 1rem;
+    border: 1px solid rgba(116, 98, 76, 0.5);
+    border-radius: 1.1rem;
+    background:
+        linear-gradient(180deg, rgba(14, 14, 14, 0.97), rgba(9, 9, 9, 0.99)),
+        repeating-linear-gradient(
+            0deg,
+            rgba(255, 255, 255, 0.02) 0,
+            rgba(255, 255, 255, 0.02) 1px,
+            rgba(0, 0, 0, 0) 1px,
+            rgba(0, 0, 0, 0) 18px
+        );
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.44);
+    color: #ece5d8;
+}
+
+.kw-dn-inventory__shell.is-collapsed .kw-dn-inventory__panel {
+    display: none;
+}
+
+.kw-dn-inventory__header {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: end;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(121, 105, 88, 0.35);
+}
+
+.kw-dn-inventory__eyebrow,
+.kw-dn-inventory__item-eyebrow {
+    font-size: 0.74rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #b59678;
+}
+
+.kw-dn-inventory__title {
+    margin: 0.16rem 0 0;
+    font-size: 1.18rem;
+    font-family: Georgia, "Times New Roman", serif;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #f5efe3;
+}
+
+.kw-dn-inventory__header-copy,
+.kw-dn-inventory__group-copy,
+.kw-dn-inventory__note {
+    max-width: 18rem;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    color: rgba(236, 229, 216, 0.76);
+}
+
+.kw-dn-inventory__items,
+.kw-dn-inventory__group-body {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.kw-dn-inventory__card,
+.kw-dn-inventory__group {
+    border: 1px solid rgba(121, 105, 88, 0.38);
+    border-radius: 1rem;
+    background:
+        linear-gradient(180deg, rgba(28, 24, 21, 0.96), rgba(13, 12, 11, 0.98));
+    overflow: hidden;
+}
+
+.kw-dn-inventory__item-head {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr) auto;
+    gap: 0.85rem;
+    align-items: center;
+    padding: 0.9rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+}
+
+.kw-dn-inventory__item-art {
+    width: 70px;
+    height: 98px;
+    object-fit: cover;
+    border-radius: 0.35rem;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+}
+
+.kw-dn-inventory__item-title,
+.kw-dn-inventory__group-title {
+    font-size: 1rem;
+    font-family: Georgia, "Times New Roman", serif;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #f5efe3;
+}
+
+.kw-dn-inventory__item-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.55rem;
+    margin-top: 0.3rem;
+    font-size: 0.86rem;
+    color: rgba(236, 229, 216, 0.8);
+}
+
+.kw-dn-inventory__item-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.28rem 0.55rem;
+    border: 1px solid rgba(132, 29, 32, 0.42);
+    border-radius: 999px;
+    background: rgba(132, 29, 32, 0.15);
+    font-size: 0.76rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.kw-dn-inventory__item-state {
+    display: grid;
+    gap: 0.45rem;
+    justify-items: end;
+}
+
+.kw-dn-inventory__item-body {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0 0.9rem 0.9rem;
+    border-top: 1px solid rgba(121, 105, 88, 0.28);
+}
+
+.kw-dn-inventory__item-body.is-hidden {
+    display: none;
+}
+
+.kw-dn-inventory__actions,
+.kw-dn-inventory__scrap-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    align-items: center;
+}
+
+.kw-dn-inventory__checkbox {
+    display: flex;
+    gap: 0.6rem;
+    align-items: start;
+    font-size: 0.9rem;
+    color: rgba(236, 229, 216, 0.88);
+}
+
+.kw-dn-inventory__checkbox input {
+    margin-top: 0.14rem;
+}
+
+.kw-dn-inventory__group-head {
+    padding: 0.9rem 0.9rem 0;
+}
+
+.kw-dn-inventory__group-body {
+    padding: 0 0.9rem 0.9rem;
+}
+
+.kw-dn-inventory__scrap {
+    display: grid;
+    gap: 0.6rem;
+    padding: 0.8rem;
+    border: 1px solid rgba(160, 144, 123, 0.25);
+    border-radius: 0.85rem;
+    background:
+        linear-gradient(180deg, rgba(239, 230, 211, 0.96), rgba(221, 210, 189, 0.92));
+    color: #231d17;
+    clip-path: polygon(0 6%, 5% 0, 100% 0, 100% 94%, 96% 100%, 0 100%);
+}
+
+.kw-dn-inventory__scrap-meta {
+    display: grid;
+    gap: 0.16rem;
+}
+
+.kw-dn-inventory__scrap-meta small {
+    opacity: 0.76;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.kw-dn-inventory__scrap-select {
+    min-width: 11rem;
+    max-width: 100%;
+}
+
+.kw-dn-inventory__empty {
+    padding: 0.9rem;
+    border-radius: 0.85rem;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(236, 229, 216, 0.7);
+    font-style: italic;
+}
+
+@media (max-width: 700px) {
+    #kw-deathnote-inventory {
+        width: calc(100vw - 24px);
+        left: 12px;
+        bottom: 12px;
+    }
+
+    .kw-dn-inventory__item-head {
+        grid-template-columns: 58px minmax(0, 1fr);
+    }
+
+    .kw-dn-inventory__item-art {
+        width: 58px;
+        height: 82px;
+    }
+
+    .kw-dn-inventory__item-state {
+        grid-column: 1 / -1;
+        justify-items: start;
+        grid-auto-flow: column;
+    }
+}
+
 .kw-thoughts {
     margin-top: 0.65rem;
     padding: 0.5rem 0.75rem;

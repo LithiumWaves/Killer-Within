@@ -37,6 +37,7 @@ const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
 const CLOSED_HEIGHT = 340;
 const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
+const INVENTORY_ID = 'kw-deathnote-inventory';
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
@@ -127,6 +128,43 @@ function getTogglePosition(left, top, isOpening) {
         x: Math.round(nextX),
         y: Math.round(nextY),
     };
+}
+
+function setNotebookOpenState(nextOpen) {
+    const settings = getSettings();
+    const root = document.getElementById(FLOATING_ID);
+    let anchorX = null;
+    let anchorY = null;
+
+    if (root) {
+        const rect = root.getBoundingClientRect();
+        anchorX = Math.round(rect.left);
+        anchorY = Math.round(rect.top);
+    }
+
+    if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) {
+        const resolved = resolvePosition();
+        anchorX = Math.round(resolved.x);
+        anchorY = Math.round(resolved.y);
+    }
+
+    if (nextOpen) {
+        settings.closedFloatingX = anchorX;
+        settings.closedFloatingY = anchorY;
+        const nextPosition = getTogglePosition(anchorX, anchorY, true);
+        settings.floatingX = nextPosition.x;
+        settings.floatingY = nextPosition.y;
+    } else if (Number.isFinite(settings.closedFloatingX) && Number.isFinite(settings.closedFloatingY)) {
+        settings.floatingX = settings.closedFloatingX;
+        settings.floatingY = settings.closedFloatingY;
+    } else {
+        settings.floatingX = anchorX;
+        settings.floatingY = anchorY;
+    }
+
+    settings.isOpen = Boolean(nextOpen);
+    scheduleSettingsSave();
+    refreshDeathNoteUi();
 }
 
 function getSpreadCount(pages) {
@@ -731,6 +769,14 @@ function formatAccessLabel(access) {
     return 'No access';
 }
 
+function getUserActor() {
+    return {
+        type: NOTEBOOK_ACTOR_TYPES.USER,
+        id: '',
+        name: 'User',
+    };
+}
+
 function renderUserAccessOptions(selectedAccess) {
     const options = [
         { value: NOTEBOOK_USER_ACCESS.FULL, label: 'Full notebook' },
@@ -746,6 +792,162 @@ function renderUserAccessOptions(selectedAccess) {
             </option>
         `;
     }).join('');
+}
+
+function renderInventoryScrapRows() {
+    const inventory = getDeathNoteInventory();
+    const scraps = inventory.scraps.filter((scrap) => scrap && scrap.active);
+
+    if (!scraps.length) {
+        return `
+            <div class="kw-dn-inventory__empty">
+                No torn scraps are currently in play.
+            </div>
+        `;
+    }
+
+    return scraps.map((scrap) => {
+        const actors = getActorChoices({
+            currentActor: scrap.holder,
+            includeWorld: true,
+        });
+        return `
+            <div class="kw-dn-inventory__scrap">
+                <div class="kw-dn-inventory__scrap-meta">
+                    <b>${escapeHtml(scrap.label)}</b>
+                    <span>Held by ${escapeHtml(formatActorLabel(scrap.holder))}</span>
+                    <small>${escapeHtml(scrap.noteText || 'Blank scrap')}</small>
+                </div>
+                <div class="kw-dn-inventory__scrap-actions">
+                    <select
+                        class="text_pole kw-dn-inventory__scrap-select"
+                        data-scrap-id="${escapeHtml(scrap.id)}"
+                    >
+                        ${renderActorOptions(actors, scrap.holder)}
+                    </select>
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__scrap-give"
+                        data-scrap-id="${escapeHtml(scrap.id)}"
+                    >Give</button>
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__scrap-remove"
+                        data-scrap-id="${escapeHtml(scrap.id)}"
+                    >Destroy</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderInventoryTrayHtml() {
+    const settings = getSettings();
+    const ownership = getNotebookOwnership();
+    const inventory = getDeathNoteInventory();
+    const linked = getLinkedShinigami();
+    const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
+    const notebookAvailable = !inventory.notebook.destroyed;
+    const canOpenNotebook = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
+    const itemCount = (notebookAvailable ? 1 : 0) + inventory.scraps.filter((scrap) => scrap && scrap.active).length;
+    const linkedLabel = linked.active ? getActorDisplayName(linked.actor, linked.avatar || 'Linked') : 'Unlinked';
+
+    return `
+        <div class="kw-dn-inventory__shell ${settings.inventoryCollapsed ? 'is-collapsed' : ''}">
+            <button
+                type="button"
+                id="kw-dn-inventory-toggle"
+                class="kw-dn-inventory__toggle"
+                aria-expanded="${settings.inventoryCollapsed ? 'false' : 'true'}"
+                aria-controls="${INVENTORY_ID}-panel"
+            >
+                <span class="kw-dn-inventory__toggle-label">Inventory</span>
+                <span class="kw-dn-inventory__toggle-count">${itemCount}</span>
+            </button>
+            <div id="${INVENTORY_ID}-panel" class="kw-dn-inventory__panel">
+                <div class="kw-dn-inventory__header">
+                    <div>
+                        <div class="kw-dn-inventory__eyebrow">Killer Within</div>
+                        <h3 class="kw-dn-inventory__title">Personal Effects</h3>
+                    </div>
+                    <div class="kw-dn-inventory__header-copy">
+                        Click an item to reveal what you can do with it.
+                    </div>
+                </div>
+
+                <div class="kw-dn-inventory__items">
+                    <section class="kw-dn-inventory__card ${settings.inventoryNotebookExpanded ? 'is-active' : ''}">
+                        <button
+                            type="button"
+                            id="kw-dn-inventory-notebook-toggle"
+                            class="kw-dn-inventory__item-head"
+                            aria-expanded="${settings.inventoryNotebookExpanded ? 'true' : 'false'}"
+                        >
+                            <img
+                                class="kw-dn-inventory__item-art"
+                                src="${coverUrl}"
+                                alt="Death Note cover"
+                                draggable="false"
+                            />
+                            <div class="kw-dn-inventory__item-meta">
+                                <div class="kw-dn-inventory__item-eyebrow">Notebook</div>
+                                <div class="kw-dn-inventory__item-title">Death Note</div>
+                                <div class="kw-dn-inventory__item-summary">
+                                    <span>${notebookAvailable ? 'In play' : 'Missing / destroyed'}</span>
+                                    <span>Held by ${escapeHtml(formatActorLabel(ownership.holder))}</span>
+                                    <span>Your access: ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
+                                </div>
+                            </div>
+                            <div class="kw-dn-inventory__item-state">
+                                <span class="kw-dn-inventory__item-chip">${settings.isOpen ? 'Opened' : 'Stored'}</span>
+                                <span class="kw-dn-inventory__item-chip">${escapeHtml(linkedLabel)}</span>
+                            </div>
+                        </button>
+
+                        <div class="kw-dn-inventory__item-body ${settings.inventoryNotebookExpanded ? '' : 'is-hidden'}">
+                            <div class="kw-dn-inventory__actions">
+                                <button
+                                    type="button"
+                                    id="kw-dn-inventory-open"
+                                    class="menu_button"
+                                    ${canOpenNotebook ? '' : 'disabled'}
+                                >${settings.isOpen ? 'Put Away' : 'Open Death Note'}</button>
+                                <button
+                                    type="button"
+                                    id="kw-dn-inventory-tear"
+                                    class="menu_button"
+                                    ${canOpenNotebook ? '' : 'disabled'}
+                                >Tear a Piece Off</button>
+                            </div>
+                            <label class="kw-dn-inventory__checkbox">
+                                <input
+                                    type="checkbox"
+                                    id="kw-dn-inventory-show-floating"
+                                    ${settings.showFloatingButton ? 'checked' : ''}
+                                />
+                                <span>Show the floating notebook button while the Death Note is stored.</span>
+                            </label>
+                            <div class="kw-dn-inventory__note">
+                                Opening from inventory always works when you have full notebook access, even if the floating notebook is hidden.
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="kw-dn-inventory__group">
+                        <div class="kw-dn-inventory__group-head">
+                            <div>
+                                <div class="kw-dn-inventory__group-title">Torn Scraps</div>
+                                <div class="kw-dn-inventory__group-copy">Scraps can be passed around to let other characters perceive your linked Shinigami.</div>
+                            </div>
+                        </div>
+                        <div class="kw-dn-inventory__group-body">
+                            ${renderInventoryScrapRows()}
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function renderNotebookManagerHtml() {
@@ -1256,6 +1458,28 @@ function renderSettingsPanel() {
     syncSettingsUi();
 }
 
+function ensureInventoryTray() {
+    const settings = getSettings();
+    const existing = document.getElementById(INVENTORY_ID);
+
+    if (!settings.enabled) {
+        if (existing) {
+            existing.remove();
+        }
+        return null;
+    }
+
+    let root = existing;
+    if (!root) {
+        root = document.createElement('div');
+        root.id = INVENTORY_ID;
+        document.body.append(root);
+    }
+
+    root.innerHTML = renderInventoryTrayHtml();
+    return root;
+}
+
 function updatePageWithOverflow(textarea, pages, pageIndex, value) {
     const nextPages = ensurePageCapacity(pages, pageIndex);
     const result = [...nextPages];
@@ -1377,7 +1601,7 @@ function buildWidgetHtml() {
 
 function ensureWidget() {
     const settings = getSettings();
-    if (!settings.enabled) {
+    if (!settings.enabled || (!settings.showFloatingButton && !settings.isOpen)) {
         const existing = document.getElementById(FLOATING_ID);
         if (existing) {
             existing.remove();
@@ -1599,27 +1823,7 @@ function bindWidgetUi() {
 
                     if (!state.moved && state.toggleOnTap) {
                         const settings = getSettings();
-                        const isOpening = !settings.isOpen;
-                        if (root) {
-                            const rectFinal = root.getBoundingClientRect();
-                            if (isOpening) {
-                                settings.closedFloatingX = Math.round(rectFinal.left);
-                                settings.closedFloatingY = Math.round(rectFinal.top);
-
-                                const nextPosition = getTogglePosition(rectFinal.left, rectFinal.top, true);
-                                settings.floatingX = nextPosition.x;
-                                settings.floatingY = nextPosition.y;
-                            } else if (Number.isFinite(settings.closedFloatingX) && Number.isFinite(settings.closedFloatingY)) {
-                                settings.floatingX = settings.closedFloatingX;
-                                settings.floatingY = settings.closedFloatingY;
-                            } else {
-                                settings.floatingX = Math.round(rectFinal.left);
-                                settings.floatingY = Math.round(rectFinal.top);
-                            }
-                        }
-                        settings.isOpen = isOpening;
-                        scheduleSettingsSave();
-                        refreshDeathNoteUi();
+                        setNotebookOpenState(!settings.isOpen);
                     }
                 };
 
@@ -1721,6 +1925,90 @@ function bindWidgetUi() {
         });
 }
 
+function bindInventoryUi() {
+    $(document)
+        .off('click', '#kw-dn-inventory-toggle')
+        .on('click', '#kw-dn-inventory-toggle', (event) => {
+            event.preventDefault();
+            const settings = getSettings();
+            settings.inventoryCollapsed = !settings.inventoryCollapsed;
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '#kw-dn-inventory-notebook-toggle')
+        .on('click', '#kw-dn-inventory-notebook-toggle', (event) => {
+            event.preventDefault();
+            const settings = getSettings();
+            settings.inventoryNotebookExpanded = !settings.inventoryNotebookExpanded;
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '#kw-dn-inventory-open')
+        .on('click', '#kw-dn-inventory-open', (event) => {
+            event.preventDefault();
+            const settings = getSettings();
+            const inventory = getDeathNoteInventory();
+            const ownership = getNotebookOwnership();
+            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+                notify('warning', 'You need full notebook access to open the Death Note from inventory.');
+                return;
+            }
+
+            setNotebookOpenState(!settings.isOpen);
+        })
+        .off('click', '#kw-dn-inventory-tear')
+        .on('click', '#kw-dn-inventory-tear', async (event) => {
+            event.preventDefault();
+            const inventory = getDeathNoteInventory();
+            const ownership = getNotebookOwnership();
+            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+                notify('warning', 'You need full notebook access to tear off a scrap.');
+                return;
+            }
+
+            await commitInventoryMutation(() => createNotebookScrap(getUserActor(), {
+                reason: 'A notebook scrap was torn off from the inventory tray.',
+            }), 'Notebook scrap created.');
+        })
+        .off('change', '#kw-dn-inventory-show-floating')
+        .on('change', '#kw-dn-inventory-show-floating', (event) => {
+            getSettings().showFloatingButton = Boolean($(event.currentTarget).prop('checked'));
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '.kw-dn-inventory__scrap-give')
+        .on('click', '.kw-dn-inventory__scrap-give', async (event) => {
+            event.preventDefault();
+            const scrapId = String($(event.currentTarget).data('scrapId') || '').trim();
+            if (!scrapId) {
+                return;
+            }
+
+            const select = $(`.kw-dn-inventory__scrap-select[data-scrap-id="${scrapId}"]`).first();
+            const actor = decodeActorValue(select.val(), null);
+            if (!actor) {
+                notify('warning', 'Choose who should receive the scrap.');
+                return;
+            }
+
+            await commitInventoryMutation(() => transferNotebookScrap(scrapId, actor, {
+                reason: `${actor.name || actor.type} received a Death Note scrap via inventory.`,
+            }), 'Notebook scrap transferred.');
+        })
+        .off('click', '.kw-dn-inventory__scrap-remove')
+        .on('click', '.kw-dn-inventory__scrap-remove', async (event) => {
+            event.preventDefault();
+            const scrapId = String($(event.currentTarget).data('scrapId') || '').trim();
+            if (!scrapId) {
+                return;
+            }
+
+            await commitInventoryMutation(() => removeNotebookScrap(scrapId, {
+                reason: 'Notebook scrap destroyed from inventory.',
+            }), 'Notebook scrap destroyed.');
+        });
+}
+
 let measureElement = null;
 
 function getMeasureElement() {
@@ -1818,6 +2106,7 @@ function paginateNotebookText(textarea, text) {
 export function refreshDeathNoteUi() {
     renderSettingsPanel();
     syncSettingsUi();
+    ensureInventoryTray();
     ensureWidget();
     ensureChatNameMaskObserver();
     queueMaskedChatNameRender();
@@ -1826,8 +2115,10 @@ export function refreshDeathNoteUi() {
 export function setupDeathNoteUi() {
     renderSettingsPanel();
     syncSettingsUi();
+    ensureInventoryTray();
     ensureWidget();
     bindWidgetUi();
+    bindInventoryUi();
     ensureChatNameMaskObserver();
     queueMaskedChatNameRender();
 }
