@@ -393,7 +393,9 @@
     #kw-deathnote-inventory {
         width: calc(100vw - 20px);
         left: 10px;
-        bottom: 10px;
+        top: calc(env(safe-area-inset-top, 0px) + 10px);
+        bottom: auto;
+        z-index: 2147483647;
     }
 
     .kw-dn-inventory__toggle {
@@ -402,7 +404,7 @@
     }
 
     .kw-dn-inventory__panel {
-        max-height: min(58vh, 32rem);
+        max-height: min(44vh, 24rem);
         overflow-y: auto;
     }
 
@@ -425,7 +427,8 @@
     #kw-deathnote-inventory {
         width: calc(100vw - 16px);
         left: 8px;
-        bottom: 8px;
+        top: calc(env(safe-area-inset-top, 0px) + 8px);
+        bottom: auto;
     }
 
     .kw-dn-inventory__panel {
@@ -1014,6 +1017,7 @@
 }
 
 .kw-deathnote--mobile {
+    z-index: 2147483644;
     --kw-dn-font-size: 16px;
     --kw-dn-line-height: 27px;
     --kw-dn-editor-top: 9px;
