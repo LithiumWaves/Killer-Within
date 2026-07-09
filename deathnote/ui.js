@@ -19,6 +19,7 @@ import {
     getLinkedShinigami,
     getNotebookPages,
     getNotebookOwnership,
+    getPermanentResolvedLineCounts,
     getRecentChatMemoryCandidates,
     getSettings,
     learnCharacterName,
@@ -177,6 +178,54 @@ function sanitizeNotebookInputPageValue(value) {
         value: sanitized,
         blockedName: blockedActor?.name || blockedLine || '',
     };
+}
+
+function buildPermanentLineMaskText(sourceType, sourceId, text) {
+    const counts = getPermanentResolvedLineCounts(sourceType, sourceId);
+    if (!(counts instanceof Map) || !counts.size) {
+        return '';
+    }
+
+    const lines = String(text ?? '').split(/\r?\n/);
+    const remaining = new Map(counts);
+    let hasLockedLine = false;
+    const maskedLines = lines.map((line) => {
+        const rawLine = String(line ?? '');
+        const key = rawLine.trim();
+        const available = key ? (remaining.get(key) ?? 0) : 0;
+        if (available > 0) {
+            remaining.set(key, available - 1);
+            hasLockedLine = true;
+            return rawLine || ' ';
+        }
+
+        return '\u200b';
+    });
+
+    return hasLockedLine ? maskedLines.join('\n') : '';
+}
+
+function renderPermanentLineOverlay(sourceType, sourceId, text, className = '') {
+    const overlayText = buildPermanentLineMaskText(sourceType, sourceId, text);
+    const classes = ['kw-dn-locked-overlay', className, overlayText ? 'is-visible' : ''].filter(Boolean).join(' ');
+    return `
+        <div class="${classes}" aria-hidden="true">${escapeHtml(overlayText || '\u200b')}</div>
+    `;
+}
+
+function syncPermanentLineOverlay(input, sourceType, sourceId, text) {
+    if (!(input instanceof HTMLElement) || !input.parentElement) {
+        return;
+    }
+
+    const overlay = input.parentElement.querySelector('.kw-dn-locked-overlay');
+    if (!(overlay instanceof HTMLElement)) {
+        return;
+    }
+
+    const overlayText = buildPermanentLineMaskText(sourceType, sourceId, text);
+    overlay.textContent = overlayText || '\u200b';
+    overlay.classList.toggle('is-visible', Boolean(overlayText));
 }
 
 function shouldPlayWritingSoundForInputType(inputType) {
@@ -506,6 +555,7 @@ function renderNotebookPage(text, extraClass = '') {
 
 function renderEditablePage({ pageIndex, side, text, extraClass = '' }) {
     const classes = ['kw-deathnote__paper', 'kw-deathnote__paper--editable', extraClass].filter(Boolean).join(' ');
+    const sourceId = `page:${pageIndex}`;
     return `
         <div class="${classes}">
             <textarea
@@ -516,6 +566,7 @@ function renderEditablePage({ pageIndex, side, text, extraClass = '' }) {
                 autocomplete="off"
                 spellcheck="false"
             >${escapeHtml(String(text || ''))}</textarea>
+            ${renderPermanentLineOverlay('notebook', sourceId, text, 'kw-deathnote__locked-overlay')}
         </div>
     `;
 }
@@ -1363,13 +1414,16 @@ function renderScrapSelectionPanel(scrap) {
             </div>
             <div class="kw-dn-inventory__scrap-paper">
                 <div class="kw-dn-inventory__scrap-paper-label">Torn Note</div>
-                <textarea
-                    class="kw-dn-inventory__scrap-textarea"
-                    data-scrap-id="${escapeHtml(scrap.id)}"
-                    rows="2"
-                    spellcheck="false"
-                    placeholder="Write up to two names..."
-                >${escapeHtml(scrap.noteText || '')}</textarea>
+                <div class="kw-dn-inventory__scrap-editor">
+                    <textarea
+                        class="kw-dn-inventory__scrap-textarea"
+                        data-scrap-id="${escapeHtml(scrap.id)}"
+                        rows="2"
+                        spellcheck="false"
+                        placeholder="Write up to two names..."
+                    >${escapeHtml(scrap.noteText || '')}</textarea>
+                    ${renderPermanentLineOverlay('scrap', `scrap:${scrap.id}`, scrap.noteText || '', 'kw-dn-inventory__locked-overlay')}
+                </div>
                 <div class="kw-dn-inventory__scrap-paper-note">A scrap can hold no more than two valid Death Note names.</div>
             </div>
             <div class="kw-dn-inventory__context-link">
@@ -1729,6 +1783,8 @@ function syncSettingsUi() {
     const settings = getSettings();
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
     $('#kw-deathnote-require-known-names').prop('checked', Boolean(settings.requireKnownNamesForKills));
+    $('#kw-deathnote-permanent-notebook').prop('checked', Boolean(settings.permanentResolvedNotebookEntries));
+    $('#kw-deathnote-permanent-scrap').prop('checked', Boolean(settings.permanentResolvedScrapEntries));
     $('#kw-deathnote-open-sound').prop('checked', Boolean(settings.enableOpenSound));
     $('#kw-deathnote-writing-sound').prop('checked', Boolean(settings.enableWritingSound));
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
@@ -1766,6 +1822,39 @@ function bindSettingsUi() {
             persistChatChanges();
             refreshDeathNoteUi();
         }
+    });
+
+    $('#kw-deathnote-permanent-notebook').off('change').on('change', async (event) => {
+        getSettings().permanentResolvedNotebookEntries = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+        const changed = setNotebookPages([...getNotebookPages()]);
+        if (changed) {
+            await persistChatChanges();
+        }
+        refreshDeathNoteUi();
+    });
+
+    $('#kw-deathnote-permanent-scrap').off('change').on('change', async (event) => {
+        getSettings().permanentResolvedScrapEntries = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+        const inventory = getDeathNoteInventory();
+        let changed = false;
+        for (const scrap of Array.isArray(inventory.scraps) ? inventory.scraps : []) {
+            if (!scrap || !scrap.active) {
+                continue;
+            }
+
+            if (updateNotebookScrapText(scrap.id, scrap.noteText || '', {
+                reason: 'Scrap permanence setting changed.',
+            })) {
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            await persistChatChanges();
+        }
+        refreshDeathNoteUi();
     });
 
     $('#kw-deathnote-open-sound').off('change').on('change', (event) => {
@@ -2084,6 +2173,17 @@ function renderSettingsPanel() {
                     <input id="kw-deathnote-require-known-names" type="checkbox" />
                     <span>Require discovered names for Death Note kills</span>
                 </label>
+                <div class="killer-within-settings__field">
+                    <span>Resolved ink</span>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-deathnote-permanent-notebook" type="checkbox" />
+                        <span>Resolved notebook lines become permanent and darken</span>
+                    </label>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-deathnote-permanent-scrap" type="checkbox" />
+                        <span>Resolved scrap lines become permanent and darken</span>
+                    </label>
+                </div>
                 <div class="killer-within-settings__field">
                     <span>Notebook sounds</span>
                     <label class="killer-within-settings__row">
@@ -2525,11 +2625,15 @@ function bindWidgetUi() {
             const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
             const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
             const value = sanitizedInput.value;
+            syncPermanentLineOverlay(textarea, 'notebook', `page:${pageIndex}`, value);
             const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
             const nextPages = sanitizeNotebookPagesForRules(update.pages);
             const changed = setNotebookPages(nextPages);
 
             if (!changed) {
+                if (value !== inputValue) {
+                    textarea.value = value;
+                }
                 return;
             }
 
@@ -2549,19 +2653,27 @@ function bindWidgetUi() {
                 return;
             }
 
-            const activeTrimmed = String(nextPages[pageIndex] || '') !== value;
+            const activePageChanged = String(nextPages[pageIndex] || '') !== value;
             const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
             const otherSideChanged = pageSide === 'left'
                 ? beforeVisible.right !== afterVisible.right
                 : beforeVisible.left !== afterVisible.left;
 
-            if (activeTrimmed) {
+            if (update.overflowed) {
                 const nextPageIndex = pageIndex + 1;
                 const nextSpreadIndex = nextPageIndex === 0 ? 0 : Math.floor((nextPageIndex + 1) / 2);
                 settings.currentSpreadIndex = nextSpreadIndex;
                 queueFocusRestore(nextPageIndex, nextPageIndex % 2 === 1 ? 'left' : 'right', 'start');
                 scheduleSettingsSave();
                 refreshDeathNoteUi();
+                scheduleChatSave(state);
+                return;
+            }
+
+            if (activePageChanged) {
+                queueFocusRestore(pageIndex, pageSide, 'end');
+                refreshDeathNoteUi();
+                scheduleSettingsSave();
                 scheduleChatSave(state);
                 return;
             }
@@ -2605,7 +2717,9 @@ function bindWidgetUi() {
             }
 
             const rawValue = textarea.value;
-            const sanitizedValue = sanitizeScrapNoteText(rawValue, 2);
+            const trimmedToHeight = trimTextareaValueToFit(textarea, rawValue);
+            const sanitizedValue = sanitizeScrapNoteText(trimmedToHeight, 2);
+            syncPermanentLineOverlay(textarea, 'scrap', `scrap:${scrapId}`, sanitizedValue);
             const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
             if (shouldPlayWritingSoundForInputType(inputType)) {
                 pulseWritingSound();
@@ -2623,6 +2737,18 @@ function bindWidgetUi() {
                 const safeEnd = Math.min(selectionEnd, nextLength);
                 textarea.setSelectionRange(safeStart, safeEnd);
             }
+
+            const actualScrapText = String(getDeathNoteInventory().scraps.find((entry) => entry?.id === scrapId)?.noteText || '');
+            if (textarea.value !== actualScrapText) {
+                const selectionStart = textarea.selectionStart;
+                const selectionEnd = textarea.selectionEnd;
+                textarea.value = actualScrapText;
+                const nextLength = actualScrapText.length;
+                const safeStart = Math.min(selectionStart, nextLength);
+                const safeEnd = Math.min(selectionEnd, nextLength);
+                textarea.setSelectionRange(safeStart, safeEnd);
+            }
+            syncPermanentLineOverlay(textarea, 'scrap', `scrap:${scrapId}`, actualScrapText);
 
             if (!changed) {
                 return;
@@ -2933,6 +3059,27 @@ function measureFits(textarea, value) {
     measure.textContent = value || '\u200b';
 
     return measure.scrollHeight <= textarea.clientHeight + 1;
+}
+
+function trimTextareaValueToFit(textarea, value) {
+    const source = String(value ?? '');
+    if (!source || measureFits(textarea, source)) {
+        return source;
+    }
+
+    let low = 0;
+    let high = source.length;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        const sample = source.slice(0, mid);
+        if (measureFits(textarea, sample)) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    return source.slice(0, Math.max(0, low)).trimEnd();
 }
 
 function findPageBreakIndex(textarea, text) {

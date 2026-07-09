@@ -680,6 +680,27 @@ function normalizeIdentityTheftState(value) {
     };
 }
 
+function normalizeDeathEntrySourceType(value) {
+    const sourceType = String(value || '').trim().toLowerCase();
+    if (sourceType === 'notebook' || sourceType === 'scrap') {
+        return sourceType;
+    }
+
+    return 'notebook';
+}
+
+function normalizeDeathEntrySourceId(value, fallback = '') {
+    return String(value || fallback || '').trim();
+}
+
+function getDeathEntrySourceKey(sourceType, sourceId, noteText) {
+    return [
+        normalizeDeathEntrySourceType(sourceType),
+        normalizeDeathEntrySourceId(sourceId),
+        String(noteText || '').trim(),
+    ].join('::');
+}
+
 function getIdentityTheftActorKey(actor) {
     return getActorKnowledgeKey(normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, ''));
 }
@@ -981,6 +1002,14 @@ export function getChatState() {
     if (!Array.isArray(state.entries)) {
         state.entries = [];
     }
+    state.entries = state.entries
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            ...entry,
+            sourceType: normalizeDeathEntrySourceType(entry.sourceType),
+            sourceId: normalizeDeathEntrySourceId(entry.sourceId),
+            sourceLineIndex: Number.isFinite(Number(entry.sourceLineIndex)) ? Math.max(0, Math.floor(Number(entry.sourceLineIndex))) : null,
+        }));
 
     if (!Object.hasOwn(state, 'hasNotebook')) {
         state.hasNotebook = true;
@@ -2109,6 +2138,9 @@ export function addDeathEntry({
     noteText,
     hasExplicitCause,
     hasExplicitTime,
+    sourceType = 'notebook',
+    sourceId = '',
+    sourceLineIndex = null,
 } = {}) {
     const state = getChatState();
 
@@ -2120,6 +2152,9 @@ export function addDeathEntry({
         remainingAssistantMessages: normalizeRemaining(remainingAssistantMessages),
         hasExplicitCause: Boolean(hasExplicitCause),
         hasExplicitTime: Boolean(hasExplicitTime),
+        sourceType: normalizeDeathEntrySourceType(sourceType),
+        sourceId: normalizeDeathEntrySourceId(sourceId),
+        sourceLineIndex: Number.isFinite(Number(sourceLineIndex)) ? Math.max(0, Math.floor(Number(sourceLineIndex))) : null,
         status: 'active',
         createdAt: Date.now(),
         resolvedAt: null,
@@ -2262,17 +2297,28 @@ export function sanitizeScrapNoteText(text, maxNames = 2) {
 }
 
 function collectActiveDeathNoteSourceLines(state) {
-    const notebookLines = String(state.notebookText ?? '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
+    const notebookLines = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '')
+        .flatMap((page, pageIndex) => String(page || '')
+            .split('\n')
+            .map((line, lineIndex) => ({
+                line: String(line || '').trim(),
+                sourceType: 'notebook',
+                sourceId: `page:${pageIndex}`,
+                sourceLineIndex: lineIndex,
+            }))
+            .filter((entry) => entry.line));
     const scrapLines = Array.isArray(state.inventory?.scraps)
         ? state.inventory.scraps
             .filter((scrap) => scrap?.active)
             .flatMap((scrap) => String(scrap.noteText || '')
                 .split('\n')
-                .map((line) => line.trim())
-                .filter(Boolean))
+                .map((line, lineIndex) => ({
+                    line: String(line || '').trim(),
+                    sourceType: 'scrap',
+                    sourceId: `scrap:${scrap.id}`,
+                    sourceLineIndex: lineIndex,
+                }))
+                .filter((entry) => entry.line))
         : [];
 
     return [...notebookLines, ...scrapLines];
@@ -2281,8 +2327,122 @@ function collectActiveDeathNoteSourceLines(state) {
 function buildLineCounts(lines) {
     const counts = new Map();
     for (const line of lines) {
-        counts.set(line, (counts.get(line) ?? 0) + 1);
+        const key = getDeathEntrySourceKey(line?.sourceType, line?.sourceId, line?.line);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
     }
+    return counts;
+}
+
+function isPermanentResolvedEntryEnabledForSourceType(sourceType) {
+    const settings = getSettings();
+    const normalized = normalizeDeathEntrySourceType(sourceType);
+    if (normalized === 'scrap') {
+        return Boolean(settings.permanentResolvedScrapEntries);
+    }
+
+    return Boolean(settings.permanentResolvedNotebookEntries);
+}
+
+function getPermanentResolvedEntriesForSource(sourceType, sourceId) {
+    if (!isPermanentResolvedEntryEnabledForSourceType(sourceType)) {
+        return [];
+    }
+
+    const state = getChatState();
+    const normalizedType = normalizeDeathEntrySourceType(sourceType);
+    const normalizedId = normalizeDeathEntrySourceId(sourceId);
+    return state.entries.filter((entry) => {
+        if (!entry) {
+            return false;
+        }
+
+        if (String(entry.status || '').trim().toLowerCase() !== 'resolved') {
+            return false;
+        }
+
+        if (normalizeDeathEntrySourceType(entry.sourceType) !== normalizedType) {
+            return false;
+        }
+
+        return normalizeDeathEntrySourceId(entry.sourceId) === normalizedId && String(entry.noteText || '').trim();
+    });
+}
+
+function enforcePermanentLinesForSource(text, sourceType, sourceId, maxLines = null) {
+    const source = String(text ?? '');
+    const lines = source ? source.split(/\r?\n/).map((line) => String(line ?? '')) : [];
+    const lockedEntries = getPermanentResolvedEntriesForSource(sourceType, sourceId);
+    if (!lockedEntries.length) {
+        if (!Number.isFinite(Number(maxLines))) {
+            return source;
+        }
+
+        const limited = lines.slice(0, Math.max(0, Math.floor(Number(maxLines))));
+        return limited.join('\n').trimEnd();
+    }
+
+    const lineCounts = new Map();
+    for (const line of lines) {
+        const key = String(line || '').trim();
+        if (!key) {
+            continue;
+        }
+
+        lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+    }
+
+    const missingLockedLines = [];
+    const lockedCounts = new Map();
+    for (const entry of lockedEntries) {
+        const key = String(entry.noteText || '').trim();
+        if (!key) {
+            continue;
+        }
+
+        lockedCounts.set(key, (lockedCounts.get(key) ?? 0) + 1);
+    }
+
+    for (const [key, requiredCount] of lockedCounts.entries()) {
+        const currentCount = lineCounts.get(key) ?? 0;
+        for (let index = currentCount; index < requiredCount; index += 1) {
+            missingLockedLines.push(key);
+        }
+    }
+
+    let nextLines = [...lines, ...missingLockedLines];
+    if (Number.isFinite(Number(maxLines))) {
+        const limit = Math.max(0, Math.floor(Number(maxLines)));
+        if (missingLockedLines.length >= limit) {
+            nextLines = missingLockedLines.slice(0, limit);
+        } else {
+            nextLines = [...nextLines.slice(0, Math.max(0, limit - missingLockedLines.length)), ...missingLockedLines];
+        }
+    }
+
+    return nextLines.join('\n').trimEnd();
+}
+
+export function enforcePermanentNotebookPages(pages) {
+    const normalized = normalizeNotebookPages(pages, '');
+    return normalized.map((page, pageIndex) => enforcePermanentLinesForSource(page, 'notebook', `page:${pageIndex}`));
+}
+
+export function enforcePermanentScrapText(scrapId, text, maxLines = 2) {
+    const sourceId = `scrap:${String(scrapId || '').trim()}`;
+    return enforcePermanentLinesForSource(sanitizeScrapNoteText(text, maxLines), 'scrap', sourceId, maxLines);
+}
+
+export function getPermanentResolvedLineCounts(sourceType, sourceId) {
+    const counts = new Map();
+    for (const entry of getPermanentResolvedEntriesForSource(sourceType, sourceId)) {
+        const key = String(entry.noteText || '').trim();
+        if (!key) {
+            continue;
+        }
+
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
     return counts;
 }
 
@@ -2308,7 +2468,7 @@ export function getNotebookPages() {
 
 export function setNotebookPages(pages) {
     const state = getChatState();
-    const normalized = normalizeNotebookPages(pages, state.notebookText ?? '');
+    const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, state.notebookText ?? ''));
     const nextText = normalized.join('');
     const sameLength = Array.isArray(state.notebookPages) && state.notebookPages.length === normalized.length;
     const samePages = sameLength && normalized.every((page, index) => state.notebookPages[index] === page);
@@ -2336,7 +2496,7 @@ export function updateNotebookScrapText(scrapId, noteText, options = {}) {
         return false;
     }
 
-    const sanitized = sanitizeScrapNoteText(noteText, 2);
+    const sanitized = enforcePermanentScrapText(id, noteText, 2);
     if (scrap.noteText === sanitized) {
         return false;
     }
@@ -2370,26 +2530,42 @@ export function reconcileEntriesFromNotebookPages() {
             continue;
         }
 
+        entry.status = normalizeEntryStatus(entry.status);
+        if (entry.status === 'resolved') {
+            retained.push(entry);
+            continue;
+        }
+
+        const available = counts.get(getDeathEntrySourceKey(entry.sourceType, entry.sourceId, key)) ?? 0;
+        if (available <= 0) {
+            continue;
+        }
+
+        counts.set(getDeathEntrySourceKey(entry.sourceType, entry.sourceId, key), available - 1);
+        retained.push(entry);
+    }
+
+    for (const lineEntry of lines) {
+        const key = getDeathEntrySourceKey(lineEntry.sourceType, lineEntry.sourceId, lineEntry.line);
         const available = counts.get(key) ?? 0;
         if (available <= 0) {
             continue;
         }
 
-        counts.set(key, available - 1);
-        retained.push(entry);
-    }
+        const parsed = parseNotebookLine(lineEntry.line);
+        if (!parsed) {
+            continue;
+        }
 
-    for (const [line, count] of counts.entries()) {
-        for (let i = 0; i < count; i += 1) {
-            const parsed = parseNotebookLine(line);
-            if (!parsed) {
-                continue;
-            }
-
-            const entry = addDeathEntry(parsed);
-            if (entry) {
-                retained.push(entry);
-            }
+        const entry = addDeathEntry({
+            ...parsed,
+            sourceType: lineEntry.sourceType,
+            sourceId: lineEntry.sourceId,
+            sourceLineIndex: lineEntry.sourceLineIndex,
+        });
+        if (entry) {
+            retained.push(entry);
+            counts.set(key, available - 1);
         }
     }
 

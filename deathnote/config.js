@@ -23,6 +23,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     debug: false,
     isOpen: false,
     requireKnownNamesForKills: true,
+    permanentResolvedNotebookEntries: false,
+    permanentResolvedScrapEntries: false,
     idStealSuccessChancePercent: 75,
     idStealSuccessChanceOverrides: {},
     idStealSelectedActorKey: '',
