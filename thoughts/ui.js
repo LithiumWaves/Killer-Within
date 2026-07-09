@@ -146,7 +146,7 @@ function buildMemoryManagerHtml() {
                             />
                             <span>Use in context</span>
                         </span>
-                        <span class="kw-memory-entry__meta">Message ${entry.index + 1}</span>
+                        <span class="kw-memory-entry__meta">Thought ${entry.characterThoughtNumber || 1} · Message ${entry.index + 1}</span>
                         <span class="kw-memory-entry__body">${escapeHtml(entry.thought)}</span>
                     </label>
                 `)
