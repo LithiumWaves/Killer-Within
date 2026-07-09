@@ -24,6 +24,7 @@ export function getThoughtEntries({
     const context = getContext();
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     const targetCharacterKey = normalizeCharacterKey(characterKey);
+    const countsByCharacter = new Map();
 
     return chat
         .map((message, index) => ({ message, index }))
@@ -42,13 +43,20 @@ export function getThoughtEntries({
 
             return getMessageCharacterKey(message) === targetCharacterKey;
         })
-        .map(({ message, index }) => ({
-            index,
-            name: message?.name || 'Character',
-            characterKey: getMessageCharacterKey(message),
-            thought: getAssistantThought(message),
-            selected: isThoughtEnabledInContext(message),
-        }))
+        .map(({ message, index }) => {
+            const entryCharacterKey = getMessageCharacterKey(message) || normalizeCharacterKey(message?.name || '') || '__unknown_character__';
+            const characterThoughtNumber = (countsByCharacter.get(entryCharacterKey) ?? 0) + 1;
+            countsByCharacter.set(entryCharacterKey, characterThoughtNumber);
+
+            return {
+                index,
+                name: message?.name || 'Character',
+                characterKey: getMessageCharacterKey(message),
+                thought: getAssistantThought(message),
+                selected: isThoughtEnabledInContext(message),
+                characterThoughtNumber,
+            };
+        })
         .slice(-Math.max(0, Number(limit) || 0));
 }
 
@@ -68,7 +76,7 @@ export function buildThoughtHistoryBlock(limit, characterKey = getActiveCharacte
     }
 
     return history
-        .map(({ index, name, thought }) => `Thought ${index + 1} | ${name}\n${thought}`)
+        .map(({ characterThoughtNumber, name, thought }) => `Thought ${characterThoughtNumber} | ${name}\n${thought}`)
         .join('\n\n');
 }
 
