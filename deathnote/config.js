@@ -24,6 +24,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     isOpen: false,
     requireKnownNamesForKills: true,
     idStealSuccessChancePercent: 75,
+    idStealSuccessChanceOverrides: {},
+    idStealSelectedActorKey: '',
     enableOpenSound: true,
     enableWritingSound: true,
     showFloatingButton: true,

@@ -15,6 +15,7 @@ import {
     getCurrentChatCharacterActors,
     getDeathNoteInventory,
     getIdentityStealAttemptState,
+    getIdentityStealSuccessChance,
     getLinkedShinigami,
     getNotebookPages,
     getNotebookOwnership,
@@ -62,8 +63,6 @@ let inventoryDragState = {
     upHandler: null,
     ignoreClick: false,
 };
-const WRITING_SOUND_LOOP_START = 0;
-const WRITING_SOUND_LOOP_END = 1.2;
 const WRITING_SOUND_IDLE_MS = 280;
 let deathNoteAudioState = {
     openAudio: null,
@@ -89,14 +88,7 @@ function getDeathNoteAudio(type) {
     if (!deathNoteAudioState.writingAudio) {
         const audio = new Audio(new URL('../audio/writing-with-pen.mp3', import.meta.url).toString());
         audio.preload = 'auto';
-        audio.addEventListener('timeupdate', () => {
-            if (audio.currentTime >= WRITING_SOUND_LOOP_END) {
-                audio.currentTime = WRITING_SOUND_LOOP_START;
-                if (audio.paused) {
-                    audio.play().catch(() => {});
-                }
-            }
-        });
+        audio.loop = true;
         deathNoteAudioState.writingAudio = audio;
     }
 
@@ -116,7 +108,7 @@ function stopWritingSound(reset = true) {
 
     audio.pause();
     if (reset) {
-        audio.currentTime = WRITING_SOUND_LOOP_START;
+        audio.currentTime = 0;
     }
 }
 
@@ -149,9 +141,6 @@ function pulseWritingSound() {
 
     try {
         if (audio.paused) {
-            if (audio.currentTime >= WRITING_SOUND_LOOP_END || audio.currentTime < WRITING_SOUND_LOOP_START) {
-                audio.currentTime = WRITING_SOUND_LOOP_START;
-            }
             audio.play().catch(() => {});
         }
     } catch (_error) {
@@ -528,8 +517,26 @@ function renderNameKnowledgeManagerHtml() {
         `;
     }
 
+    const settings = getSettings();
+    const selectedKey = (() => {
+        const requested = String(settings.idStealSelectedActorKey || '').trim();
+        if (requested && directory.some((entry) => entry && entry.key === requested)) {
+            return requested;
+        }
+        return String(directory[0]?.key || '').trim();
+    })();
+    const selectedEntry = directory.find((entry) => entry && entry.key === selectedKey) || directory[0];
+    const selectedChance = selectedEntry ? getIdentityStealSuccessChance(selectedEntry.actor) : 75;
+    const selectedHasOverride = Boolean(
+        selectedEntry
+        && settings.idStealSuccessChanceOverrides
+        && typeof settings.idStealSuccessChanceOverrides === 'object'
+        && Object.hasOwn(settings.idStealSuccessChanceOverrides, selectedEntry.key),
+    );
+
     const rows = directory.map((entry) => {
         const stealState = getIdentityStealAttemptState(entry.actor);
+        const successChance = getIdentityStealSuccessChance(entry.actor);
         let primaryActionLabel = entry.known ? 'Hide again' : 'Steal ID';
         let primaryActionClass = entry.known ? 'kw-deathnote-hide-name' : 'kw-deathnote-steal-id';
         let primaryActionDisabled = '';
@@ -549,7 +556,7 @@ function renderNameKnowledgeManagerHtml() {
             <div class="kw-deathnote-item">
                 <div class="kw-deathnote-item__meta">
                     <b>${escapeHtml(entry.displayName)}</b>
-                    <span>${escapeHtml(statusDetail)}</span>
+                    <span>${escapeHtml(`${statusDetail} | Steal success: ${successChance}%`)}</span>
                 </div>
                 <span class="kw-deathnote-name-state">${entry.known ? 'Known' : 'Hidden'}</span>
                 <div class="kw-deathnote-item__actions">
@@ -571,13 +578,40 @@ function renderNameKnowledgeManagerHtml() {
         `;
     }).join('');
 
-    const settings = getSettings();
     return `
         <div class="kw-deathnote-manager">
             <div class="kw-deathnote-manager__summary">
                 <span><b>Unknown names stay scrambled</b> until they are learned in-scene.</span>
-                <span><b>Steal ID success chance:</b> ${escapeHtml(String(settings.idStealSuccessChancePercent))}%</span>
+                <span><b>Default steal success chance:</b> ${escapeHtml(String(Math.min(100, Math.max(0, Number(settings.idStealSuccessChancePercent) || 75))))}%</span>
                 <span><b>Scope:</b> Current chat participants only</span>
+            </div>
+            <div class="kw-deathnote-manager__actions">
+                <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                    <span>Character perception target</span>
+                    <select id="kw-deathnote-id-steal-character" class="text_pole">
+                        ${directory.map((entry) => `
+                            <option value="${escapeHtml(entry.key)}" ${entry.key === selectedKey ? 'selected' : ''}>${escapeHtml(entry.trueName || entry.displayName)}</option>
+                        `).join('')}
+                    </select>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Steal success %</span>
+                    <input
+                        id="kw-deathnote-id-steal-success-box"
+                        class="text_pole"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value="${escapeHtml(String(selectedChance))}"
+                    />
+                </label>
+                <button
+                    type="button"
+                    id="kw-deathnote-id-steal-clear"
+                    class="menu_button"
+                    ${selectedHasOverride ? '' : 'disabled'}
+                >Use Default</button>
             </div>
             <div class="kw-deathnote-manager__list">${rows}</div>
         </div>
@@ -1580,8 +1614,6 @@ function syncSettingsUi() {
     const settings = getSettings();
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
     $('#kw-deathnote-require-known-names').prop('checked', Boolean(settings.requireKnownNamesForKills));
-    $('#kw-deathnote-id-steal-success').val(String(Math.min(100, Math.max(0, Number(settings.idStealSuccessChancePercent) || 75))));
-    $('#kw-deathnote-id-steal-success-value').text(`${Math.min(100, Math.max(0, Number(settings.idStealSuccessChancePercent) || 75))}%`);
     $('#kw-deathnote-open-sound').prop('checked', Boolean(settings.enableOpenSound));
     $('#kw-deathnote-writing-sound').prop('checked', Boolean(settings.enableWritingSound));
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
@@ -1604,15 +1636,6 @@ function bindSettingsUi() {
             persistChatChanges();
             refreshDeathNoteUi();
         }
-    });
-
-    $('#kw-deathnote-id-steal-success').off('input change').on('input change', (event) => {
-        const raw = Number($(event.currentTarget).val());
-        getSettings().idStealSuccessChancePercent = Number.isFinite(raw)
-            ? Math.min(100, Math.max(0, Math.round(raw)))
-            : 75;
-        scheduleSettingsSave();
-        syncSettingsUi();
     });
 
     $('#kw-deathnote-open-sound').off('change').on('change', (event) => {
@@ -1730,6 +1753,46 @@ function bindSettingsUi() {
                 source: 'debug_force_reveal',
                 reason: `${actor.name || 'Character'} force-revealed via debug manager.`,
             }), 'Character name force-revealed.');
+        })
+        .off('change', '#kw-deathnote-id-steal-character')
+        .on('change', '#kw-deathnote-id-steal-character', (event) => {
+            getSettings().idStealSelectedActorKey = String($(event.currentTarget).val() || '').trim();
+            scheduleSettingsSave();
+            syncSettingsUi();
+        })
+        .off('input change', '#kw-deathnote-id-steal-success-box')
+        .on('input change', '#kw-deathnote-id-steal-success-box', (event) => {
+            const settings = getSettings();
+            const selectedKey = String(settings.idStealSelectedActorKey || '').trim()
+                || String(getCharacterNameDirectory()[0]?.key || '').trim();
+            if (!selectedKey) {
+                return;
+            }
+
+            const raw = Number($(event.currentTarget).val());
+            const nextValue = Number.isFinite(raw)
+                ? Math.min(100, Math.max(0, Math.round(raw)))
+                : getIdentityStealSuccessChance(getCharacterNameDirectory().find((entry) => entry.key === selectedKey)?.actor || null);
+            settings.idStealSuccessChanceOverrides = settings.idStealSuccessChanceOverrides && typeof settings.idStealSuccessChanceOverrides === 'object'
+                ? settings.idStealSuccessChanceOverrides
+                : {};
+            settings.idStealSuccessChanceOverrides[selectedKey] = nextValue;
+            scheduleSettingsSave();
+            syncSettingsUi();
+        })
+        .off('click', '#kw-deathnote-id-steal-clear')
+        .on('click', '#kw-deathnote-id-steal-clear', (event) => {
+            event.preventDefault();
+            const settings = getSettings();
+            const selectedKey = String(settings.idStealSelectedActorKey || '').trim()
+                || String(getCharacterNameDirectory()[0]?.key || '').trim();
+            if (!selectedKey || !settings.idStealSuccessChanceOverrides || typeof settings.idStealSuccessChanceOverrides !== 'object') {
+                return;
+            }
+
+            delete settings.idStealSuccessChanceOverrides[selectedKey];
+            scheduleSettingsSave();
+            syncSettingsUi();
         })
         .off('click', '.kw-deathnote-track-memory')
         .on('click', '.kw-deathnote-track-memory', async (event) => {
@@ -1886,17 +1949,6 @@ function renderSettingsPanel() {
                 <label class="killer-within-settings__row">
                     <input id="kw-deathnote-require-known-names" type="checkbox" />
                     <span>Require discovered names for Death Note kills</span>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>ID steal success chance <span id="kw-deathnote-id-steal-success-value">75%</span></span>
-                    <input
-                        id="kw-deathnote-id-steal-success"
-                        class="text_pole"
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                    />
                 </label>
                 <div class="killer-within-settings__field">
                     <span>Notebook sounds</span>

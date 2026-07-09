@@ -1272,6 +1272,21 @@ export function getIdentityStealAttemptState(actor) {
     };
 }
 
+export function getIdentityStealSuccessChance(actor) {
+    const settings = getSettings();
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getIdentityTheftActorKey(normalized);
+    const overrides = settings && settings.idStealSuccessChanceOverrides && typeof settings.idStealSuccessChanceOverrides === 'object'
+        ? settings.idStealSuccessChanceOverrides
+        : {};
+    const overrideRaw = key && Object.hasOwn(overrides, key) ? Number(overrides[key]) : NaN;
+    const defaultRaw = Number(settings.idStealSuccessChancePercent);
+    const resolved = Number.isFinite(overrideRaw)
+        ? overrideRaw
+        : (Number.isFinite(defaultRaw) ? defaultRaw : 75);
+    return Math.min(100, Math.max(0, Math.round(resolved)));
+}
+
 export function attemptStealCharacterId(actor, options = {}) {
     const state = getChatState();
     const target = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
@@ -1301,11 +1316,7 @@ export function attemptStealCharacterId(actor, options = {}) {
 
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
     const userActor = normalizeActorRef(options.actor, NOTEBOOK_ACTOR_TYPES.USER, 'User');
-    const settings = getSettings();
-    const successChancePercentRaw = Number(settings.idStealSuccessChancePercent);
-    const successChancePercent = Number.isFinite(successChancePercentRaw)
-        ? Math.min(100, Math.max(0, successChancePercentRaw))
-        : 75;
+    const successChancePercent = getIdentityStealSuccessChance(target);
     if (Math.random() >= (successChancePercent / 100)) {
         const cooldownUntil = timestamp + ID_THEFT_COOLDOWN_MS;
         upsertIdentityTheftCooldown(state, target, cooldownUntil);
