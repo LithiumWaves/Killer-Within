@@ -45,6 +45,19 @@ let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
 let chatNameMaskObserver = null;
 let chatNameMaskQueued = false;
+let inventoryDragState = {
+    dragging: false,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    moved: false,
+    pointerId: null,
+    handlersInstalled: false,
+    moveHandler: null,
+    upHandler: null,
+    ignoreClick: false,
+};
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -58,6 +71,20 @@ function clamp(value, min, max) {
 
 function isPortraitMobileViewport() {
     return window.innerWidth <= MOBILE_VIEWPORT_MAX && window.innerHeight > window.innerWidth;
+}
+
+function resolveInventoryMobilePosition(root = null) {
+    const settings = getSettings();
+    const margin = window.innerWidth <= 420 ? 8 : 10;
+    const width = root ? Math.round(root.getBoundingClientRect().width) : Math.round(Math.min(window.innerWidth - (margin * 2), window.innerWidth <= 420 ? 268 : 296));
+    const preferredX = Number.isFinite(settings.inventoryMobileX) ? settings.inventoryMobileX : window.innerWidth - width - margin;
+    const preferredY = Number.isFinite(settings.inventoryMobileY)
+        ? settings.inventoryMobileY
+        : margin + 0;
+    return {
+        x: clamp(Math.round(preferredX), 0, Math.max(0, window.innerWidth - width)),
+        y: clamp(Math.round(preferredY), 0, Math.max(0, window.innerHeight - 44)),
+    };
 }
 
 function getClosedWidgetSize() {
@@ -1733,6 +1760,18 @@ function ensureInventoryTray() {
     }
 
     root.innerHTML = renderInventoryTrayHtml();
+    if (isPortraitMobileViewport()) {
+        const position = resolveInventoryMobilePosition(root);
+        root.style.left = `${position.x}px`;
+        root.style.top = `${position.y}px`;
+        root.style.right = 'auto';
+        root.style.bottom = 'auto';
+    } else {
+        root.style.left = '';
+        root.style.top = '';
+        root.style.right = '';
+        root.style.bottom = '';
+    }
     return root;
 }
 
@@ -2184,8 +2223,116 @@ function bindWidgetUi() {
 
 function bindInventoryUi() {
     $(document)
+        .off('pointerdown', '#kw-dn-inventory-toggle')
+        .on('pointerdown', '#kw-dn-inventory-toggle', (event) => {
+            if (!isPortraitMobileViewport()) {
+                return;
+            }
+
+            const root = document.getElementById(INVENTORY_ID);
+            if (!root) {
+                return;
+            }
+
+            const e = event.originalEvent || event;
+            if (!e || !e.isPrimary) {
+                return;
+            }
+
+            event.preventDefault();
+            const rect = root.getBoundingClientRect();
+            inventoryDragState.dragging = true;
+            inventoryDragState.moved = false;
+            inventoryDragState.pointerId = e.pointerId;
+            inventoryDragState.startX = e.clientX;
+            inventoryDragState.startY = e.clientY;
+            inventoryDragState.originX = rect.left;
+            inventoryDragState.originY = rect.top;
+
+            if (!inventoryDragState.handlersInstalled) {
+                inventoryDragState.handlersInstalled = true;
+
+                inventoryDragState.moveHandler = (rawEvent) => {
+                    if (!inventoryDragState.dragging) {
+                        return;
+                    }
+
+                    const activeRoot = document.getElementById(INVENTORY_ID);
+                    if (!activeRoot) {
+                        return;
+                    }
+
+                    const eMove = rawEvent;
+                    if (inventoryDragState.pointerId !== null && eMove.pointerId !== inventoryDragState.pointerId) {
+                        return;
+                    }
+
+                    const dx = eMove.clientX - inventoryDragState.startX;
+                    const dy = eMove.clientY - inventoryDragState.startY;
+                    if (Math.abs(dx) + Math.abs(dy) > 4) {
+                        inventoryDragState.moved = true;
+                    }
+
+                    const rectNow = activeRoot.getBoundingClientRect();
+                    const maxX = Math.max(0, window.innerWidth - rectNow.width);
+                    const maxY = Math.max(0, window.innerHeight - Math.min(rectNow.height, 64));
+                    const nextX = clamp(inventoryDragState.originX + dx, 0, maxX);
+                    const nextY = clamp(inventoryDragState.originY + dy, 0, maxY);
+                    activeRoot.style.left = `${Math.round(nextX)}px`;
+                    activeRoot.style.top = `${Math.round(nextY)}px`;
+                    activeRoot.style.right = 'auto';
+                    activeRoot.style.bottom = 'auto';
+                };
+
+                inventoryDragState.upHandler = (rawEvent) => {
+                    if (!inventoryDragState.dragging) {
+                        return;
+                    }
+
+                    const eUp = rawEvent;
+                    if (inventoryDragState.pointerId !== null && eUp.pointerId !== inventoryDragState.pointerId) {
+                        return;
+                    }
+
+                    const activeRoot = document.getElementById(INVENTORY_ID);
+                    inventoryDragState.dragging = false;
+                    inventoryDragState.pointerId = null;
+                    inventoryDragState.ignoreClick = true;
+
+                    if (activeRoot) {
+                        const rectFinal = activeRoot.getBoundingClientRect();
+                        const settings = getSettings();
+                        settings.inventoryMobileX = Math.round(rectFinal.left);
+                        settings.inventoryMobileY = Math.round(rectFinal.top);
+                        scheduleSettingsSave();
+                    }
+
+                    window.removeEventListener('pointermove', inventoryDragState.moveHandler, true);
+                    window.removeEventListener('pointerup', inventoryDragState.upHandler, true);
+                    window.removeEventListener('pointercancel', inventoryDragState.upHandler, true);
+                    inventoryDragState.handlersInstalled = false;
+
+                    if (!inventoryDragState.moved) {
+                        const settings = getSettings();
+                        settings.inventoryCollapsed = !settings.inventoryCollapsed;
+                        scheduleSettingsSave();
+                        refreshDeathNoteUi();
+                    }
+                };
+
+                window.addEventListener('pointermove', inventoryDragState.moveHandler, true);
+                window.addEventListener('pointerup', inventoryDragState.upHandler, true);
+                window.addEventListener('pointercancel', inventoryDragState.upHandler, true);
+            }
+        })
         .off('click', '#kw-dn-inventory-toggle')
         .on('click', '#kw-dn-inventory-toggle', (event) => {
+            if (inventoryDragState.ignoreClick) {
+                inventoryDragState.ignoreClick = false;
+                event.preventDefault();
+                return;
+            }
+
             event.preventDefault();
             const settings = getSettings();
             settings.inventoryCollapsed = !settings.inventoryCollapsed;

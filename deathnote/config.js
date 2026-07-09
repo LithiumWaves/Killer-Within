@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     floatingY: null,
     closedFloatingX: null,
     closedFloatingY: null,
+    inventoryMobileX: null,
+    inventoryMobileY: null,
     inventoryCollapsed: false,
     inventorySelectedItemKey: 'notebook',
     draftText: '',
