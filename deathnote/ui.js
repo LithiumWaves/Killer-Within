@@ -6,6 +6,7 @@ import {
     createNotebookScrap,
     destroyNotebook,
     forgetCharacterName,
+    getActorByTrueName,
     getActorDisplayName,
     getCharacterActorForMessage,
     getChatState,
@@ -19,10 +20,13 @@ import {
     getNotebookOwnership,
     getRecentChatMemoryCandidates,
     getSettings,
+    learnCharacterName,
     linkNotebookShinigami,
     notify,
     persistChatChanges,
     removeNotebookScrap,
+    sanitizeNotebookPagesForRules,
+    sanitizeNotebookPageText,
     scheduleSettingsSave,
     setDeathNoteMemoryTracked,
     setNotebookOwnership,
@@ -58,11 +62,126 @@ let inventoryDragState = {
     upHandler: null,
     ignoreClick: false,
 };
+const WRITING_SOUND_LOOP_START = 0;
+const WRITING_SOUND_LOOP_END = 1.2;
+const WRITING_SOUND_IDLE_MS = 280;
+let deathNoteAudioState = {
+    openAudio: null,
+    writingAudio: null,
+    writingStopTimer: null,
+};
 
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function getDeathNoteAudio(type) {
+    if (type === 'open') {
+        if (!deathNoteAudioState.openAudio) {
+            deathNoteAudioState.openAudio = new Audio(new URL('../audio/pen-click.mp3', import.meta.url).toString());
+            deathNoteAudioState.openAudio.preload = 'auto';
+        }
+        return deathNoteAudioState.openAudio;
+    }
+
+    if (!deathNoteAudioState.writingAudio) {
+        const audio = new Audio(new URL('../audio/writing-with-pen.mp3', import.meta.url).toString());
+        audio.preload = 'auto';
+        audio.addEventListener('timeupdate', () => {
+            if (audio.currentTime >= WRITING_SOUND_LOOP_END) {
+                audio.currentTime = WRITING_SOUND_LOOP_START;
+                if (audio.paused) {
+                    audio.play().catch(() => {});
+                }
+            }
+        });
+        deathNoteAudioState.writingAudio = audio;
+    }
+
+    return deathNoteAudioState.writingAudio;
+}
+
+function stopWritingSound(reset = true) {
+    if (deathNoteAudioState.writingStopTimer) {
+        clearTimeout(deathNoteAudioState.writingStopTimer);
+        deathNoteAudioState.writingStopTimer = null;
+    }
+
+    const audio = deathNoteAudioState.writingAudio;
+    if (!audio) {
+        return;
+    }
+
+    audio.pause();
+    if (reset) {
+        audio.currentTime = WRITING_SOUND_LOOP_START;
+    }
+}
+
+function playNotebookOpenSound() {
+    if (!getSettings().enableOpenSound) {
+        return;
+    }
+
+    const audio = getDeathNoteAudio('open');
+    try {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
+    } catch (_error) {
+        // Ignore autoplay or decoding failures.
+    }
+}
+
+function pulseWritingSound() {
+    if (!getSettings().enableWritingSound) {
+        stopWritingSound();
+        return;
+    }
+
+    const audio = getDeathNoteAudio('writing');
+    if (deathNoteAudioState.writingStopTimer) {
+        clearTimeout(deathNoteAudioState.writingStopTimer);
+        deathNoteAudioState.writingStopTimer = null;
+    }
+
+    try {
+        if (audio.paused) {
+            if (audio.currentTime >= WRITING_SOUND_LOOP_END || audio.currentTime < WRITING_SOUND_LOOP_START) {
+                audio.currentTime = WRITING_SOUND_LOOP_START;
+            }
+            audio.play().catch(() => {});
+        }
+    } catch (_error) {
+        // Ignore autoplay or decoding failures.
+    }
+
+    deathNoteAudioState.writingStopTimer = setTimeout(() => {
+        stopWritingSound(false);
+    }, WRITING_SOUND_IDLE_MS);
+}
+
+function sanitizeNotebookInputPageValue(value) {
+    const source = String(value ?? '');
+    const sanitized = sanitizeNotebookPageText(source);
+    if (sanitized === source) {
+        return {
+            value: source,
+            blockedName: '',
+        };
+    }
+
+    const blockedLine = source
+        .split('\n')
+        .map((line) => String(line || '').trim())
+        .find((line) => line && !sanitizeNotebookPageText(line));
+    const blockedActor = blockedLine ? getActorByTrueName(blockedLine) : null;
+    return {
+        value: sanitized,
+        blockedName: blockedActor?.name || blockedLine || '',
+    };
 }
 
 function clamp(value, min, max) {
@@ -225,6 +344,11 @@ function setNotebookOpenState(nextOpen) {
 
     settings.isOpen = Boolean(nextOpen);
     scheduleSettingsSave();
+    if (nextOpen) {
+        playNotebookOpenSound();
+    } else {
+        stopWritingSound();
+    }
     refreshDeathNoteUi();
 }
 
@@ -406,18 +530,18 @@ function renderNameKnowledgeManagerHtml() {
 
     const rows = directory.map((entry) => {
         const stealState = getIdentityStealAttemptState(entry.actor);
-        let actionLabel = entry.known ? 'Hide again' : 'Steal ID';
-        let actionClass = entry.known ? 'kw-deathnote-hide-name' : 'kw-deathnote-steal-id';
-        let actionDisabled = '';
+        let primaryActionLabel = entry.known ? 'Hide again' : 'Steal ID';
+        let primaryActionClass = entry.known ? 'kw-deathnote-hide-name' : 'kw-deathnote-steal-id';
+        let primaryActionDisabled = '';
         let statusDetail = entry.known ? 'Known to the user' : 'Name hidden from the user';
 
         if (!entry.known && stealState.hasId) {
-            actionLabel = 'ID Stolen';
-            actionDisabled = 'disabled';
+            primaryActionLabel = 'ID Stolen';
+            primaryActionDisabled = 'disabled';
             statusDetail = 'ID card already taken';
         } else if (!entry.known && stealState.onCooldown) {
-            actionLabel = `Cooldown ${formatRemainingTime(stealState.cooldownUntil - Date.now())}`;
-            actionDisabled = 'disabled';
+            primaryActionLabel = `Cooldown ${formatRemainingTime(stealState.cooldownUntil - Date.now())}`;
+            primaryActionDisabled = 'disabled';
             statusDetail = 'They are on alert after the last attempt';
         }
 
@@ -431,20 +555,28 @@ function renderNameKnowledgeManagerHtml() {
                 <div class="kw-deathnote-item__actions">
                     <button
                         type="button"
-                        class="menu_button ${actionClass}"
+                        class="menu_button ${primaryActionClass}"
                         data-actor="${escapeHtml(encodeActorValue(entry.actor))}"
-                        ${actionDisabled}
-                    >${escapeHtml(actionLabel)}</button>
+                        ${primaryActionDisabled}
+                    >${escapeHtml(primaryActionLabel)}</button>
+                    ${entry.known ? '' : `
+                        <button
+                            type="button"
+                            class="menu_button kw-deathnote-force-reveal-name"
+                            data-actor="${escapeHtml(encodeActorValue(entry.actor))}"
+                        >Force Reveal</button>
+                    `}
                 </div>
             </div>
         `;
     }).join('');
 
+    const settings = getSettings();
     return `
         <div class="kw-deathnote-manager">
             <div class="kw-deathnote-manager__summary">
                 <span><b>Unknown names stay scrambled</b> until they are learned in-scene.</span>
-                <span><b>Steal ID:</b> risky, can fail, and puts the target on alert.</span>
+                <span><b>Steal ID success chance:</b> ${escapeHtml(String(settings.idStealSuccessChancePercent))}%</span>
                 <span><b>Scope:</b> Current chat participants only</span>
             </div>
             <div class="kw-deathnote-manager__list">${rows}</div>
@@ -1447,12 +1579,13 @@ function getSettingsHost() {
 function syncSettingsUi() {
     const settings = getSettings();
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
+    $('#kw-deathnote-require-known-names').prop('checked', Boolean(settings.requireKnownNamesForKills));
+    $('#kw-deathnote-id-steal-success').val(String(Math.min(100, Math.max(0, Number(settings.idStealSuccessChancePercent) || 75))));
+    $('#kw-deathnote-id-steal-success-value').text(`${Math.min(100, Math.max(0, Number(settings.idStealSuccessChancePercent) || 75))}%`);
+    $('#kw-deathnote-open-sound').prop('checked', Boolean(settings.enableOpenSound));
+    $('#kw-deathnote-writing-sound').prop('checked', Boolean(settings.enableWritingSound));
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
-    $('#kw-deathnote-notebook-manager').html(renderNotebookManagerHtml());
-    $('#kw-deathnote-link-manager').html(renderLinkManagerHtml());
-    $('#kw-deathnote-scrap-manager').html(renderScrapManagerHtml());
-    $('#kw-deathnote-toucher-manager').html(renderToucherManagerHtml());
 }
 
 function bindSettingsUi() {
@@ -1461,6 +1594,38 @@ function bindSettingsUi() {
         getSettings().fontMode = value === 'script' ? 'script' : 'print';
         scheduleSettingsSave();
         refreshDeathNoteUi();
+    });
+
+    $('#kw-deathnote-require-known-names').off('change').on('change', (event) => {
+        getSettings().requireKnownNamesForKills = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+        const sanitizedPages = sanitizeNotebookPagesForRules(getNotebookPages());
+        if (setNotebookPages(sanitizedPages)) {
+            persistChatChanges();
+            refreshDeathNoteUi();
+        }
+    });
+
+    $('#kw-deathnote-id-steal-success').off('input change').on('input change', (event) => {
+        const raw = Number($(event.currentTarget).val());
+        getSettings().idStealSuccessChancePercent = Number.isFinite(raw)
+            ? Math.min(100, Math.max(0, Math.round(raw)))
+            : 75;
+        scheduleSettingsSave();
+        syncSettingsUi();
+    });
+
+    $('#kw-deathnote-open-sound').off('change').on('change', (event) => {
+        getSettings().enableOpenSound = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-writing-sound').off('change').on('change', (event) => {
+        getSettings().enableWritingSound = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+        if (!getSettings().enableWritingSound) {
+            stopWritingSound();
+        }
     });
 
     $(document)
@@ -1552,6 +1717,19 @@ function bindSettingsUi() {
             await commitInventoryMutation(() => forgetCharacterName(actor, {
                 reason: `${actor.name || 'Character'} hidden again via manager.`,
             }), 'Character name hidden again.');
+        })
+        .off('click', '.kw-deathnote-force-reveal-name')
+        .on('click', '.kw-deathnote-force-reveal-name', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            if (!actor) {
+                return;
+            }
+
+            await commitInventoryMutation(() => learnCharacterName(actor, {
+                source: 'debug_force_reveal',
+                reason: `${actor.name || 'Character'} force-revealed via debug manager.`,
+            }), 'Character name force-revealed.');
         })
         .off('click', '.kw-deathnote-track-memory')
         .on('click', '.kw-deathnote-track-memory', async (event) => {
@@ -1705,6 +1883,32 @@ function renderSettingsPanel() {
                         <option value="script">Script</option>
                     </select>
                 </label>
+                <label class="killer-within-settings__row">
+                    <input id="kw-deathnote-require-known-names" type="checkbox" />
+                    <span>Require discovered names for Death Note kills</span>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>ID steal success chance <span id="kw-deathnote-id-steal-success-value">75%</span></span>
+                    <input
+                        id="kw-deathnote-id-steal-success"
+                        class="text_pole"
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                    />
+                </label>
+                <div class="killer-within-settings__field">
+                    <span>Notebook sounds</span>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-deathnote-open-sound" type="checkbox" />
+                        <span>Play pen click when opening</span>
+                    </label>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-deathnote-writing-sound" type="checkbox" />
+                        <span>Play writing sound while writing</span>
+                    </label>
+                </div>
                 <div class="killer-within-settings__field">
                     <span>Notebook defaults</span>
                     <small>If a cause is omitted, Death Note entries default to heart attack. If time is omitted, they trigger on the next assistant message.</small>
@@ -1716,22 +1920,6 @@ function renderSettingsPanel() {
                 <div class="killer-within-settings__field">
                     <span>Death Note memories</span>
                     <div id="kw-deathnote-memory-manager"></div>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Notebook inventory</span>
-                    <div id="kw-deathnote-notebook-manager"></div>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Linked Shinigami</span>
-                    <div id="kw-deathnote-link-manager"></div>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Notebook scraps</span>
-                    <div id="kw-deathnote-scrap-manager"></div>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Touchers and visibility</span>
-                    <div id="kw-deathnote-toucher-manager"></div>
                 </div>
             </div>
         </div>
@@ -2148,12 +2336,27 @@ function bindWidgetUi() {
             const currentSpreadIndex = getClampedSpreadIndex(pages);
             const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
             const rawValue = $(textarea).val();
-            const value = String(rawValue === undefined || rawValue === null ? '' : rawValue);
+            const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
+            const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
+            const value = sanitizedInput.value;
             const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
-            const nextPages = update.pages;
+            const nextPages = sanitizeNotebookPagesForRules(update.pages);
             const changed = setNotebookPages(nextPages);
 
             if (!changed) {
+                return;
+            }
+
+            pulseWritingSound();
+            if (sanitizedInput.blockedName) {
+                notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);
+            }
+
+            if (value !== inputValue) {
+                queueFocusRestore(pageIndex, pageSide, 'end');
+                refreshDeathNoteUi();
+                scheduleSettingsSave();
+                scheduleChatSave(state);
                 return;
             }
 

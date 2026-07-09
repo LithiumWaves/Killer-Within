@@ -8,7 +8,6 @@ import {
 } from './config.js';
 
 const INVENTORY_HISTORY_LIMIT = 40;
-const ID_THEFT_FAILURE_CHANCE = 0.25;
 const ID_THEFT_COOLDOWN_MS = 5 * 60 * 1000;
 
 export function getContext() {
@@ -384,6 +383,16 @@ function getCharacterRosterActors() {
     }
 
     return roster;
+}
+
+function getCurrentChatActorByName(name) {
+    const search = normalizeKnowledgeKey(name);
+    if (!search) {
+        return null;
+    }
+
+    const roster = collectCurrentChatActors();
+    return roster.find((actor) => normalizeKnowledgeKey(actor.name) === search) || null;
 }
 
 function getMessageForceAvatarFile(message) {
@@ -1075,6 +1084,10 @@ export function getCurrentChatCharacterActors() {
     return collectCurrentChatActors();
 }
 
+export function getActorByTrueName(name) {
+    return getCurrentChatActorByName(name);
+}
+
 export function getCharacterActorForMessage(message) {
     if (!message || message.is_user || message.is_system) {
         return null;
@@ -1288,7 +1301,12 @@ export function attemptStealCharacterId(actor, options = {}) {
 
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
     const userActor = normalizeActorRef(options.actor, NOTEBOOK_ACTOR_TYPES.USER, 'User');
-    if (Math.random() < ID_THEFT_FAILURE_CHANCE) {
+    const settings = getSettings();
+    const successChancePercentRaw = Number(settings.idStealSuccessChancePercent);
+    const successChancePercent = Number.isFinite(successChancePercentRaw)
+        ? Math.min(100, Math.max(0, successChancePercentRaw))
+        : 75;
+    if (Math.random() >= (successChancePercent / 100)) {
         const cooldownUntil = timestamp + ID_THEFT_COOLDOWN_MS;
         upsertIdentityTheftCooldown(state, target, cooldownUntil);
         state.identityTheft.pendingExposure = normalizeIdentityTheftPendingExposure({
@@ -2136,6 +2154,16 @@ function parseNotebookLine(line) {
     const cause = hasExplicitCause ? body : 'heart attack';
     const targetName = hasExplicitCause ? '' : body;
 
+    if (targetName) {
+        const settings = getSettings();
+        if (settings.requireKnownNamesForKills) {
+            const actor = getCurrentChatActorByName(targetName);
+            if (actor && !isActorNameKnown(actor)) {
+                return null;
+            }
+        }
+    }
+
     return {
         noteText: raw,
         targetName,
@@ -2144,6 +2172,30 @@ function parseNotebookLine(line) {
         hasExplicitCause,
         hasExplicitTime,
     };
+}
+
+export function sanitizeNotebookPageText(pageText) {
+    const source = String(pageText ?? '');
+    if (!source) {
+        return source;
+    }
+
+    return source
+        .split('\n')
+        .filter((line) => {
+            const trimmed = String(line || '').trim();
+            if (!trimmed) {
+                return true;
+            }
+
+            return parseNotebookLine(trimmed) !== null;
+        })
+        .join('\n');
+}
+
+export function sanitizeNotebookPagesForRules(pages) {
+    const normalized = normalizeNotebookPages(pages, '');
+    return normalized.map((page) => sanitizeNotebookPageText(page));
 }
 
 function buildLineCounts(lines) {

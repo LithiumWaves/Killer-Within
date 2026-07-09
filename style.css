@@ -78,6 +78,8 @@
 .kw-deathnote-item__actions {
     display: flex;
     justify-content: end;
+    flex-wrap: wrap;
+    gap: 0.45rem;
 }
 
 .kw-deathnote-name-state {
