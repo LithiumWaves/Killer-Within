@@ -77,6 +77,27 @@ export function notify(type, message) {
     console.info(`[${MODULE_NAME}] ${message}`);
 }
 
+export function reportDebugEvent(payload) {
+    try {
+        const event = payload && typeof payload === 'object' ? payload : { msg: String(payload || '') };
+        const record = {
+            ts: Date.now(),
+            sessionId: 'notebook-reveal-missing',
+            ...event,
+        };
+
+        globalThis.__kwDeathNoteDebugEvents = Array.isArray(globalThis.__kwDeathNoteDebugEvents)
+            ? globalThis.__kwDeathNoteDebugEvents
+            : [];
+        globalThis.__kwDeathNoteDebugEvents.push(record);
+        if (globalThis.__kwDeathNoteDebugEvents.length > 250) {
+            globalThis.__kwDeathNoteDebugEvents.splice(0, globalThis.__kwDeathNoteDebugEvents.length - 250);
+        }
+    } catch (_error) {
+        // Ignore debug reporting failures.
+    }
+}
+
 function createDefaultChatState() {
     return {
         version: 4,

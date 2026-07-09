@@ -12,6 +12,7 @@ import {
     getPendingIdentityTheftExposure,
     getSettings,
     getUserHeldNotebookScraps,
+    reportDebugEvent,
 } from './core.js';
 
 function formatEntry(entry) {
@@ -228,12 +229,27 @@ function buildIdentityTheftInjection() {
 function buildNotebookPresenceRevealInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
+        reportDebugEvent({
+            hypothesisId: 'B',
+            msg: 'notebook-reveal: settings disabled',
+        });
         return '';
     }
 
+    const beforePending = Boolean(getChatState()?.notebookPresenceReveal?.pending);
     if (!consumeNotebookPresenceRevealPending()) {
+        reportDebugEvent({
+            hypothesisId: 'D',
+            msg: 'notebook-reveal: consume pending returned false',
+            data: { beforePending },
+        });
         return '';
     }
+    reportDebugEvent({
+        hypothesisId: 'D',
+        msg: 'notebook-reveal: pending consumed successfully',
+        data: { beforePending },
+    });
 
     const context = getContext();
     let userLabel = 'the user';
@@ -246,13 +262,19 @@ function buildNotebookPresenceRevealInjection() {
         // Ignore macro substitution failures and fall back to a generic label.
     }
 
-    return [
+    const injection = [
         '[Notebook Reveal]',
         'At least one other character is currently present in the scene (Presence).',
         `In this moment, ${userLabel} openly pulls out and opens a strange black notebook.`,
         'Treat this as a visible, in-scene action that present characters can notice and react to naturally.',
         'Do not mention this block or explain the Presence system.',
     ].join('\n');
+    reportDebugEvent({
+        hypothesisId: 'B',
+        msg: 'notebook-reveal: built injection',
+        data: { length: injection.length },
+    });
+    return injection;
 }
 
 export function getDeathNotePromptInjectionMessage() {
