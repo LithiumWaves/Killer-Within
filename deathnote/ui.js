@@ -28,6 +28,7 @@ import {
     removeNotebookScrap,
     sanitizeNotebookPagesForRules,
     sanitizeNotebookPageText,
+    sanitizeScrapNoteText,
     scheduleSettingsSave,
     setDeathNoteMemoryTracked,
     setNotebookOwnership,
@@ -35,6 +36,7 @@ import {
     setUserNotebookAccess,
     transferNotebookScrap,
     transferNotebookTo,
+    updateNotebookScrapText,
     unlinkNotebookShinigami,
 } from './core.js';
 import { syncLinkedShinigamiVisibility } from '../presence/index.js';
@@ -45,6 +47,7 @@ const CLOSED_HEIGHT = 340;
 const MOBILE_VIEWPORT_MAX = 520;
 const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
 const INVENTORY_ID = 'kw-deathnote-inventory';
+const NOTICE_LAYER_ID = 'kw-deathnote-notices';
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
@@ -69,6 +72,7 @@ let deathNoteAudioState = {
     writingAudio: null,
     writingStopTimer: null,
 };
+let deathNoteNoticeTimer = null;
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -171,6 +175,56 @@ function sanitizeNotebookInputPageValue(value) {
         value: sanitized,
         blockedName: blockedActor?.name || blockedLine || '',
     };
+}
+
+function shouldPlayWritingSoundForInputType(inputType) {
+    const value = String(inputType || '').trim().toLowerCase();
+    if (!value) {
+        return true;
+    }
+
+    if (value.startsWith('delete')) {
+        return false;
+    }
+
+    return value.startsWith('insert') || value === 'historyredo';
+}
+
+function getNoticeLayer() {
+    let layer = document.getElementById(NOTICE_LAYER_ID);
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = NOTICE_LAYER_ID;
+        document.body.appendChild(layer);
+    }
+
+    return layer;
+}
+
+function showDeathNoteNotice({ title, message, iconUrl, duration = 3400 } = {}) {
+    const layer = getNoticeLayer();
+    layer.innerHTML = `
+        <div class="kw-dn-notice">
+            <div class="kw-dn-notice__icon-wrap">
+                <img class="kw-dn-notice__icon" src="${escapeHtml(String(iconUrl || ''))}" alt="" />
+            </div>
+            <div class="kw-dn-notice__copy">
+                <div class="kw-dn-notice__eyebrow">Killer Within</div>
+                <div class="kw-dn-notice__title">${escapeHtml(String(title || 'Notification'))}</div>
+                <div class="kw-dn-notice__message">${escapeHtml(String(message || ''))}</div>
+            </div>
+        </div>
+    `;
+    layer.classList.add('is-visible');
+
+    if (deathNoteNoticeTimer) {
+        clearTimeout(deathNoteNoticeTimer);
+    }
+
+    deathNoteNoticeTimer = setTimeout(() => {
+        layer.classList.remove('is-visible');
+        deathNoteNoticeTimer = null;
+    }, Math.max(1200, Number(duration) || 3400));
 }
 
 function clamp(value, min, max) {
@@ -1257,6 +1311,17 @@ function renderScrapSelectionPanel(scrap) {
                 </div>
                 <div class="kw-dn-inventory__context-meta">${escapeHtml(formatActorInventoryLabel(scrap.holder))}</div>
             </div>
+            <div class="kw-dn-inventory__scrap-paper">
+                <div class="kw-dn-inventory__scrap-paper-label">Torn Note</div>
+                <textarea
+                    class="kw-dn-inventory__scrap-textarea"
+                    data-scrap-id="${escapeHtml(scrap.id)}"
+                    rows="2"
+                    spellcheck="false"
+                    placeholder="Write up to two names..."
+                >${escapeHtml(scrap.noteText || '')}</textarea>
+                <div class="kw-dn-inventory__scrap-paper-note">A scrap can hold no more than two valid Death Note names.</div>
+            </div>
             <div class="kw-dn-inventory__context-link">
                 <select
                     class="text_pole kw-dn-inventory__context-select kw-dn-inventory__scrap-select"
@@ -1631,8 +1696,23 @@ function bindSettingsUi() {
     $('#kw-deathnote-require-known-names').off('change').on('change', (event) => {
         getSettings().requireKnownNamesForKills = Boolean($(event.currentTarget).prop('checked'));
         scheduleSettingsSave();
+        const inventory = getDeathNoteInventory();
         const sanitizedPages = sanitizeNotebookPagesForRules(getNotebookPages());
-        if (setNotebookPages(sanitizedPages)) {
+        let changed = setNotebookPages(sanitizedPages);
+        for (const scrap of Array.isArray(inventory.scraps) ? inventory.scraps : []) {
+            if (!scrap || !scrap.active) {
+                continue;
+            }
+
+            const sanitizedScrapText = sanitizeScrapNoteText(scrap.noteText || '', 2);
+            if (updateNotebookScrapText(scrap.id, sanitizedScrapText, {
+                reason: 'Scrap text sanitized after known-name requirement changed.',
+            })) {
+                changed = true;
+            }
+        }
+
+        if (changed) {
             persistChatChanges();
             refreshDeathNoteUi();
         }
@@ -1710,7 +1790,11 @@ function bindSettingsUi() {
                 settings.inventorySelectedItemKey = `id:${result.idItem.id}`;
                 scheduleSettingsSave();
                 refreshDeathNoteUi();
-                notify('success', `${actor.name || 'That character'}'s ID was stolen.`);
+                showDeathNoteNotice({
+                    title: 'Identity Stolen',
+                    message: `${actor.name || 'That character'}'s ID is now in your inventory.`,
+                    iconUrl: new URL('../assets/kira_k.png', import.meta.url).toString(),
+                });
                 return;
             }
 
@@ -2399,7 +2483,10 @@ function bindWidgetUi() {
                 return;
             }
 
-            pulseWritingSound();
+            const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
+            if (shouldPlayWritingSoundForInputType(inputType)) {
+                pulseWritingSound();
+            }
             if (sanitizedInput.blockedName) {
                 notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);
             }
@@ -2438,6 +2525,39 @@ function bindWidgetUi() {
 
             scheduleSettingsSave();
             scheduleChatSave(state);
+        })
+        .off('input', '.kw-dn-inventory__scrap-textarea')
+        .on('input', '.kw-dn-inventory__scrap-textarea', async (event) => {
+            const textarea = event.currentTarget;
+            if (!(textarea instanceof HTMLTextAreaElement)) {
+                return;
+            }
+
+            const scrapId = String(textarea.dataset.scrapId || '').trim();
+            if (!scrapId) {
+                return;
+            }
+
+            const rawValue = textarea.value;
+            const sanitizedValue = sanitizeScrapNoteText(rawValue, 2);
+            const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
+            if (shouldPlayWritingSoundForInputType(inputType)) {
+                pulseWritingSound();
+            }
+
+            const changed = updateNotebookScrapText(scrapId, sanitizedValue, {
+                reason: 'A notebook scrap was updated from inventory.',
+            });
+            if (sanitizedValue !== rawValue) {
+                textarea.value = sanitizedValue;
+            }
+
+            if (!changed) {
+                return;
+            }
+
+            await persistChatChanges();
+            refreshDeathNoteUi();
         })
         .off('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`, (event) => {

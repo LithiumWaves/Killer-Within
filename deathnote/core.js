@@ -2209,6 +2209,53 @@ export function sanitizeNotebookPagesForRules(pages) {
     return normalized.map((page) => sanitizeNotebookPageText(page));
 }
 
+export function sanitizeScrapNoteText(text, maxNames = 2) {
+    const source = String(text ?? '');
+    if (!source) {
+        return '';
+    }
+
+    const limitedMax = Number.isFinite(Number(maxNames))
+        ? Math.max(0, Math.floor(Number(maxNames)))
+        : 2;
+    const kept = [];
+
+    for (const line of source.split('\n')) {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) {
+            continue;
+        }
+
+        if (parseNotebookLine(trimmed) === null) {
+            continue;
+        }
+
+        kept.push(trimmed);
+        if (kept.length >= limitedMax) {
+            break;
+        }
+    }
+
+    return kept.join('\n');
+}
+
+function collectActiveDeathNoteSourceLines(state) {
+    const notebookLines = String(state.notebookText ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const scrapLines = Array.isArray(state.inventory?.scraps)
+        ? state.inventory.scraps
+            .filter((scrap) => scrap?.active)
+            .flatMap((scrap) => String(scrap.noteText || '')
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean))
+        : [];
+
+    return [...notebookLines, ...scrapLines];
+}
+
 function buildLineCounts(lines) {
     const counts = new Map();
     for (const line of lines) {
@@ -2254,13 +2301,43 @@ export function setNotebookPages(pages) {
     return true;
 }
 
+export function updateNotebookScrapText(scrapId, noteText, options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const id = String(scrapId || '').trim();
+    if (!id) {
+        return false;
+    }
+
+    const scrap = state.inventory.scraps.find((entry) => entry?.id === id);
+    if (!scrap) {
+        return false;
+    }
+
+    const sanitized = sanitizeScrapNoteText(noteText, 2);
+    if (scrap.noteText === sanitized) {
+        return false;
+    }
+
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    scrap.noteText = sanitized;
+    scrap.updatedAt = timestamp;
+    pushInventoryHistory(state, {
+        action: 'write_scrap',
+        itemId: scrap.id,
+        detail: String(options.reason || '').trim() || `${scrap.label} was written on.`,
+        actor: scrap.holder,
+        target: scrap.owner,
+        timestamp,
+    });
+    reconcileEntriesFromNotebookText();
+    return true;
+}
+
 export function reconcileEntriesFromNotebookPages() {
     const state = getChatState();
     syncNotebookTextFromPages(state);
-    const lines = String(state.notebookText ?? '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
+    const lines = collectActiveDeathNoteSourceLines(state);
 
     const counts = buildLineCounts(lines);
     const retained = [];

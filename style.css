@@ -391,6 +391,156 @@
     color: #ece5db;
 }
 
+.kw-dn-inventory__context-card--scrap {
+    background:
+        linear-gradient(180deg, rgba(23, 20, 17, 0.98), rgba(13, 11, 10, 0.995));
+}
+
+.kw-dn-inventory__scrap-paper {
+    position: relative;
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.8rem 0.75rem 0.7rem;
+    border: 1px solid rgba(121, 101, 80, 0.34);
+    color: #271d18;
+    background:
+        linear-gradient(180deg, rgba(237, 225, 207, 0.98), rgba(215, 198, 176, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 248, 239, 0.7),
+        0 10px 20px rgba(0, 0, 0, 0.18);
+    clip-path: polygon(0 8%, 7% 0, 100% 4%, 96% 100%, 4% 96%, 0 88%);
+}
+
+.kw-dn-inventory__scrap-paper::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        repeating-linear-gradient(
+            180deg,
+            rgba(74, 96, 128, 0.12) 0,
+            rgba(74, 96, 128, 0.12) 1px,
+            rgba(0, 0, 0, 0) 1px,
+            rgba(0, 0, 0, 0) 26px
+        );
+    opacity: 0.85;
+    pointer-events: none;
+}
+
+.kw-dn-inventory__scrap-paper-label,
+.kw-dn-inventory__scrap-paper-note {
+    position: relative;
+    z-index: 1;
+}
+
+.kw-dn-inventory__scrap-paper-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(63, 41, 33, 0.8);
+    font-family: Georgia, "Times New Roman", serif;
+}
+
+.kw-dn-inventory__scrap-paper-note {
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: rgba(70, 50, 41, 0.76);
+}
+
+.kw-dn-inventory__scrap-textarea {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-height: 4.4rem;
+    resize: none;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #1f1713;
+    font-size: 1rem;
+    line-height: 1.62;
+    font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+    overflow: hidden;
+}
+
+.kw-dn-inventory__scrap-textarea::placeholder {
+    color: rgba(74, 56, 47, 0.5);
+}
+
+#kw-deathnote-notices {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 2147483646;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 160ms ease, transform 160ms ease;
+}
+
+#kw-deathnote-notices.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.kw-dn-notice {
+    min-width: min(22rem, calc(100vw - 32px));
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.8rem;
+    align-items: center;
+    padding: 0.9rem 1rem;
+    border: 1px solid rgba(129, 18, 38, 0.52);
+    border-radius: 0.28rem;
+    background:
+        linear-gradient(180deg, rgba(15, 15, 17, 0.99), rgba(7, 7, 9, 0.995));
+    box-shadow:
+        0 20px 48px rgba(0, 0, 0, 0.38),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    color: #efe6db;
+}
+
+.kw-dn-notice__icon-wrap {
+    width: 2.6rem;
+    height: 2.6rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(129, 18, 38, 0.46);
+    border-radius: 0.22rem;
+    background: rgba(120, 10, 30, 0.08);
+}
+
+.kw-dn-notice__icon {
+    width: 1.3rem;
+    height: 1.3rem;
+    object-fit: contain;
+}
+
+.kw-dn-notice__copy {
+    display: grid;
+    gap: 0.16rem;
+}
+
+.kw-dn-notice__eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(188, 167, 148, 0.8);
+}
+
+.kw-dn-notice__title {
+    font-size: 0.88rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: Georgia, "Times New Roman", serif;
+}
+
+.kw-dn-notice__message {
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: rgba(234, 224, 214, 0.76);
+}
+
 @media (max-width: 700px) {
     #kw-deathnote-inventory {
         width: min(18.5rem, calc(100vw - 20px));
@@ -441,6 +591,16 @@
         padding: 0;
         border: 0;
         background: transparent;
+    }
+
+    #kw-deathnote-notices {
+        right: 10px;
+        left: 10px;
+        bottom: 10px;
+    }
+
+    .kw-dn-notice {
+        min-width: 0;
     }
 }
 
@@ -493,6 +653,11 @@
     .kw-dn-inventory__scrap-select {
         min-height: 2rem;
         font-size: 0.7rem;
+    }
+
+    .kw-dn-inventory__scrap-textarea {
+        min-height: 3.8rem;
+        font-size: 0.9rem;
     }
 }
 
