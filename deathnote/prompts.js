@@ -249,7 +249,7 @@ function buildNotebookPresenceRevealInjection() {
     return [
         '[Notebook Reveal]',
         'At least one other character is currently present in the scene (Presence).',
-        `In this moment, ${userLabel} openly pulls out and opens a strange black notebook.`,
+        `In this moment, ${userLabel} openly pulls out and opens a strange black notebook with "Death Note" written on the cover.`,
         'Treat this as a visible, in-scene action that present characters can notice and react to naturally.',
         'Do not mention this block or explain the Presence system.',
     ].join('\n');

@@ -1,5 +1,7 @@
 import {
     DEFAULT_SETTINGS,
+    DEFAULT_THOUGHT_PROMPT,
+    LEGACY_DEFAULT_THOUGHT_PROMPT,
     MESSAGE_EXTRA_KEY,
     MODULE_NAME,
 } from './config.js';
@@ -21,6 +23,10 @@ export function getSettings() {
         if (!Object.hasOwn(settings, key)) {
             settings[key] = value;
         }
+    }
+
+    if (String(settings.thoughtPrompt || '').trim() === LEGACY_DEFAULT_THOUGHT_PROMPT.trim()) {
+        settings.thoughtPrompt = DEFAULT_THOUGHT_PROMPT;
     }
 
     return settings;
