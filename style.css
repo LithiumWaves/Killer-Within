@@ -607,9 +607,11 @@
     width: min(62rem, calc(100vw - 2.4rem));
     max-height: min(88vh, 56rem);
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 0.9rem;
     padding: 1rem;
     overflow: hidden;
+    min-height: 0;
     border: 1px solid rgba(119, 16, 32, 0.42);
     border-radius: 0.5rem;
     background:
@@ -656,6 +658,8 @@
 .kw-dn-settings-modal__body {
     overflow-y: auto;
     padding-right: 0.25rem;
+    min-height: 0;
+    overscroll-behavior: contain;
 }
 
 .kw-dn-settings-modal__sections {
