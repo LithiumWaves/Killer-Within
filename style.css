@@ -691,6 +691,47 @@
     gap: 0.75rem;
 }
 
+.kw-dn-settings-modal__foldout {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.kw-dn-settings-modal__foldout-summary {
+    cursor: pointer;
+    display: grid;
+    gap: 0.12rem;
+    list-style: none;
+    user-select: none;
+}
+
+.kw-dn-settings-modal__foldout-summary::-webkit-details-marker {
+    display: none;
+}
+
+.kw-dn-settings-modal__foldout-summary::after {
+    content: "Expand";
+    justify-self: start;
+    margin-top: 0.2rem;
+    padding: 0.18rem 0.5rem;
+    border: 1px solid rgba(118, 17, 33, 0.36);
+    border-radius: 999px;
+    font-size: 0.64rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #c3b1a3;
+    background: rgba(118, 17, 33, 0.08);
+}
+
+.kw-dn-settings-modal__foldout[open] .kw-dn-settings-modal__foldout-summary::after {
+    content: "Collapse";
+}
+
+.kw-dn-settings-modal__foldout-body {
+    display: grid;
+    gap: 0.75rem;
+    padding-top: 0.15rem;
+}
+
 .kw-dn-settings-modal__close {
     min-height: 2rem;
     padding: 0.36rem 0.8rem;

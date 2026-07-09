@@ -189,7 +189,7 @@ function getSettingsHost() {
     return $('#extensions_settings2, #extensions_settings').first();
 }
 
-function syncSettingsUi() {
+export function syncThoughtSettingsUi() {
     const settings = getSettings();
 
     $('#kw-thoughts-enabled').prop('checked', settings.enabled);
@@ -207,7 +207,7 @@ function syncSettingsUi() {
     renderMemoryManager();
 }
 
-function bindSettingsUi() {
+export function bindThoughtSettingsUi() {
     $('#kw-thoughts-enabled').off('input').on('input', (event) => {
         getSettings().enabled = Boolean($(event.currentTarget).prop('checked'));
         scheduleSettingsSave();
@@ -291,6 +291,75 @@ function bindSettingsUi() {
         });
 }
 
+export function renderThoughtManagementSettingsHtml() {
+    return `
+        <label class="killer-within-settings__row">
+            <input id="kw-thoughts-enabled" type="checkbox" />
+            <span>Enable hidden thoughts generation</span>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Thought generation mode</span>
+            <select id="kw-thoughts-generation-mode" class="text_pole">
+                <option value="raw">Raw</option>
+                <option value="hybrid">Hybrid</option>
+            </select>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Stored thought history to inject</span>
+            <input id="kw-thoughts-history" class="text_pole" type="number" min="0" max="50" step="1" />
+        </label>
+        <label class="killer-within-settings__row">
+            <input id="kw-thoughts-main-prompt" type="checkbox" />
+            <span>Inject previous thoughts into the main reply prompt</span>
+        </label>
+        <label class="killer-within-settings__row">
+            <input id="kw-thoughts-pending" type="checkbox" />
+            <span>Inject the freshly generated hidden thought into the same reply</span>
+        </label>
+        <div class="killer-within-settings__field">
+            <span>Thought memories in this chat</span>
+            <div id="kw-thoughts-memory-manager" class="kw-memory-manager"></div>
+        </div>
+    `;
+}
+
+export function renderThoughtPromptSettingsHtml() {
+    return `
+        <label class="killer-within-settings__field">
+            <span>Thought generation prompt</span>
+            <textarea id="kw-thoughts-prompt" class="text_pole" rows="10"></textarea>
+        </label>
+        <div class="killer-within-settings__field">
+            <span>Thought prompt placeholders</span>
+            <small>Use <code>{{thought_prompt}}</code>, <code>{{history_block}}</code>, <code>{{thought_prompt_block}}</code>, <code>{{identity_context_block}}</code>, <code>{{conversation_context_block}}</code>, <code>{{visible_reply}}</code>, and <code>{{sections}}</code>.</small>
+        </div>
+        <label class="killer-within-settings__field">
+            <span>Thought wrapper template</span>
+            <textarea id="kw-thoughts-wrapper-template" class="text_pole" rows="8"></textarea>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Thought context template</span>
+            <textarea id="kw-thoughts-context-template" class="text_pole" rows="8"></textarea>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Raw generation system prompt</span>
+            <textarea id="kw-thoughts-raw-system" class="text_pole" rows="6"></textarea>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Manual thought wrapper template</span>
+            <textarea id="kw-thoughts-manual-wrapper-template" class="text_pole" rows="8"></textarea>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Manual reconstruction system prompt</span>
+            <textarea id="kw-thoughts-manual-raw-system" class="text_pole" rows="6"></textarea>
+        </label>
+        <label class="killer-within-settings__field">
+            <span>Main reply injection template</span>
+            <textarea id="kw-thoughts-main-injection-template" class="text_pole" rows="6"></textarea>
+        </label>
+    `;
+}
+
 export function renderSettingsPanel() {
     const host = getSettingsHost();
     if (!host.length || document.getElementById(PANEL_ID)) {
@@ -304,76 +373,21 @@ export function renderSettingsPanel() {
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content">
-                <label class="killer-within-settings__row">
-                    <input id="kw-thoughts-enabled" type="checkbox" />
-                    <span>Enable hidden thoughts generation</span>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Thought generation mode</span>
-                    <select id="kw-thoughts-generation-mode" class="text_pole">
-                        <option value="raw">Raw</option>
-                        <option value="hybrid">Hybrid</option>
-                    </select>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Stored thought history to inject</span>
-                    <input id="kw-thoughts-history" class="text_pole" type="number" min="0" max="50" step="1" />
-                </label>
-                <label class="killer-within-settings__row">
-                    <input id="kw-thoughts-main-prompt" type="checkbox" />
-                    <span>Inject previous thoughts into the main reply prompt</span>
-                </label>
-                <label class="killer-within-settings__row">
-                    <input id="kw-thoughts-pending" type="checkbox" />
-                    <span>Inject the freshly generated hidden thought into the same reply</span>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Thought generation prompt</span>
-                    <textarea id="kw-thoughts-prompt" class="text_pole" rows="10"></textarea>
-                </label>
                 <div class="killer-within-settings__field">
-                    <span>Prompt templates</span>
-                    <small>Use placeholders like <code>{{thought_prompt}}</code>, <code>{{history_block}}</code>, <code>{{thought_prompt_block}}</code>, <code>{{identity_context_block}}</code>, <code>{{conversation_context_block}}</code>, <code>{{visible_reply}}</code>, and <code>{{sections}}</code>.</small>
-                </div>
-                <label class="killer-within-settings__field">
-                    <span>Thought wrapper template</span>
-                    <textarea id="kw-thoughts-wrapper-template" class="text_pole" rows="8"></textarea>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Thought context template</span>
-                    <textarea id="kw-thoughts-context-template" class="text_pole" rows="8"></textarea>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Raw generation system prompt</span>
-                    <textarea id="kw-thoughts-raw-system" class="text_pole" rows="6"></textarea>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Manual thought wrapper template</span>
-                    <textarea id="kw-thoughts-manual-wrapper-template" class="text_pole" rows="8"></textarea>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Manual reconstruction system prompt</span>
-                    <textarea id="kw-thoughts-manual-raw-system" class="text_pole" rows="6"></textarea>
-                </label>
-                <label class="killer-within-settings__field">
-                    <span>Main reply injection template</span>
-                    <textarea id="kw-thoughts-main-injection-template" class="text_pole" rows="6"></textarea>
-                </label>
-                <div class="killer-within-settings__field">
-                    <span>Thought memories in this chat</span>
-                    <div id="kw-thoughts-memory-manager" class="kw-memory-manager"></div>
+                    <span>Thought controls were moved into the Death Note inventory settings window.</span>
+                    <small>Open the inventory, click <code>Settings</code>, then expand <code>Thought Management</code> or <code>Prompt Management</code>.</small>
                 </div>
             </div>
         </div>
     `);
 
-    bindSettingsUi();
-    syncSettingsUi();
+    bindThoughtSettingsUi();
+    syncThoughtSettingsUi();
 }
 
 export function refreshThoughtUi() {
     renderSettingsPanel();
-    syncSettingsUi();
+    syncThoughtSettingsUi();
     queueThoughtRender();
 }
 

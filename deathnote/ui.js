@@ -43,6 +43,12 @@ import {
 } from './core.js';
 import { syncLinkedShinigamiVisibility } from '../presence/index.js';
 import { getMessagePresenceTracker, isPresenceActive, resolvePresenceAvatar } from '../presence/core.js';
+import {
+    bindThoughtSettingsUi,
+    renderThoughtManagementSettingsHtml,
+    renderThoughtPromptSettingsHtml,
+    syncThoughtSettingsUi,
+} from '../thoughts/ui.js';
 
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
@@ -1877,6 +1883,7 @@ function syncSettingsUi() {
     $('#kw-deathnote-prompt-presence-template').val(settings.presencePromptTemplate);
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
+    syncThoughtSettingsUi();
 }
 
 function bindSettingsUi() {
@@ -1977,6 +1984,8 @@ function bindSettingsUi() {
         getSettings().presencePromptTemplate = String($(event.currentTarget).val() || '').trim();
         scheduleSettingsSave();
     });
+
+    bindThoughtSettingsUi();
 
     $(document)
         .off('change', '#kw-deathnote-owner')
@@ -2324,11 +2333,23 @@ function renderInventorySettingsContentHtml() {
                 </div>
             </section>
             <section class="kw-dn-settings-modal__section">
-                <div class="kw-dn-settings-modal__section-head">
-                    <div class="kw-dn-settings-modal__eyebrow">Prompt Studio</div>
-                    <div class="kw-dn-settings-modal__section-title">Injected Prompt Templates</div>
-                </div>
-                <div class="kw-dn-settings-modal__section-body">
+                <details class="kw-dn-settings-modal__foldout">
+                    <summary class="kw-dn-settings-modal__foldout-summary">
+                        <span class="kw-dn-settings-modal__eyebrow">Thoughts</span>
+                        <span class="kw-dn-settings-modal__section-title">Thought Management</span>
+                    </summary>
+                    <div class="kw-dn-settings-modal__foldout-body">
+                        ${renderThoughtManagementSettingsHtml()}
+                    </div>
+                </details>
+            </section>
+            <section class="kw-dn-settings-modal__section">
+                <details class="kw-dn-settings-modal__foldout">
+                    <summary class="kw-dn-settings-modal__foldout-summary">
+                        <span class="kw-dn-settings-modal__eyebrow">Prompt Studio</span>
+                        <span class="kw-dn-settings-modal__section-title">Prompt Management</span>
+                    </summary>
+                    <div class="kw-dn-settings-modal__foldout-body">
                     <div class="killer-within-settings__field">
                         <span>Template placeholders</span>
                         <small>Use <code>{{ownership_block}}</code>, <code>{{inventory_block}}</code>, <code>{{due_block}}</code>, <code>{{entries_block}}</code>, <code>{{user_label}}</code>, <code>{{target_label}}</code>, <code>{{linked_shinigami}}</code>, and <code>{{touchers_block}}</code>.</small>
@@ -2349,7 +2370,12 @@ function renderInventorySettingsContentHtml() {
                         <span>Presence template</span>
                         <textarea id="kw-deathnote-prompt-presence-template" class="text_pole" rows="9"></textarea>
                     </label>
-                </div>
+                    <div class="killer-within-settings__field">
+                        <span>Hidden thought prompts</span>
+                    </div>
+                    ${renderThoughtPromptSettingsHtml()}
+                    </div>
+                </details>
             </section>
         </div>
     `;
