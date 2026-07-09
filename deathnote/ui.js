@@ -2706,6 +2706,10 @@ function bindWidgetUi() {
             const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
             const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
             const value = sanitizedInput.value;
+            const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
+            if (shouldPlayWritingSoundForInputType(inputType)) {
+                pulseWritingSound();
+            }
             syncPermanentLineOverlay(textarea, 'notebook', `page:${pageIndex}`, value);
             const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
             const nextPages = sanitizeNotebookPagesForRules(update.pages);
@@ -2716,11 +2720,6 @@ function bindWidgetUi() {
                     textarea.value = value;
                 }
                 return;
-            }
-
-            const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
-            if (shouldPlayWritingSoundForInputType(inputType)) {
-                pulseWritingSound();
             }
             if (sanitizedInput.blockedName) {
                 notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);

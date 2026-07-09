@@ -527,17 +527,9 @@ function getExplicitSelfIntroductionReason(message, actor) {
     }
 
     const namePattern = buildFlexibleNamePattern(name);
-    const patterns = [
-        new RegExp(`\\b(?:i\\s+am|i'm|im)\\s+${namePattern}\\b`, 'i'),
-        new RegExp(`\\bmy\\s+name\\s+is\\s+${namePattern}\\b`, 'i'),
-        new RegExp(`\\b(?:you\\s+can\\s+)?call\\s+me\\s+${namePattern}\\b`, 'i'),
-    ];
-
     for (const section of quotedSections) {
-        for (const pattern of patterns) {
-            if (pattern.test(section)) {
-                return 'self_introduction';
-            }
+        if (new RegExp(`\\b${namePattern}\\b`, 'i').test(section)) {
+            return 'quoted_display_name';
         }
     }
 
@@ -1264,7 +1256,7 @@ export function autoLearnCharacterNameFromMessage(messageIndex, options = {}) {
     return learnCharacterName(actor, {
         source: 'auto',
         timestamp: options.timestamp,
-        reason: `${actor.name || 'Character'} explicitly introduced themself in dialogue.`,
+        reason: `${actor.name || 'Character'} said their displayed name in quoted dialogue.`,
     });
 }
 
@@ -1493,6 +1485,14 @@ export function linkNotebookShinigami(actor, options = {}) {
             return value === null ? Date.now() : value;
         })(),
     });
+
+    if (isUserActor(state.ownership.owner)) {
+        learnCharacterName(state.shinigamiLink.actor, {
+            source: 'linked_shinigami',
+            timestamp: state.shinigamiLink.linkedAt,
+            reason: `${state.shinigamiLink.actor.name || 'The linked Shinigami'} became known when linked to the user's Death Note.`,
+        });
+    }
 
     pushInventoryHistory(state, {
         action: 'link_shinigami',
