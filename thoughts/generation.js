@@ -18,6 +18,7 @@ import {
 import {
     getDeathNotePromptInjectionMessage,
     getIdentityTheftPromptInjectionMessage,
+    getNotebookRevealPromptInjectionMessage,
 } from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
@@ -173,6 +174,12 @@ export function installInterceptor() {
         if (deathNoteInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
             chat.splice(insertAt, 0, deathNoteInjection);
+        }
+
+        const notebookRevealInjection = getNotebookRevealPromptInjectionMessage();
+        if (notebookRevealInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, notebookRevealInjection);
         }
 
         const identityTheftInjection = getIdentityTheftPromptInjectionMessage();

@@ -23,6 +23,7 @@ import {
     getSettings,
     learnCharacterName,
     linkNotebookShinigami,
+    markNotebookPresenceRevealPending,
     notify,
     persistChatChanges,
     removeNotebookScrap,
@@ -40,6 +41,7 @@ import {
     unlinkNotebookShinigami,
 } from './core.js';
 import { syncLinkedShinigamiVisibility } from '../presence/index.js';
+import { getMessagePresenceTracker, isPresenceActive, resolvePresenceAvatar } from '../presence/core.js';
 
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
@@ -188,6 +190,51 @@ function shouldPlayWritingSoundForInputType(inputType) {
     }
 
     return value.startsWith('insert') || value === 'historyredo';
+}
+
+function normalizePresenceToken(value) {
+    return String(value || '').trim().replace(/(\.\w+)$/i, '').toLowerCase();
+}
+
+function shouldTriggerNotebookPresenceReveal() {
+    if (!isPresenceActive()) {
+        return false;
+    }
+
+    const context = getContext();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    let tracker = [];
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const entries = getMessagePresenceTracker(chat[index]);
+        if (entries.length) {
+            tracker = entries;
+            break;
+        }
+    }
+
+    if (!tracker.length) {
+        return false;
+    }
+
+    const normalized = new Set(tracker.map((entry) => normalizePresenceToken(entry)).filter(Boolean));
+    normalized.delete('presence_universal_tracker');
+    if (!normalized.size) {
+        return false;
+    }
+
+    const actors = getCurrentChatCharacterActors();
+    for (const actor of Array.isArray(actors) ? actors : []) {
+        const candidate = resolvePresenceAvatar(actor?.name || actor?.id || '');
+        if (!candidate) {
+            continue;
+        }
+
+        if (normalized.has(normalizePresenceToken(candidate))) {
+            return true;
+        }
+    }
+
+    return true;
 }
 
 function getNoticeLayer() {
@@ -389,6 +436,9 @@ function setNotebookOpenState(nextOpen) {
     scheduleSettingsSave();
     if (nextOpen) {
         playNotebookOpenSound();
+        if (shouldTriggerNotebookPresenceReveal()) {
+            markNotebookPresenceRevealPending();
+        }
     } else {
         stopWritingSound();
     }
@@ -2526,6 +2576,22 @@ function bindWidgetUi() {
             scheduleSettingsSave();
             scheduleChatSave(state);
         })
+        .off('keydown', '.kw-dn-inventory__scrap-textarea')
+        .on('keydown', '.kw-dn-inventory__scrap-textarea', (event) => {
+            const textarea = event.currentTarget;
+            if (!(textarea instanceof HTMLTextAreaElement)) {
+                return;
+            }
+
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            const lines = String(textarea.value || '').split(/\r?\n/);
+            if (lines.length >= 2) {
+                event.preventDefault();
+            }
+        })
         .off('input', '.kw-dn-inventory__scrap-textarea')
         .on('input', '.kw-dn-inventory__scrap-textarea', async (event) => {
             const textarea = event.currentTarget;
@@ -2549,15 +2615,20 @@ function bindWidgetUi() {
                 reason: 'A notebook scrap was updated from inventory.',
             });
             if (sanitizedValue !== rawValue) {
+                const selectionStart = textarea.selectionStart;
+                const selectionEnd = textarea.selectionEnd;
                 textarea.value = sanitizedValue;
+                const nextLength = sanitizedValue.length;
+                const safeStart = Math.min(selectionStart, nextLength);
+                const safeEnd = Math.min(selectionEnd, nextLength);
+                textarea.setSelectionRange(safeStart, safeEnd);
             }
 
             if (!changed) {
                 return;
             }
 
-            await persistChatChanges();
-            refreshDeathNoteUi();
+            scheduleChatSave(state);
         })
         .off('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`, (event) => {

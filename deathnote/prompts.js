@@ -4,6 +4,7 @@ import {
     NOTEBOOK_USER_ACCESS,
 } from './config.js';
 import {
+    consumeNotebookPresenceRevealPending,
     getContext,
     getChatState,
     getDeathNoteInventory,
@@ -224,6 +225,36 @@ function buildIdentityTheftInjection() {
     ].join('\n');
 }
 
+function buildNotebookPresenceRevealInjection() {
+    const settings = getSettings();
+    if (!settings.enabled) {
+        return '';
+    }
+
+    if (!consumeNotebookPresenceRevealPending()) {
+        return '';
+    }
+
+    const context = getContext();
+    let userLabel = 'the user';
+    try {
+        const resolved = String(context?.substituteParams?.('{{user}}') || '').trim();
+        if (resolved && resolved !== '{{user}}') {
+            userLabel = resolved;
+        }
+    } catch (_error) {
+        // Ignore macro substitution failures and fall back to a generic label.
+    }
+
+    return [
+        '[Notebook Reveal]',
+        'At least one other character is currently present in the scene (Presence).',
+        `In this moment, ${userLabel} openly pulls out and opens a strange black notebook.`,
+        'Treat this as a visible, in-scene action that present characters can notice and react to naturally.',
+        'Do not mention this block or explain the Presence system.',
+    ].join('\n');
+}
+
 export function getDeathNotePromptInjectionMessage() {
     const injection = buildDeathNoteInjection();
     if (!injection) {
@@ -260,6 +291,27 @@ export function getIdentityTheftPromptInjectionMessage() {
             [MESSAGE_EXTRA_KEY]: {
                 injected: true,
                 identityTheft: true,
+            },
+        },
+    };
+}
+
+export function getNotebookRevealPromptInjectionMessage() {
+    const injection = buildNotebookPresenceRevealInjection();
+    if (!injection) {
+        return null;
+    }
+
+    return {
+        name: 'Notebook Reveal',
+        is_user: false,
+        is_system: true,
+        send_date: Date.now(),
+        mes: injection,
+        extra: {
+            [MESSAGE_EXTRA_KEY]: {
+                injected: true,
+                notebookReveal: true,
             },
         },
     };

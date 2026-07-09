@@ -85,6 +85,10 @@ function createDefaultChatState() {
         shinigamiLink: createDefaultShinigamiLinkState(),
         nameKnowledge: createDefaultNameKnowledgeState(),
         identityTheft: createDefaultIdentityTheftState(),
+        notebookPresenceReveal: {
+            pending: false,
+            openedAt: null,
+        },
         inventory: createDefaultInventoryState(),
         notebookText: '',
         notebookPages: [''],
@@ -987,6 +991,15 @@ export function getChatState() {
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
     state.identityTheft = normalizeIdentityTheftState(state.identityTheft);
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
+    if (!state.notebookPresenceReveal || typeof state.notebookPresenceReveal !== 'object') {
+        state.notebookPresenceReveal = {
+            pending: false,
+            openedAt: null,
+        };
+    } else {
+        state.notebookPresenceReveal.pending = Boolean(state.notebookPresenceReveal.pending);
+        state.notebookPresenceReveal.openedAt = normalizeTransferredAt(state.notebookPresenceReveal.openedAt);
+    }
 
     if (state.inventory.notebook.destroyed) {
         state.hasNotebook = false;
@@ -1007,6 +1020,25 @@ export function getChatState() {
     syncNotebookTextFromPages(state);
 
     return state;
+}
+
+export function markNotebookPresenceRevealPending(timestamp = null) {
+    const state = getChatState();
+    state.notebookPresenceReveal ??= { pending: false, openedAt: null };
+    state.notebookPresenceReveal.pending = true;
+    state.notebookPresenceReveal.openedAt = normalizeTransferredAt(timestamp) ?? Date.now();
+    return true;
+}
+
+export function consumeNotebookPresenceRevealPending() {
+    const state = getChatState();
+    const pending = Boolean(state?.notebookPresenceReveal?.pending);
+    if (!pending) {
+        return false;
+    }
+
+    state.notebookPresenceReveal.pending = false;
+    return true;
 }
 
 export function getNotebookOwnership() {
@@ -2218,25 +2250,15 @@ export function sanitizeScrapNoteText(text, maxNames = 2) {
     const limitedMax = Number.isFinite(Number(maxNames))
         ? Math.max(0, Math.floor(Number(maxNames)))
         : 2;
-    const kept = [];
-
-    for (const line of source.split('\n')) {
-        const trimmed = String(line || '').trim();
-        if (!trimmed) {
-            continue;
-        }
-
-        if (parseNotebookLine(trimmed) === null) {
-            continue;
-        }
-
-        kept.push(trimmed);
-        if (kept.length >= limitedMax) {
-            break;
-        }
+    if (limitedMax <= 0) {
+        return '';
     }
 
-    return kept.join('\n');
+    const lines = source
+        .split(/\r?\n/)
+        .slice(0, limitedMax)
+        .map((line) => String(line ?? ''));
+    return lines.join('\n').trimEnd();
 }
 
 function collectActiveDeathNoteSourceLines(state) {
