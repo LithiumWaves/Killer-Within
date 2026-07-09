@@ -739,6 +739,7 @@
         0 14px 24px rgba(0, 0, 0, 0.26);
     cursor: pointer;
     z-index: 3;
+    touch-action: none;
 }
 
 .kw-deathnote__spine-handle {
@@ -753,6 +754,7 @@
         linear-gradient(90deg, rgba(0, 0, 0, 0.22), rgba(255, 255, 255, 0.02) 50%, rgba(0, 0, 0, 0.18));
     opacity: 0.18;
     pointer-events: auto;
+    touch-action: none;
 }
 
 .kw-deathnote__page-left {
