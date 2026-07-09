@@ -2382,28 +2382,10 @@ function renderInventorySettingsContentHtml() {
 }
 
 function renderSettingsPanel() {
-    const host = getSettingsHost();
-    if (!host.length || document.getElementById(SETTINGS_PANEL_ID)) {
-        return;
+    const existing = document.getElementById(SETTINGS_PANEL_ID);
+    if (existing) {
+        existing.remove();
     }
-
-    host.append(`
-        <div id="${SETTINGS_PANEL_ID}" class="killer-within-settings inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>Killer Within Death Note</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-            </div>
-            <div class="inline-drawer-content">
-                <label class="killer-within-settings__row">
-                    <span>Death Note controls now live in the diegetic inventory settings window.</span>
-                </label>
-                <button type="button" id="kw-deathnote-settings-open-drawer" class="menu_button">Open Inventory Settings</button>
-            </div>
-        </div>
-    `);
-
-    bindSettingsUi();
-    syncSettingsUi();
 }
 
 function renderInventorySettingsModalHtml() {

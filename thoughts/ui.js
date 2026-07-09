@@ -361,28 +361,10 @@ export function renderThoughtPromptSettingsHtml() {
 }
 
 export function renderSettingsPanel() {
-    const host = getSettingsHost();
-    if (!host.length || document.getElementById(PANEL_ID)) {
-        return;
+    const existing = document.getElementById(PANEL_ID);
+    if (existing) {
+        existing.remove();
     }
-
-    host.append(`
-        <div id="${PANEL_ID}" class="killer-within-settings inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>Killer Within Thoughts</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-            </div>
-            <div class="inline-drawer-content">
-                <div class="killer-within-settings__field">
-                    <span>Thought controls were moved into the Death Note inventory settings window.</span>
-                    <small>Open the inventory, click <code>Settings</code>, then expand <code>Thought Management</code> or <code>Prompt Management</code>.</small>
-                </div>
-            </div>
-        </div>
-    `);
-
-    bindThoughtSettingsUi();
-    syncThoughtSettingsUi();
 }
 
 export function refreshThoughtUi() {
