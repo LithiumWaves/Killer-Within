@@ -890,6 +890,24 @@ function escapeRegExpForUi(value) {
     return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function maskNameForUi(name) {
+    const source = String(name || '').trim();
+    if (!source) {
+        return '';
+    }
+
+    let result = '';
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source.charAt(index);
+        const code = source.charCodeAt(index);
+        const isUpper = code >= 65 && code <= 90;
+        const isLower = code >= 97 && code <= 122;
+        result += isUpper || isLower ? '█' : char;
+    }
+
+    return result;
+}
+
 function isIgnoredMessageTextNode(node) {
     if (!node || !node.parentElement || typeof node.parentElement.closest !== 'function') {
         return false;
@@ -918,6 +936,18 @@ function replaceLeadingName(text, originalName, displayName) {
 
     const escaped = escapeRegExpForUi(original).replace(/\s+/g, '\\s+');
     return source.replace(new RegExp(`^(${escaped})(?=\\b|\\s|$)`, 'i'), next);
+}
+
+function restoreLeadingMaskedName(text, originalName) {
+    const source = String(text || '');
+    const original = String(originalName || '').trim();
+    const masked = maskNameForUi(original);
+    if (!source || !original || !masked || masked === original) {
+        return source;
+    }
+
+    const escaped = escapeRegExpForUi(masked).replace(/\s+/g, '\\s+');
+    return source.replace(new RegExp(`^(${escaped})(?=\\b|\\s|$)`), original);
 }
 
 function replaceMatchingTextNodes(root, originalName, displayName) {
@@ -980,6 +1010,34 @@ function replaceStandaloneMessageNameText($message, originalName, displayName) {
     return changed;
 }
 
+function restoreStandaloneMaskedMessageNameText($message, originalName) {
+    const messageRoot = $message && $message.length ? $message.get(0) : null;
+    const maskedOriginal = maskNameForUi(originalName);
+    if (!messageRoot || !originalName || !maskedOriginal || maskedOriginal === originalName) {
+        return false;
+    }
+
+    const walker = document.createTreeWalker(messageRoot, NodeFilter.SHOW_TEXT);
+    let changed = false;
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = String(node && node.textContent ? node.textContent : '');
+        const trimmed = text.trim();
+        if (!trimmed || trimmed !== maskedOriginal) {
+            continue;
+        }
+
+        if (isIgnoredMessageTextNode(node)) {
+            continue;
+        }
+
+        node.textContent = text.replace(maskedOriginal, originalName);
+        changed = true;
+    }
+
+    return changed;
+}
+
 function renderMaskedChatMessageNames() {
     const context = getContext();
     const chat = context && Array.isArray(context.chat) ? context.chat : [];
@@ -1035,8 +1093,28 @@ function renderMaskedChatMessageNames() {
             if (!storedOriginal && element && element.setAttribute) {
                 element.setAttribute('data-kw-original-name', baseline);
             }
+            const maskedBaseline = maskNameForUi(baseline);
+            if (element && element.setAttribute) {
+                element.setAttribute('data-kw-masked-name', maskedBaseline);
+            }
 
             const currentText = String(element && element.textContent ? element.textContent : '');
+            if (displayName === baseline) {
+                if (currentText.trim() === maskedBaseline) {
+                    element.textContent = baseline;
+                    continue;
+                }
+
+                const restored = restoreLeadingMaskedName(currentText, baseline);
+                if (restored !== currentText) {
+                    element.textContent = restored;
+                    continue;
+                }
+
+                replaceMatchingTextNodes(element, maskedBaseline, baseline);
+                continue;
+            }
+
             const replaced = replaceLeadingName(currentText, baseline, displayName);
             if (replaced !== currentText) {
                 element.textContent = replaced;
@@ -1047,6 +1125,9 @@ function renderMaskedChatMessageNames() {
         }
 
         replaceStandaloneMessageNameText($message, originalName, displayName);
+        if (displayName === originalName) {
+            restoreStandaloneMaskedMessageNameText($message, originalName);
+        }
     });
 }
 
