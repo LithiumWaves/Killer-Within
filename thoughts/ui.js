@@ -194,9 +194,12 @@ export function syncThoughtSettingsUi() {
 
     $('#kw-thoughts-enabled').prop('checked', settings.enabled);
     $('#kw-thoughts-generation-mode').val(settings.generationMode === 'hybrid' ? 'hybrid' : 'raw');
+    $('#kw-thoughts-provider').val(settings.thoughtGenerationProvider === 'openrouter' ? 'openrouter' : 'main');
     $('#kw-thoughts-history').val(settings.maxInjectedThoughts);
     $('#kw-thoughts-main-prompt').prop('checked', settings.includeThoughtsInMainPrompt);
     $('#kw-thoughts-pending').prop('checked', settings.includePendingThoughtInMainPrompt);
+    $('#kw-thoughts-openrouter-key').val(settings.openRouterApiKey || '');
+    $('#kw-thoughts-openrouter-model').val(settings.openRouterModel || '');
     $('#kw-thoughts-prompt').val(settings.thoughtPrompt);
     $('#kw-thoughts-wrapper-template').val(settings.thoughtWrapperTemplate);
     $('#kw-thoughts-context-template').val(settings.thoughtContextTemplate);
@@ -204,6 +207,7 @@ export function syncThoughtSettingsUi() {
     $('#kw-thoughts-manual-wrapper-template').val(settings.manualThoughtWrapperTemplate);
     $('#kw-thoughts-manual-raw-system').val(settings.manualThoughtRawSystemPrompt);
     $('#kw-thoughts-main-injection-template').val(settings.thoughtMainInjectionTemplate);
+    $('.kw-thoughts-openrouter-fields').toggleClass('is-hidden', settings.thoughtGenerationProvider !== 'openrouter');
     renderMemoryManager();
 }
 
@@ -216,6 +220,13 @@ export function bindThoughtSettingsUi() {
     $('#kw-thoughts-generation-mode').off('input').on('input', (event) => {
         const value = String($(event.currentTarget).val() || 'raw').trim().toLowerCase();
         getSettings().generationMode = value === 'hybrid' ? 'hybrid' : 'raw';
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-provider').off('input').on('input', (event) => {
+        const value = String($(event.currentTarget).val() || 'main').trim().toLowerCase();
+        getSettings().thoughtGenerationProvider = value === 'openrouter' ? 'openrouter' : 'main';
+        syncThoughtSettingsUi();
         scheduleSettingsSave();
     });
 
@@ -232,6 +243,16 @@ export function bindThoughtSettingsUi() {
 
     $('#kw-thoughts-pending').off('input').on('input', (event) => {
         getSettings().includePendingThoughtInMainPrompt = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-openrouter-key').off('input').on('input', (event) => {
+        getSettings().openRouterApiKey = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-openrouter-model').off('input').on('input', (event) => {
+        getSettings().openRouterModel = String($(event.currentTarget).val() || '').trim();
         scheduleSettingsSave();
     });
 
@@ -298,12 +319,25 @@ export function renderThoughtManagementSettingsHtml() {
             <span>Enable hidden thoughts generation</span>
         </label>
         <label class="killer-within-settings__field">
+            <span>Thought generation provider</span>
+            <select id="kw-thoughts-provider" class="text_pole">
+                <option value="main">Use main SillyTavern model</option>
+                <option value="openrouter">Use a separate OpenRouter model</option>
+            </select>
+        </label>
+        <label class="killer-within-settings__field">
             <span>Thought generation mode</span>
             <select id="kw-thoughts-generation-mode" class="text_pole">
                 <option value="raw">Raw</option>
                 <option value="hybrid">Hybrid</option>
             </select>
         </label>
+        <div class="killer-within-settings__field kw-thoughts-openrouter-fields is-hidden">
+            <span>Separate thoughts model</span>
+            <small>Stored locally in extension settings. The model field accepts either an OpenRouter model page URL or a raw model ID like <code>openai/gpt-4.1-mini</code>.</small>
+            <input id="kw-thoughts-openrouter-key" class="text_pole" type="password" placeholder="OpenRouter API key" autocomplete="off" />
+            <input id="kw-thoughts-openrouter-model" class="text_pole" type="text" placeholder="OpenRouter model URL or model ID" autocomplete="off" />
+        </div>
         <label class="killer-within-settings__field">
             <span>Stored thought history to inject</span>
             <input id="kw-thoughts-history" class="text_pole" type="number" min="0" max="50" step="1" />

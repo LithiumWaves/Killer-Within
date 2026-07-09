@@ -24,7 +24,83 @@ import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
 
+function normalizeOpenRouterModel(value) {
+    const source = String(value || '').trim();
+    if (!source) {
+        return '';
+    }
+
+    if (!/^https?:\/\//i.test(source)) {
+        return source;
+    }
+
+    try {
+        const url = new URL(source);
+        const segments = String(url.pathname || '')
+            .split('/')
+            .map((segment) => String(segment || '').trim())
+            .filter(Boolean);
+        if (!segments.length) {
+            return '';
+        }
+
+        if (segments[0].toLowerCase() === 'models') {
+            segments.shift();
+        }
+
+        return segments.join('/');
+    } catch (_error) {
+        return source;
+    }
+}
+
+async function requestOpenRouterThought(rawRequest, settings) {
+    const apiKey = String(settings?.openRouterApiKey || '').trim();
+    const model = normalizeOpenRouterModel(settings?.openRouterModel);
+    if (!apiKey || !model) {
+        return '';
+    }
+
+    const systemPrompt = String(rawRequest?.systemPrompt || '').trim();
+    const prompt = String(rawRequest?.prompt || '').trim();
+    if (!systemPrompt || !prompt) {
+        return '';
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: prompt },
+            ],
+        }),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`OpenRouter request failed (${response.status}): ${errorText || response.statusText}`);
+    }
+
+    const payload = await response.json();
+    return normalizeThoughtResult(
+        payload?.choices?.[0]?.message?.content
+        || payload?.choices?.[0]?.text
+        || payload
+    );
+}
+
 async function requestThoughtGeneration(context, settings, rawRequest, hybridPrompt) {
+    const provider = String(settings?.thoughtGenerationProvider || 'main').trim().toLowerCase();
+    if (provider === 'openrouter') {
+        return requestOpenRouterThought(rawRequest, settings);
+    }
+
     const mode = settings?.generationMode === 'hybrid' ? 'hybrid' : 'raw';
 
     if (mode === 'hybrid' && typeof context?.generateQuietPrompt === 'function') {

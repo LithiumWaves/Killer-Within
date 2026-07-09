@@ -660,6 +660,7 @@
     padding-right: 0.25rem;
     min-height: 0;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .kw-dn-settings-modal__sections {
@@ -736,6 +737,14 @@
     padding-top: 0.15rem;
 }
 
+.kw-thoughts-openrouter-fields.is-hidden {
+    display: none;
+}
+
+.kw-thoughts-openrouter-fields input + input {
+    margin-top: 0.45rem;
+}
+
 .kw-dn-settings-modal__close {
     min-height: 2rem;
     padding: 0.36rem 0.8rem;
@@ -795,6 +804,27 @@
 
     .kw-dn-settings-modal__header {
         gap: 0.6rem;
+    }
+
+    .kw-dn-settings-modal__body {
+        padding-right: 0.05rem;
+    }
+
+    .kw-dn-settings-modal__sections {
+        gap: 0.72rem;
+    }
+
+    .kw-dn-settings-modal__section {
+        gap: 0.65rem;
+        padding: 0.72rem;
+    }
+
+    .kw-dn-settings-modal__section-title {
+        font-size: 0.88rem;
+    }
+
+    .kw-dn-settings-modal__foldout-summary::after {
+        font-size: 0.6rem;
     }
 
 
@@ -894,6 +924,42 @@
         width: calc(100vw - 1rem);
         max-height: calc(100vh - 1rem);
         padding: 0.7rem;
+        border-radius: 0.34rem;
+    }
+
+    .kw-dn-settings-modal__backdrop {
+        padding: 0.5rem;
+        align-items: stretch;
+    }
+
+    .kw-dn-settings-modal__header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .kw-dn-settings-modal__close {
+        width: 100%;
+    }
+
+    .kw-dn-settings-modal__body {
+        padding-right: 0;
+    }
+
+    .kw-dn-settings-modal__section {
+        padding: 0.62rem;
+    }
+
+    .kw-dn-settings-modal__section-body,
+    .kw-dn-settings-modal__foldout-body {
+        gap: 0.62rem;
+    }
+
+    .kw-dn-settings-modal__title {
+        font-size: 1.06rem;
+    }
+
+    .kw-thoughts-openrouter-fields input {
+        min-height: 2.15rem;
     }
 }
 
