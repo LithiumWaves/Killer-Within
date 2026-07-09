@@ -21,7 +21,7 @@ import {
     getNotebookRevealPromptInjectionMessage,
 } from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
-import { persistChatChanges as persistDeathNoteChatChanges, reportDebugEvent, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
+import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
 
 async function requestThoughtGeneration(context, settings, rawRequest, hybridPrompt) {
@@ -165,12 +165,6 @@ export function installInterceptor() {
             return;
         }
 
-        reportDebugEvent({
-            hypothesisId: 'C',
-            msg: 'generation: interceptor invoked',
-            data: { type, chatLength: chat.length },
-        });
-
         const deathNoteTick = tickDeathNoteCountdownForGeneration(chat.length);
         if (deathNoteTick?.ticked) {
             await persistDeathNoteChatChanges();
@@ -186,16 +180,6 @@ export function installInterceptor() {
         if (notebookRevealInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
             chat.splice(insertAt, 0, notebookRevealInjection);
-            reportDebugEvent({
-                hypothesisId: 'C',
-                msg: 'generation: inserted notebook reveal injection',
-                data: { insertAt, chatLength: chat.length },
-            });
-        } else {
-            reportDebugEvent({
-                hypothesisId: 'C',
-                msg: 'generation: no notebook reveal injection returned',
-            });
         }
 
         const identityTheftInjection = getIdentityTheftPromptInjectionMessage();

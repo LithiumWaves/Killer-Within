@@ -27,7 +27,6 @@ import {
     markNotebookPresenceRevealPending,
     notify,
     persistChatChanges,
-    reportDebugEvent,
     removeNotebookScrap,
     sanitizeNotebookPagesForRules,
     sanitizeNotebookPageText,
@@ -248,10 +247,6 @@ function normalizePresenceToken(value) {
 
 function shouldTriggerNotebookPresenceReveal() {
     if (!isPresenceActive()) {
-        reportDebugEvent({
-            hypothesisId: 'A',
-            msg: 'presence-reveal: Presence inactive',
-        });
         return false;
     }
 
@@ -267,22 +262,12 @@ function shouldTriggerNotebookPresenceReveal() {
     }
 
     if (!tracker.length) {
-        reportDebugEvent({
-            hypothesisId: 'A',
-            msg: 'presence-reveal: no tracker found in recent messages',
-            data: { chatLength: chat.length },
-        });
         return false;
     }
 
     const normalized = new Set(tracker.map((entry) => normalizePresenceToken(entry)).filter(Boolean));
     normalized.delete('presence_universal_tracker');
     if (!normalized.size) {
-        reportDebugEvent({
-            hypothesisId: 'A',
-            msg: 'presence-reveal: tracker contained only universal token',
-            data: { tracker },
-        });
         return false;
     }
 
@@ -294,20 +279,10 @@ function shouldTriggerNotebookPresenceReveal() {
         }
 
         if (normalized.has(normalizePresenceToken(candidate))) {
-            reportDebugEvent({
-                hypothesisId: 'A',
-                msg: 'presence-reveal: matched present character',
-                data: { actor: actor?.name || actor?.id || '', candidate, tracker },
-            });
             return true;
         }
     }
 
-    reportDebugEvent({
-        hypothesisId: 'A',
-        msg: 'presence-reveal: tracker present but no explicit match; defaulting to true',
-        data: { trackerCount: normalized.size },
-    });
     return true;
 }
 
@@ -510,20 +485,8 @@ function setNotebookOpenState(nextOpen) {
     scheduleSettingsSave();
     if (nextOpen) {
         playNotebookOpenSound();
-        const shouldReveal = shouldTriggerNotebookPresenceReveal();
-        reportDebugEvent({
-            hypothesisId: 'A',
-            msg: 'notebook-open: evaluated presence reveal',
-            data: { shouldReveal },
-        });
-        if (shouldReveal) {
+        if (shouldTriggerNotebookPresenceReveal()) {
             markNotebookPresenceRevealPending();
-            const state = getChatState();
-            reportDebugEvent({
-                hypothesisId: 'A',
-                msg: 'notebook-open: marked pending reveal',
-                data: { pending: Boolean(state?.notebookPresenceReveal?.pending) },
-            });
         }
     } else {
         stopWritingSound();
