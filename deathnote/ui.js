@@ -51,11 +51,13 @@ const MOBILE_VIEWPORT_MAX = 520;
 const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
 const INVENTORY_ID = 'kw-deathnote-inventory';
 const NOTICE_LAYER_ID = 'kw-deathnote-notices';
+const INVENTORY_SETTINGS_MODAL_ID = 'kw-deathnote-inventory-settings-modal';
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
 let chatNameMaskObserver = null;
 let chatNameMaskQueued = false;
+let inventorySettingsOpen = false;
 let inventoryDragState = {
     dragging: false,
     startX: 0,
@@ -1602,6 +1604,7 @@ function renderInventoryTrayHtml() {
                         <div class="kw-dn-inventory__eyebrow">Killer Within</div>
                         <h3 class="kw-dn-inventory__title">Inventory</h3>
                     </div>
+                    <button type="button" id="kw-dn-inventory-settings-open" class="menu_button kw-dn-inventory__header-action">Settings</button>
                 </div>
 
                 <div class="kw-dn-inventory__layout">
@@ -1868,6 +1871,10 @@ function syncSettingsUi() {
     $('#kw-deathnote-permanent-scrap').prop('checked', Boolean(settings.permanentResolvedScrapEntries));
     $('#kw-deathnote-open-sound').prop('checked', Boolean(settings.enableOpenSound));
     $('#kw-deathnote-writing-sound').prop('checked', Boolean(settings.enableWritingSound));
+    $('#kw-deathnote-prompt-template').val(settings.deathNotePromptTemplate);
+    $('#kw-deathnote-prompt-theft-template').val(settings.identityTheftPromptTemplate);
+    $('#kw-deathnote-prompt-reveal-template').val(settings.notebookRevealPromptTemplate);
+    $('#kw-deathnote-prompt-presence-template').val(settings.presencePromptTemplate);
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
 }
@@ -1949,6 +1956,26 @@ function bindSettingsUi() {
         if (!getSettings().enableWritingSound) {
             stopWritingSound();
         }
+    });
+
+    $('#kw-deathnote-prompt-template').off('input').on('input', (event) => {
+        getSettings().deathNotePromptTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-prompt-theft-template').off('input').on('input', (event) => {
+        getSettings().identityTheftPromptTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-prompt-reveal-template').off('input').on('input', (event) => {
+        getSettings().notebookRevealPromptTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-prompt-presence-template').off('input').on('input', (event) => {
+        getSettings().presencePromptTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
     });
 
     $(document)
@@ -2230,6 +2257,104 @@ function bindSettingsUi() {
         });
 }
 
+function renderInventorySettingsContentHtml() {
+    return `
+        <div class="kw-dn-settings-modal__sections">
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Notebook</div>
+                    <div class="kw-dn-settings-modal__section-title">Writing And Rules</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <label class="killer-within-settings__field">
+                        <span>Notebook font</span>
+                        <select id="kw-deathnote-font-mode" class="text_pole">
+                            <option value="print">Print</option>
+                            <option value="script">Script</option>
+                        </select>
+                    </label>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-deathnote-require-known-names" type="checkbox" />
+                        <span>Require discovered names for Death Note kills</span>
+                    </label>
+                    <div class="killer-within-settings__field">
+                        <span>Resolved ink</span>
+                        <label class="killer-within-settings__row">
+                            <input id="kw-deathnote-permanent-notebook" type="checkbox" />
+                            <span>Resolved notebook lines become permanent and darken</span>
+                        </label>
+                        <label class="killer-within-settings__row">
+                            <input id="kw-deathnote-permanent-scrap" type="checkbox" />
+                            <span>Resolved scrap lines become permanent and darken</span>
+                        </label>
+                    </div>
+                    <div class="killer-within-settings__field">
+                        <span>Notebook sounds</span>
+                        <label class="killer-within-settings__row">
+                            <input id="kw-deathnote-open-sound" type="checkbox" />
+                            <span>Play pen click when opening</span>
+                        </label>
+                        <label class="killer-within-settings__row">
+                            <input id="kw-deathnote-writing-sound" type="checkbox" />
+                            <span>Play writing sound while writing</span>
+                        </label>
+                    </div>
+                    <div class="killer-within-settings__field">
+                        <span>Notebook defaults</span>
+                        <small>If a cause is omitted, Death Note entries default to heart attack. If time is omitted, they trigger on the next assistant message.</small>
+                    </div>
+                </div>
+            </section>
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Knowledge</div>
+                    <div class="kw-dn-settings-modal__section-title">Name Discovery</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <div id="kw-deathnote-name-manager"></div>
+                </div>
+            </section>
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Memory</div>
+                    <div class="kw-dn-settings-modal__section-title">Death Note Memories</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <div id="kw-deathnote-memory-manager"></div>
+                </div>
+            </section>
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Prompt Studio</div>
+                    <div class="kw-dn-settings-modal__section-title">Injected Prompt Templates</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <div class="killer-within-settings__field">
+                        <span>Template placeholders</span>
+                        <small>Use <code>{{ownership_block}}</code>, <code>{{inventory_block}}</code>, <code>{{due_block}}</code>, <code>{{entries_block}}</code>, <code>{{user_label}}</code>, <code>{{target_label}}</code>, <code>{{linked_shinigami}}</code>, and <code>{{touchers_block}}</code>.</small>
+                    </div>
+                    <label class="killer-within-settings__field">
+                        <span>Death Note context template</span>
+                        <textarea id="kw-deathnote-prompt-template" class="text_pole" rows="12"></textarea>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Failed identity theft template</span>
+                        <textarea id="kw-deathnote-prompt-theft-template" class="text_pole" rows="8"></textarea>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Notebook reveal template</span>
+                        <textarea id="kw-deathnote-prompt-reveal-template" class="text_pole" rows="8"></textarea>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Presence template</span>
+                        <textarea id="kw-deathnote-prompt-presence-template" class="text_pole" rows="9"></textarea>
+                    </label>
+                </div>
+            </section>
+        </div>
+    `;
+}
+
 function renderSettingsPanel() {
     const host = getSettingsHost();
     if (!host.length || document.getElementById(SETTINGS_PANEL_ID)) {
@@ -2243,57 +2368,57 @@ function renderSettingsPanel() {
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content">
-                <label class="killer-within-settings__field">
-                    <span>Notebook font</span>
-                    <select id="kw-deathnote-font-mode" class="text_pole">
-                        <option value="print">Print</option>
-                        <option value="script">Script</option>
-                    </select>
-                </label>
                 <label class="killer-within-settings__row">
-                    <input id="kw-deathnote-require-known-names" type="checkbox" />
-                    <span>Require discovered names for Death Note kills</span>
+                    <span>Death Note controls now live in the diegetic inventory settings window.</span>
                 </label>
-                <div class="killer-within-settings__field">
-                    <span>Resolved ink</span>
-                    <label class="killer-within-settings__row">
-                        <input id="kw-deathnote-permanent-notebook" type="checkbox" />
-                        <span>Resolved notebook lines become permanent and darken</span>
-                    </label>
-                    <label class="killer-within-settings__row">
-                        <input id="kw-deathnote-permanent-scrap" type="checkbox" />
-                        <span>Resolved scrap lines become permanent and darken</span>
-                    </label>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Notebook sounds</span>
-                    <label class="killer-within-settings__row">
-                        <input id="kw-deathnote-open-sound" type="checkbox" />
-                        <span>Play pen click when opening</span>
-                    </label>
-                    <label class="killer-within-settings__row">
-                        <input id="kw-deathnote-writing-sound" type="checkbox" />
-                        <span>Play writing sound while writing</span>
-                    </label>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Notebook defaults</span>
-                    <small>If a cause is omitted, Death Note entries default to heart attack. If time is omitted, they trigger on the next assistant message.</small>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Name discovery</span>
-                    <div id="kw-deathnote-name-manager"></div>
-                </div>
-                <div class="killer-within-settings__field">
-                    <span>Death Note memories</span>
-                    <div id="kw-deathnote-memory-manager"></div>
-                </div>
+                <button type="button" id="kw-deathnote-settings-open-drawer" class="menu_button">Open Inventory Settings</button>
             </div>
         </div>
     `);
 
     bindSettingsUi();
     syncSettingsUi();
+}
+
+function renderInventorySettingsModalHtml() {
+    return `
+        <div class="kw-dn-settings-modal__backdrop" data-close-modal="true">
+            <div class="kw-dn-settings-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="kw-dn-settings-modal-title">
+                <div class="kw-dn-settings-modal__header">
+                    <div>
+                        <div class="kw-dn-settings-modal__eyebrow">Killer Within</div>
+                        <h3 id="kw-dn-settings-modal-title" class="kw-dn-settings-modal__title">Inventory Settings</h3>
+                    </div>
+                    <button type="button" class="menu_button kw-dn-settings-modal__close" aria-label="Close settings">Close</button>
+                </div>
+                <div class="kw-dn-settings-modal__body">
+                    ${renderInventorySettingsContentHtml()}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function ensureInventorySettingsModal() {
+    const existing = document.getElementById(INVENTORY_SETTINGS_MODAL_ID);
+    if (!getSettings().enabled || !inventorySettingsOpen) {
+        if (existing) {
+            existing.remove();
+        }
+        return null;
+    }
+
+    let root = existing;
+    if (!root) {
+        root = document.createElement('div');
+        root.id = INVENTORY_SETTINGS_MODAL_ID;
+        document.body.append(root);
+    }
+
+    root.innerHTML = renderInventorySettingsModalHtml();
+    bindSettingsUi();
+    syncSettingsUi();
+    return root;
 }
 
 function ensureInventoryTray() {
@@ -2991,6 +3116,34 @@ function bindInventoryUi() {
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
+        .off('click', '#kw-dn-inventory-settings-open')
+        .on('click', '#kw-dn-inventory-settings-open', (event) => {
+            event.preventDefault();
+            inventorySettingsOpen = true;
+            refreshDeathNoteUi();
+        })
+        .off('click', '#kw-deathnote-settings-open-drawer')
+        .on('click', '#kw-deathnote-settings-open-drawer', (event) => {
+            event.preventDefault();
+            inventorySettingsOpen = true;
+            refreshDeathNoteUi();
+        })
+        .off('click', `#${INVENTORY_SETTINGS_MODAL_ID} [data-close-modal="true"]`)
+        .on('click', `#${INVENTORY_SETTINGS_MODAL_ID} [data-close-modal="true"]`, (event) => {
+            if (event.target !== event.currentTarget) {
+                return;
+            }
+
+            event.preventDefault();
+            inventorySettingsOpen = false;
+            refreshDeathNoteUi();
+        })
+        .off('click', `#${INVENTORY_SETTINGS_MODAL_ID} .kw-dn-settings-modal__close`)
+        .on('click', `#${INVENTORY_SETTINGS_MODAL_ID} .kw-dn-settings-modal__close`, (event) => {
+            event.preventDefault();
+            inventorySettingsOpen = false;
+            refreshDeathNoteUi();
+        })
         .off('click', '.kw-dn-inventory__slot[data-item-key]')
         .on('click', '.kw-dn-inventory__slot[data-item-key]', (event) => {
             event.preventDefault();
@@ -3104,6 +3257,17 @@ function bindInventoryUi() {
                     refreshDeathNoteUi();
                 }
             }
+        });
+
+    $(document)
+        .off('keydown.kw-deathnote-settings-modal')
+        .on('keydown.kw-deathnote-settings-modal', (event) => {
+            if (!inventorySettingsOpen || event.key !== 'Escape') {
+                return;
+            }
+
+            inventorySettingsOpen = false;
+            refreshDeathNoteUi();
         });
 }
 
@@ -3226,6 +3390,7 @@ export function refreshDeathNoteUi() {
     renderSettingsPanel();
     syncSettingsUi();
     ensureInventoryTray();
+    ensureInventorySettingsModal();
     ensureWidget();
     ensureChatNameMaskObserver();
     queueMaskedChatNameRender();
@@ -3235,6 +3400,7 @@ export function setupDeathNoteUi() {
     renderSettingsPanel();
     syncSettingsUi();
     ensureInventoryTray();
+    ensureInventorySettingsModal();
     ensureWidget();
     bindWidgetUi();
     bindInventoryUi();

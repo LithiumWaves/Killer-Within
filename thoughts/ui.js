@@ -198,6 +198,12 @@ function syncSettingsUi() {
     $('#kw-thoughts-main-prompt').prop('checked', settings.includeThoughtsInMainPrompt);
     $('#kw-thoughts-pending').prop('checked', settings.includePendingThoughtInMainPrompt);
     $('#kw-thoughts-prompt').val(settings.thoughtPrompt);
+    $('#kw-thoughts-wrapper-template').val(settings.thoughtWrapperTemplate);
+    $('#kw-thoughts-context-template').val(settings.thoughtContextTemplate);
+    $('#kw-thoughts-raw-system').val(settings.thoughtRawSystemPrompt);
+    $('#kw-thoughts-manual-wrapper-template').val(settings.manualThoughtWrapperTemplate);
+    $('#kw-thoughts-manual-raw-system').val(settings.manualThoughtRawSystemPrompt);
+    $('#kw-thoughts-main-injection-template').val(settings.thoughtMainInjectionTemplate);
     renderMemoryManager();
 }
 
@@ -231,6 +237,36 @@ function bindSettingsUi() {
 
     $('#kw-thoughts-prompt').off('input').on('input', (event) => {
         getSettings().thoughtPrompt = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-wrapper-template').off('input').on('input', (event) => {
+        getSettings().thoughtWrapperTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-context-template').off('input').on('input', (event) => {
+        getSettings().thoughtContextTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-raw-system').off('input').on('input', (event) => {
+        getSettings().thoughtRawSystemPrompt = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-manual-wrapper-template').off('input').on('input', (event) => {
+        getSettings().manualThoughtWrapperTemplate = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-manual-raw-system').off('input').on('input', (event) => {
+        getSettings().manualThoughtRawSystemPrompt = String($(event.currentTarget).val() || '').trim();
+        scheduleSettingsSave();
+    });
+
+    $('#kw-thoughts-main-injection-template').off('input').on('input', (event) => {
+        getSettings().thoughtMainInjectionTemplate = String($(event.currentTarget).val() || '').trim();
         scheduleSettingsSave();
     });
 
@@ -294,6 +330,34 @@ export function renderSettingsPanel() {
                 <label class="killer-within-settings__field">
                     <span>Thought generation prompt</span>
                     <textarea id="kw-thoughts-prompt" class="text_pole" rows="10"></textarea>
+                </label>
+                <div class="killer-within-settings__field">
+                    <span>Prompt templates</span>
+                    <small>Use placeholders like <code>{{thought_prompt}}</code>, <code>{{history_block}}</code>, <code>{{thought_prompt_block}}</code>, <code>{{identity_context_block}}</code>, <code>{{conversation_context_block}}</code>, <code>{{visible_reply}}</code>, and <code>{{sections}}</code>.</small>
+                </div>
+                <label class="killer-within-settings__field">
+                    <span>Thought wrapper template</span>
+                    <textarea id="kw-thoughts-wrapper-template" class="text_pole" rows="8"></textarea>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Thought context template</span>
+                    <textarea id="kw-thoughts-context-template" class="text_pole" rows="8"></textarea>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Raw generation system prompt</span>
+                    <textarea id="kw-thoughts-raw-system" class="text_pole" rows="6"></textarea>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Manual thought wrapper template</span>
+                    <textarea id="kw-thoughts-manual-wrapper-template" class="text_pole" rows="8"></textarea>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Manual reconstruction system prompt</span>
+                    <textarea id="kw-thoughts-manual-raw-system" class="text_pole" rows="6"></textarea>
+                </label>
+                <label class="killer-within-settings__field">
+                    <span>Main reply injection template</span>
+                    <textarea id="kw-thoughts-main-injection-template" class="text_pole" rows="6"></textarea>
                 </label>
                 <div class="killer-within-settings__field">
                     <span>Thought memories in this chat</span>

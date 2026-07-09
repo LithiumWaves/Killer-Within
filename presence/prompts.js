@@ -1,4 +1,10 @@
-import { getActorDisplayName, getDeathNotePresenceState, getLinkedShinigami } from '../deathnote/core.js';
+import { getActorDisplayName, getDeathNotePresenceState, getLinkedShinigami, getSettings } from '../deathnote/core.js';
+
+function renderPromptTemplate(template, replacements = {}) {
+    return String(template || '').replace(/\{\{([a-z0-9_]+)\}\}/gi, (_match, key) => {
+        return Object.hasOwn(replacements, key) ? String(replacements[key] ?? '') : '';
+    });
+}
 
 function formatActor(actor) {
     const value = actor && typeof actor === 'object' ? actor : {};
@@ -75,23 +81,19 @@ function buildTouchersBlock(touchers) {
 }
 
 function buildPresenceInjection() {
+    const settings = getSettings();
     const state = getDeathNotePresenceState();
     const shinigamiLink = getLinkedShinigami();
     if (!state.notebookPresent && !state.touchers.length && !state.userCanSeeShinigami) {
         return '';
     }
 
-    return [
-        '[Presence Context]',
-        'Selective supernatural visibility is active for Death Note-related entities.',
-        `Linked Shinigami: ${shinigamiLink && shinigamiLink.active ? (getActorDisplayName(shinigamiLink.actor, shinigamiLink.avatar || 'linked')) : 'none currently linked'}.`,
-        'Anyone currently touching the Death Note or one of its scraps can perceive that notebook\'s Shinigami.',
-        'Characters without current contact cannot directly see, hear, or confidently remember Shinigami-only actions or speech as witnessed fact unless the scene separately establishes that perception.',
-        'If a Shinigami tied to this Death Note appears, apply these visibility limits strictly.',
-        '',
-        'Current Death Note touchers:',
-        buildTouchersBlock(state.touchers),
-    ].join('\n');
+    return renderPromptTemplate(settings.presencePromptTemplate, {
+        linked_shinigami: shinigamiLink && shinigamiLink.active
+            ? getActorDisplayName(shinigamiLink.actor, shinigamiLink.avatar || 'linked')
+            : 'none currently linked',
+        touchers_block: buildTouchersBlock(state.touchers),
+    }).trim();
 }
 
 export function getPresencePromptInjectionMessage() {

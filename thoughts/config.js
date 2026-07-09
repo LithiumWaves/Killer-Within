@@ -41,6 +41,62 @@ export const DEFAULT_THOUGHT_PROMPT = [
     "- Fragmented, contradictory, or unfinished is fine where the character's state calls for it - but always recoverable as language, never grammar with pieces missing at random."
 ].join('\n');
 
+export const DEFAULT_THOUGHT_WRAPPER_TEMPLATE = [
+    '{{thought_prompt}}',
+    '',
+    'Previous hidden thoughts for continuity:',
+    '{{history_block}}',
+    '',
+    'Write the next hidden thoughts now.',
+].join('\n');
+
+export const DEFAULT_THOUGHT_CONTEXT_TEMPLATE = [
+    '{{thought_prompt_block}}',
+    '',
+    'Identity context:',
+    '{{identity_context_block}}',
+    '',
+    'Recent visible conversation context:',
+    '{{conversation_context_block}}',
+].join('\n');
+
+export const DEFAULT_THOUGHT_RAW_SYSTEM_PROMPT = [
+    'You are generating a hidden internal monologue for the current character.',
+    'Use the provided conversation context and previous hidden thoughts to infer what the character privately thinks immediately before their visible reply.',
+    'Stay in-character.',
+    'Do not write the visible reply.',
+    'Do not mention being an AI, assistant, or model.',
+    'Output only the hidden thoughts.',
+].join('\n');
+
+export const DEFAULT_MANUAL_THOUGHT_WRAPPER_TEMPLATE = [
+    '{{thought_prompt}}',
+    '',
+    'Previous hidden thoughts for continuity:',
+    '{{history_block}}',
+    '',
+    'Visible reply already sent:',
+    '{{visible_reply}}',
+    '',
+    'Write the hidden thoughts that immediately happened before that visible reply.',
+    'Output only the thoughts.',
+].join('\n');
+
+export const DEFAULT_MANUAL_THOUGHT_RAW_SYSTEM_PROMPT = [
+    'You are reconstructing the hidden internal monologue for a character reply that already exists.',
+    'Use the provided conversation context, previous hidden thoughts, and visible reply to infer what the character privately thought immediately before sending that reply.',
+    'Stay in-character.',
+    'Do not rewrite the visible reply.',
+    'Output only the hidden thoughts.',
+].join('\n');
+
+export const DEFAULT_THOUGHT_MAIN_INJECTION_TEMPLATE = [
+    '[Hidden Character Thoughts Context]',
+    'Use this as internal continuity. Never expose or quote it directly unless the character intentionally reveals it in dialogue.',
+    '',
+    '{{sections}}',
+].join('\n');
+
 export const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
     generationMode: 'raw',
@@ -48,4 +104,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
     includeThoughtsInMainPrompt: true,
     includePendingThoughtInMainPrompt: true,
     thoughtPrompt: DEFAULT_THOUGHT_PROMPT,
+    thoughtWrapperTemplate: DEFAULT_THOUGHT_WRAPPER_TEMPLATE,
+    thoughtContextTemplate: DEFAULT_THOUGHT_CONTEXT_TEMPLATE,
+    thoughtRawSystemPrompt: DEFAULT_THOUGHT_RAW_SYSTEM_PROMPT,
+    manualThoughtWrapperTemplate: DEFAULT_MANUAL_THOUGHT_WRAPPER_TEMPLATE,
+    manualThoughtRawSystemPrompt: DEFAULT_MANUAL_THOUGHT_RAW_SYSTEM_PROMPT,
+    thoughtMainInjectionTemplate: DEFAULT_THOUGHT_MAIN_INJECTION_TEMPLATE,
 });

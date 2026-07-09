@@ -16,6 +16,12 @@ import {
 import { filterMessagesVisibleToPresenceCharacter } from '../presence/core.js';
 import { state } from './state.js';
 
+function renderPromptTemplate(template, replacements = {}) {
+    return String(template || '').replace(/\{\{([a-z0-9_]+)\}\}/gi, (_match, key) => {
+        return Object.hasOwn(replacements, key) ? String(replacements[key] ?? '') : '';
+    });
+}
+
 export function getThoughtEntries({
     limit = Number.MAX_SAFE_INTEGER,
     characterKey = '',
@@ -84,14 +90,10 @@ export function buildThoughtPrompt() {
     const settings = getSettings();
     const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts, getActiveCharacterKey());
 
-    return [
-        applyPromptMacros(settings.thoughtPrompt).trim(),
-        '',
-        'Previous hidden thoughts for continuity:',
-        historyBlock,
-        '',
-        'Write the next hidden thoughts now.'
-    ].join('\n');
+    return applyPromptMacros(renderPromptTemplate(settings.thoughtWrapperTemplate, {
+        thought_prompt: settings.thoughtPrompt,
+        history_block: historyBlock,
+    })).trim();
 }
 
 function getRelevantChatMessages(limit = RAW_THOUGHT_CONTEXT_LIMIT, characterName = '') {
@@ -151,37 +153,22 @@ function buildIdentityContextBlock() {
 export function buildThoughtRawRequest() {
     const activeCharacterName = resolvePromptMacro('char');
     return {
-        systemPrompt: [
-            'You are generating a hidden internal monologue for the current character.',
-            'Use the provided conversation context and previous hidden thoughts to infer what the character privately thinks immediately before their visible reply.',
-            'Stay in-character.',
-            'Do not write the visible reply.',
-            'Do not mention being an AI, assistant, or model.',
-            'Output only the hidden thoughts.'
-        ].join('\n'),
-        prompt: [
-            buildThoughtPrompt(),
-            '',
-            'Identity context:',
-            buildIdentityContextBlock(),
-            '',
-            'Recent visible conversation context:',
-            buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, activeCharacterName),
-        ].join('\n'),
+        systemPrompt: applyPromptMacros(getSettings().thoughtRawSystemPrompt).trim(),
+        prompt: applyPromptMacros(renderPromptTemplate(getSettings().thoughtContextTemplate, {
+            thought_prompt_block: buildThoughtPrompt(),
+            identity_context_block: buildIdentityContextBlock(),
+            conversation_context_block: buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, activeCharacterName),
+        })).trim(),
     };
 }
 
 export function buildThoughtHybridPrompt() {
     const activeCharacterName = resolvePromptMacro('char');
-    return [
-        buildThoughtPrompt(),
-        '',
-        'Identity context:',
-        buildIdentityContextBlock(),
-        '',
-        'Recent visible conversation context:',
-        buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, activeCharacterName),
-    ].join('\n');
+    return applyPromptMacros(renderPromptTemplate(getSettings().thoughtContextTemplate, {
+        thought_prompt_block: buildThoughtPrompt(),
+        identity_context_block: buildIdentityContextBlock(),
+        conversation_context_block: buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, activeCharacterName),
+    })).trim();
 }
 
 function buildManualThoughtPrompt(messageIndex) {
@@ -191,18 +178,11 @@ function buildManualThoughtPrompt(messageIndex) {
     const historyBlock = buildThoughtHistoryBlock(settings.maxInjectedThoughts, getMessageCharacterKey(message));
     const visibleReply = String(message?.mes ?? '').trim();
 
-    return [
-        applyPromptMacros(settings.thoughtPrompt).trim(),
-        '',
-        'Previous hidden thoughts for continuity:',
-        historyBlock,
-        '',
-        'Visible reply already sent:',
-        visibleReply || '(empty reply)',
-        '',
-        'Write the hidden thoughts that immediately happened before that visible reply.',
-        'Output only the thoughts.',
-    ].join('\n');
+    return applyPromptMacros(renderPromptTemplate(settings.manualThoughtWrapperTemplate, {
+        thought_prompt: settings.thoughtPrompt,
+        history_block: historyBlock,
+        visible_reply: visibleReply || '(empty reply)',
+    })).trim();
 }
 
 export function buildManualThoughtRawRequest(messageIndex) {
@@ -210,22 +190,12 @@ export function buildManualThoughtRawRequest(messageIndex) {
     const message = context?.chat?.[messageIndex];
     const characterName = String(message?.name || '').trim();
     return {
-        systemPrompt: [
-            'You are reconstructing the hidden internal monologue for a character reply that already exists.',
-            'Use the provided conversation context, previous hidden thoughts, and visible reply to infer what the character privately thought immediately before sending that reply.',
-            'Stay in-character.',
-            'Do not rewrite the visible reply.',
-            'Output only the hidden thoughts.'
-        ].join('\n'),
-        prompt: [
-            buildManualThoughtPrompt(messageIndex),
-            '',
-            'Identity context:',
-            buildIdentityContextBlock(),
-            '',
-            'Recent visible conversation context:',
-            buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, characterName),
-        ].join('\n'),
+        systemPrompt: applyPromptMacros(getSettings().manualThoughtRawSystemPrompt).trim(),
+        prompt: applyPromptMacros(renderPromptTemplate(getSettings().thoughtContextTemplate, {
+            thought_prompt_block: buildManualThoughtPrompt(messageIndex),
+            identity_context_block: buildIdentityContextBlock(),
+            conversation_context_block: buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, characterName),
+        })).trim(),
     };
 }
 
@@ -233,15 +203,11 @@ export function buildManualThoughtHybridPrompt(messageIndex) {
     const context = getContext();
     const message = context?.chat?.[messageIndex];
     const characterName = String(message?.name || '').trim();
-    return [
-        buildManualThoughtPrompt(messageIndex),
-        '',
-        'Identity context:',
-        buildIdentityContextBlock(),
-        '',
-        'Recent visible conversation context:',
-        buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, characterName),
-    ].join('\n');
+    return applyPromptMacros(renderPromptTemplate(getSettings().thoughtContextTemplate, {
+        thought_prompt_block: buildManualThoughtPrompt(messageIndex),
+        identity_context_block: buildIdentityContextBlock(),
+        conversation_context_block: buildConversationContextBlock(RAW_THOUGHT_CONTEXT_LIMIT, characterName),
+    })).trim();
 }
 
 function buildMainPromptInjection() {
@@ -271,12 +237,9 @@ function buildMainPromptInjection() {
         return '';
     }
 
-    return [
-        '[Hidden Character Thoughts Context]',
-        'Use this as internal continuity. Never expose or quote it directly unless the character intentionally reveals it in dialogue.',
-        '',
-        sections.join('\n\n'),
-    ].join('\n');
+    return applyPromptMacros(renderPromptTemplate(settings.thoughtMainInjectionTemplate, {
+        sections: sections.join('\n\n'),
+    })).trim();
 }
 
 export function getPromptInjectionMessage() {

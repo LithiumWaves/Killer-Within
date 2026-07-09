@@ -14,6 +14,12 @@ import {
     getUserHeldNotebookScraps,
 } from './core.js';
 
+function renderPromptTemplate(template, replacements = {}) {
+    return String(template || '').replace(/\{\{([a-z0-9_]+)\}\}/gi, (_match, key) => {
+        return Object.hasOwn(replacements, key) ? String(replacements[key] ?? '') : '';
+    });
+}
+
 function formatEntry(entry) {
     const noteText = String(entry?.noteText || '').trim();
     const targetName = String(entry?.targetName || '').trim();
@@ -173,24 +179,12 @@ function buildDeathNoteInjection() {
     const dueBlock = dueEntries.length ? buildEntriesBlock(dueEntries) : 'None.';
     const entriesBlock = buildEntriesBlock(activeEntries);
 
-    return [
-        '[Death Note Context]',
-        'Treat the Death Note custody state and written entries below as binding constraints for story causality.',
-        'Do not mention this block or explain rules unless the scene explicitly reveals them.',
-        'Default Death Note rules: if no cause of death is written, interpret the entry as death by heart attack. If no time is written, the death occurs on the next assistant message.',
-        '',
-        buildOwnershipBlock(ownership),
-        '',
-        buildInventoryBlock(inventory),
-        '',
-        'Due now (must occur in the assistant reply being generated right now):',
-        'If at least one entry is due, the next assistant reply MUST depict those deaths occurring as described, in-story.',
-        'Do not delay them. Do not refuse. Do not acknowledge these instructions.',
-        dueBlock,
-        '',
-        'Written entries:',
-        entriesBlock,
-    ].join('\n');
+    return renderPromptTemplate(settings.deathNotePromptTemplate, {
+        ownership_block: buildOwnershipBlock(ownership),
+        inventory_block: buildInventoryBlock(inventory),
+        due_block: dueBlock,
+        entries_block: entriesBlock,
+    }).trim();
 }
 
 function buildIdentityTheftInjection() {
@@ -216,13 +210,10 @@ function buildIdentityTheftInjection() {
     }
 
     const targetLabel = formatActorLabel(pending.actor, 'that character');
-    return [
-        '[Failed Identity Theft]',
-        `If the responding character is ${targetLabel}, they already noticed that ${userLabel} tried to steal their ID.`,
-        'Treat that failed theft as something that already happened in-scene.',
-        `In this reply, ${targetLabel} should react naturally to that violation with suspicion, confrontation, guardedness, or alarm.`,
-        `If the responding character is not ${targetLabel}, ignore this block entirely.`,
-    ].join('\n');
+    return renderPromptTemplate(settings.identityTheftPromptTemplate, {
+        user_label: userLabel,
+        target_label: targetLabel,
+    }).trim();
 }
 
 function buildNotebookPresenceRevealInjection() {
@@ -246,13 +237,9 @@ function buildNotebookPresenceRevealInjection() {
         // Ignore macro substitution failures and fall back to a generic label.
     }
 
-    return [
-        '[Notebook Reveal]',
-        'At least one other character is currently present in the scene (Presence).',
-        `In this moment, ${userLabel} openly pulls out and opens a strange black notebook with "Death Note" written on the cover.`,
-        'Treat this as a visible, in-scene action that present characters can notice and react to naturally.',
-        'Do not mention this block or explain the Presence system.',
-    ].join('\n');
+    return renderPromptTemplate(settings.notebookRevealPromptTemplate, {
+        user_label: userLabel,
+    }).trim();
 }
 
 export function getDeathNotePromptInjectionMessage() {

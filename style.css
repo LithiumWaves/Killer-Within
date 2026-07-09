@@ -161,9 +161,20 @@
 }
 
 .kw-dn-inventory__header {
-    display: grid;
-    gap: 0.2rem;
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.75rem;
     padding-bottom: 0.45rem;
+}
+
+.kw-dn-inventory__header-action {
+    min-height: 2rem;
+    padding: 0.36rem 0.7rem;
+    border-radius: 0.22rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 0.72rem;
 }
 
 .kw-dn-inventory__eyebrow,
@@ -576,6 +587,119 @@
     color: rgba(234, 224, 214, 0.76);
 }
 
+#kw-deathnote-inventory-settings-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483646;
+}
+
+.kw-dn-settings-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1.2rem;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(3px);
+}
+
+.kw-dn-settings-modal__dialog {
+    width: min(62rem, calc(100vw - 2.4rem));
+    max-height: min(88vh, 56rem);
+    display: grid;
+    gap: 0.9rem;
+    padding: 1rem;
+    overflow: hidden;
+    border: 1px solid rgba(119, 16, 32, 0.42);
+    border-radius: 0.5rem;
+    background:
+        radial-gradient(circle at top, rgba(120, 9, 29, 0.08), rgba(0, 0, 0, 0) 42%),
+        linear-gradient(180deg, rgba(10, 10, 12, 0.99), rgba(3, 3, 5, 0.995)),
+        repeating-linear-gradient(
+            0deg,
+            rgba(255, 255, 255, 0.012) 0,
+            rgba(255, 255, 255, 0.012) 1px,
+            rgba(0, 0, 0, 0) 1px,
+            rgba(0, 0, 0, 0) 22px
+        );
+    box-shadow:
+        0 32px 80px rgba(0, 0, 0, 0.58),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    color: #ebe4da;
+}
+
+.kw-dn-settings-modal__header {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.9rem;
+    padding-bottom: 0.2rem;
+    border-bottom: 1px solid rgba(118, 17, 33, 0.24);
+}
+
+.kw-dn-settings-modal__eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #a89195;
+}
+
+.kw-dn-settings-modal__title {
+    margin: 0.18rem 0 0;
+    font-size: 1.22rem;
+    font-family: Georgia, "Times New Roman", serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #f2ece3;
+}
+
+.kw-dn-settings-modal__body {
+    overflow-y: auto;
+    padding-right: 0.25rem;
+}
+
+.kw-dn-settings-modal__sections {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.kw-dn-settings-modal__section {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.9rem;
+    border: 1px solid rgba(118, 17, 33, 0.24);
+    border-radius: 0.38rem;
+    background:
+        linear-gradient(180deg, rgba(12, 12, 14, 0.98), rgba(6, 6, 8, 0.99));
+}
+
+.kw-dn-settings-modal__section-head {
+    display: grid;
+    gap: 0.14rem;
+}
+
+.kw-dn-settings-modal__section-title {
+    font-size: 0.95rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: Georgia, "Times New Roman", serif;
+    color: #f0e7dd;
+}
+
+.kw-dn-settings-modal__section-body {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.kw-dn-settings-modal__close {
+    min-height: 2rem;
+    padding: 0.36rem 0.8rem;
+    border-radius: 0.22rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+}
+
 @media (max-width: 700px) {
     #kw-deathnote-inventory {
         width: min(18.5rem, calc(100vw - 20px));
@@ -614,6 +738,21 @@
         overflow-y: auto;
     }
 
+    .kw-dn-settings-modal__backdrop {
+        padding: 0.7rem;
+    }
+
+    .kw-dn-settings-modal__dialog {
+        width: min(100vw - 1.4rem, 44rem);
+        max-height: min(92vh, 60rem);
+        padding: 0.82rem;
+    }
+
+    .kw-dn-settings-modal__header {
+        gap: 0.6rem;
+    }
+
+
     .kw-dn-inventory__layout {
         grid-template-columns: 1fr;
     }
@@ -651,6 +790,16 @@
     .kw-dn-inventory__toggle {
         min-height: 2.2rem;
         padding: 0.46rem 0.64rem;
+        font-size: 0.68rem;
+    }
+
+    .kw-dn-inventory__header {
+        align-items: center;
+    }
+
+    .kw-dn-inventory__header-action {
+        min-height: 1.9rem;
+        padding: 0.3rem 0.58rem;
         font-size: 0.68rem;
     }
 
@@ -694,6 +843,12 @@
         height: calc(2 * 1.62em);
         max-height: calc(2 * 1.62em);
         font-size: 0.9rem;
+    }
+
+    .kw-dn-settings-modal__dialog {
+        width: calc(100vw - 1rem);
+        max-height: calc(100vh - 1rem);
+        padding: 0.7rem;
     }
 }
 
