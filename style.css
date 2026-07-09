@@ -691,6 +691,36 @@
     gap: 0.75rem;
 }
 
+.kw-dn-settings-modal__fold {
+    border: 1px solid rgba(118, 17, 33, 0.24);
+    border-radius: 0.38rem;
+    background:
+        linear-gradient(180deg, rgba(12, 12, 14, 0.98), rgba(6, 6, 8, 0.99));
+}
+
+.kw-dn-settings-modal__fold-summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    gap: 0.14rem;
+    padding: 0.9rem;
+    user-select: none;
+}
+
+.kw-dn-settings-modal__fold-summary::-webkit-details-marker {
+    display: none;
+}
+
+.kw-dn-settings-modal__fold[open] .kw-dn-settings-modal__fold-summary {
+    border-bottom: 1px solid rgba(118, 17, 33, 0.2);
+}
+
+.kw-dn-settings-modal__fold-body {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.9rem;
+}
+
 .kw-dn-settings-modal__close {
     min-height: 2rem;
     padding: 0.36rem 0.8rem;
