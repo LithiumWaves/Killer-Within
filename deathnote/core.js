@@ -167,6 +167,7 @@ function normalizeActorType(value, fallbackType = NOTEBOOK_ACTOR_TYPES.NONE) {
         type === NOTEBOOK_ACTOR_TYPES.USER
         || type === NOTEBOOK_ACTOR_TYPES.CHARACTER
         || type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI
+        || type === NOTEBOOK_ACTOR_TYPES.NPC
         || type === NOTEBOOK_ACTOR_TYPES.WORLD
         || type === NOTEBOOK_ACTOR_TYPES.NONE
     ) {
@@ -685,6 +686,24 @@ function normalizeDeathEntrySourceId(value, fallback = '') {
     return String(value || fallback || '').trim();
 }
 
+function normalizeDeathEntryTargetType(value) {
+    const targetType = String(value || '').trim().toLowerCase();
+    if (targetType === NOTEBOOK_ACTOR_TYPES.CHARACTER || targetType === NOTEBOOK_ACTOR_TYPES.NPC) {
+        return targetType;
+    }
+
+    return '';
+}
+
+function resolveDeathEntryTargetType(targetName) {
+    const name = String(targetName || '').trim();
+    if (!name) {
+        return '';
+    }
+
+    return getCurrentChatActorByName(name) ? NOTEBOOK_ACTOR_TYPES.CHARACTER : NOTEBOOK_ACTOR_TYPES.NPC;
+}
+
 function getDeathEntrySourceKey(sourceType, sourceId, noteText) {
     return [
         normalizeDeathEntrySourceType(sourceType),
@@ -998,6 +1017,7 @@ export function getChatState() {
         .filter((entry) => entry && typeof entry === 'object')
         .map((entry) => ({
             ...entry,
+            targetType: normalizeDeathEntryTargetType(entry.targetType) || resolveDeathEntryTargetType(entry.targetName),
             sourceType: normalizeDeathEntrySourceType(entry.sourceType),
             sourceId: normalizeDeathEntrySourceId(entry.sourceId),
             sourceLineIndex: Number.isFinite(Number(entry.sourceLineIndex)) ? Math.max(0, Math.floor(Number(entry.sourceLineIndex))) : null,
@@ -1084,6 +1104,7 @@ export function isActorNameKnown(actor) {
     const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
     if (
         normalized.type === NOTEBOOK_ACTOR_TYPES.USER
+        || normalized.type === NOTEBOOK_ACTOR_TYPES.NPC
         || normalized.type === NOTEBOOK_ACTOR_TYPES.WORLD
         || normalized.type === NOTEBOOK_ACTOR_TYPES.NONE
     ) {
@@ -1138,7 +1159,21 @@ export function getCurrentChatCharacterActors() {
 }
 
 export function getActorByTrueName(name) {
-    return getCurrentChatActorByName(name);
+    const match = getCurrentChatActorByName(name);
+    if (match) {
+        return match;
+    }
+
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) {
+        return null;
+    }
+
+    return normalizeActorRef({
+        type: NOTEBOOK_ACTOR_TYPES.NPC,
+        id: '',
+        name: normalizedName,
+    }, NOTEBOOK_ACTOR_TYPES.NPC, normalizedName);
 }
 
 export function getCharacterActorForMessage(message) {
@@ -2147,6 +2182,7 @@ export function addDeathEntry({
     const entry = {
         id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         targetName: String(targetName || '').trim(),
+        targetType: '',
         cause: String(cause || '').trim(),
         noteText: String(noteText || '').trim(),
         remainingAssistantMessages: normalizeRemaining(remainingAssistantMessages),
@@ -2159,6 +2195,7 @@ export function addDeathEntry({
         createdAt: Date.now(),
         resolvedAt: null,
     };
+    entry.targetType = normalizeDeathEntryTargetType(entry.targetType) || resolveDeathEntryTargetType(entry.targetName);
 
     if (!entry.targetName && !entry.noteText) {
         return null;
@@ -2703,4 +2740,3 @@ export function resolveDueEntriesForAssistantMessage(signature) {
 export function isDebugEnabled() {
     return Boolean(getSettings().debug);
 }
-

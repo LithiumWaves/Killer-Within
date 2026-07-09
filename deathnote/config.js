@@ -4,11 +4,12 @@ export const CHAT_METADATA_KEY = 'killerWithinDeathNote';
 export const MESSAGE_EXTRA_KEY = 'killerWithinDeathNote';
 
 export const NOTEBOOK_ACTOR_TYPES = Object.freeze({
-    NONE: 'none',
     USER: 'user',
     CHARACTER: 'character',
     SHINIGAMI: 'shinigami',
     WORLD: 'world',
+    NONE: 'none',
+    NPC: 'npc',
 });
 
 export const NOTEBOOK_USER_ACCESS = Object.freeze({

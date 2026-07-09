@@ -7,6 +7,7 @@ import {
     consumeNotebookPresenceRevealPending,
     getContext,
     getChatState,
+    getCurrentChatCharacterActors,
     getDeathNoteInventory,
     getNotebookOwnership,
     getPendingIdentityTheftExposure,
@@ -23,6 +24,7 @@ function renderPromptTemplate(template, replacements = {}) {
 function formatEntry(entry) {
     const noteText = String(entry?.noteText || '').trim();
     const targetName = String(entry?.targetName || '').trim();
+    const targetType = String(entry?.targetType || '').trim().toLowerCase();
     const cause = String(entry?.cause || '').trim() || 'heart attack';
     const remaining = Number.isFinite(Number(entry?.remainingAssistantMessages))
         ? Math.max(0, Math.floor(Number(entry.remainingAssistantMessages)))
@@ -35,6 +37,8 @@ function formatEntry(entry) {
     return [
         `Written: ${noteText || '(empty)'}`,
         targetName ? `Interpreted target: ${targetName}` : null,
+        targetType === NOTEBOOK_ACTOR_TYPES.CHARACTER ? 'Target class: active character card' : null,
+        targetType === NOTEBOOK_ACTOR_TYPES.NPC ? 'Target class: off-card NPC / story-world person' : null,
         targetName ? `Interpreted cause: ${cause}` : null,
         hasExplicitCause ? null : 'Default cause applied: heart attack',
         hasExplicitTime ? null : 'Default timing applied: next assistant message',
@@ -77,6 +81,10 @@ function formatActorLabel(actor, fallback = 'Unknown') {
         return `${name} (Shinigami)`;
     }
 
+    if (name && type === NOTEBOOK_ACTOR_TYPES.NPC) {
+        return `${name} (NPC)`;
+    }
+
     if (name) {
         return name;
     }
@@ -91,6 +99,10 @@ function formatActorLabel(actor, fallback = 'Unknown') {
 
     if (type === NOTEBOOK_ACTOR_TYPES.WORLD) {
         return 'the world';
+    }
+
+    if (type === NOTEBOOK_ACTOR_TYPES.NPC) {
+        return 'an off-card NPC';
     }
 
     if (type === NOTEBOOK_ACTOR_TYPES.NONE) {
@@ -158,6 +170,35 @@ function buildInventoryBlock(inventory) {
     return lines.join('\n');
 }
 
+function buildCurrentCharacterCardNamesBlock() {
+    const actors = getCurrentChatCharacterActors();
+    const names = Array.isArray(actors)
+        ? actors
+            .map((actor) => String(actor?.name || '').trim())
+            .filter(Boolean)
+        : [];
+
+    if (!names.length) {
+        return 'There are no active character cards in this chat right now.';
+    }
+
+    return `Active character-card names in this chat: ${names.join(', ')}.`;
+}
+
+function buildNpcDueGuidance(dueEntries) {
+    if (!Array.isArray(dueEntries) || !dueEntries.length) {
+        return '';
+    }
+
+    return [
+        '[Off-Card NPC Rule]',
+        buildCurrentCharacterCardNamesBlock(),
+        'If a due Death Note entry names someone who is not one of those active character cards, treat that person as an off-card NPC, reported criminal, broadcaster, victim, or other story-world person rather than ignoring the entry.',
+        'Their Death Note death must still occur on this reply as binding story causality.',
+        'Depict that off-card death naturally in prose, reported media, background events, witness reactions, or scene fallout, whichever best fits the ongoing scene.',
+    ].join('\n');
+}
+
 function buildDeathNoteInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
@@ -179,12 +220,18 @@ function buildDeathNoteInjection() {
     const dueBlock = dueEntries.length ? buildEntriesBlock(dueEntries) : 'None.';
     const entriesBlock = buildEntriesBlock(activeEntries);
 
-    return renderPromptTemplate(settings.deathNotePromptTemplate, {
+    const injection = renderPromptTemplate(settings.deathNotePromptTemplate, {
         ownership_block: buildOwnershipBlock(ownership),
         inventory_block: buildInventoryBlock(inventory),
         due_block: dueBlock,
         entries_block: entriesBlock,
     }).trim();
+    const npcGuidance = buildNpcDueGuidance(dueEntries);
+    if (!npcGuidance) {
+        return injection;
+    }
+
+    return `${injection}\n\n${npcGuidance}`.trim();
 }
 
 function buildIdentityTheftInjection() {
@@ -303,4 +350,3 @@ export function getNotebookRevealPromptInjectionMessage() {
         },
     };
 }
-
