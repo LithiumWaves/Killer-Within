@@ -391,16 +391,34 @@
 
 @media (max-width: 700px) {
     #kw-deathnote-inventory {
-        width: calc(100vw - 20px);
-        left: 10px;
+        width: min(18.5rem, calc(100vw - 20px));
+        right: 10px;
+        left: auto;
         top: calc(env(safe-area-inset-top, 0px) + 10px);
         bottom: auto;
         z-index: 2147483647;
     }
 
+    .kw-dn-inventory__shell {
+        justify-items: end;
+    }
+
     .kw-dn-inventory__toggle {
-        width: 100%;
-        justify-content: space-between;
+        width: auto;
+        min-height: 2.35rem;
+        justify-content: center;
+        gap: 0.45rem;
+        padding: 0.5rem 0.72rem;
+        border-radius: 999px;
+        letter-spacing: 0.07em;
+        font-size: 0.72rem;
+        box-shadow: 0 10px 22px rgba(0, 0, 0, 0.42);
+    }
+
+    .kw-dn-inventory__toggle-count {
+        min-width: 1.55rem;
+        padding: 0.1rem 0.36rem;
+        font-size: 0.72rem;
     }
 
     .kw-dn-inventory__panel {
@@ -425,10 +443,17 @@
 
 @media (max-width: 420px) {
     #kw-deathnote-inventory {
-        width: calc(100vw - 16px);
-        left: 8px;
+        width: min(16.75rem, calc(100vw - 16px));
+        right: 8px;
+        left: auto;
         top: calc(env(safe-area-inset-top, 0px) + 8px);
         bottom: auto;
+    }
+
+    .kw-dn-inventory__toggle {
+        min-height: 2.2rem;
+        padding: 0.46rem 0.64rem;
+        font-size: 0.68rem;
     }
 
     .kw-dn-inventory__panel {
@@ -1018,15 +1043,15 @@
 
 .kw-deathnote--mobile {
     z-index: 2147483644;
-    --kw-dn-font-size: 16px;
-    --kw-dn-line-height: 27px;
-    --kw-dn-editor-top: 9px;
+    --kw-dn-font-size: 15px;
+    --kw-dn-line-height: 25px;
+    --kw-dn-editor-top: 8px;
     --kw-dn-editor-left: 3px;
 }
 
 .kw-deathnote--mobile.kw-deathnote--font-script {
-    --kw-dn-font-size: 17px;
-    --kw-dn-line-height: 28px;
+    --kw-dn-font-size: 16px;
+    --kw-dn-line-height: 26px;
     --kw-dn-editor-top: 8px;
 }
 
@@ -1049,8 +1074,8 @@
     left: auto;
     right: 10px;
     top: 10px;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     border-radius: 999px;
     background:
         linear-gradient(180deg, rgba(18, 18, 22, 0.96), rgba(6, 6, 8, 0.99)),
@@ -1105,8 +1130,8 @@
 }
 
 .kw-deathnote--mobile .kw-deathnote__corner-tab {
-    width: 44px;
-    height: 44px;
+    width: 38px;
+    height: 38px;
 }
 
 .kw-deathnote--turn-next .kw-deathnote__page-right {

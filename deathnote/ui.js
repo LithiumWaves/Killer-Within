@@ -65,7 +65,7 @@ function getClosedWidgetSize() {
         return { width: CLOSED_WIDTH, height: CLOSED_HEIGHT };
     }
 
-    const maxWidth = Math.max(172, Math.min(188, window.innerWidth - 24));
+    const maxWidth = Math.max(150, Math.min(164, window.innerWidth - 28));
     return {
         width: maxWidth,
         height: Math.round(maxWidth * (CLOSED_HEIGHT / CLOSED_WIDTH)),
@@ -79,12 +79,12 @@ function getWidgetSize(isOpen) {
 
     if (isPortraitMobileViewport()) {
         const width = Math.min(
-            Math.max(320, Math.round(window.innerWidth - 16)),
-            Math.max(280, window.innerWidth - 8),
+            Math.max(276, Math.round(window.innerWidth - 42)),
+            Math.max(248, window.innerWidth - 24),
         );
         const height = Math.min(
-            Math.max(560, Math.round(window.innerHeight * 0.92)),
-            Math.max(420, window.innerHeight - 8),
+            Math.max(460, Math.round(window.innerHeight * 0.82)),
+            Math.max(380, window.innerHeight - 46),
         );
         return {
             width,
