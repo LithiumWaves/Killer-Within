@@ -219,7 +219,7 @@ function buildAiNotebookWriteGuidance(ownership) {
         'If they do not write in the notebook, do not emit any block.',
         'Use this sparingly and only when the holder would realistically choose to write right now.',
         `Do not emit more than one block, and do not include more than one written line in it.`,
-        `The block must use this exact format: <${AI_NOTEBOOK_WRITE_BLOCK_TAG}>`,
+        `The block must use this exact three-line format on separate lines: <${AI_NOTEBOOK_WRITE_BLOCK_TAG}>`,
         `writer: ${holderName}`,
         'entry: <the exact single line written in the notebook>',
         `</${AI_NOTEBOOK_WRITE_BLOCK_TAG}>`,

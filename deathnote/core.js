@@ -925,22 +925,57 @@ function extractAiNotebookWriteBlocks(text) {
         match = regex.exec(source);
     }
 
-    const strippedText = source
-        .replace(new RegExp(`\\s*<${tag}>\\s*[\\s\\S]*?\\s*<\\/${tag}>`, 'gi'), '')
-        .replace(/\n{3,}/g, '\n\n')
-        .trimEnd();
+    if (blocks.length) {
+        const strippedText = source
+            .replace(new RegExp(`\\s*<${tag}>\\s*[\\s\\S]*?\\s*<\\/${tag}>`, 'gi'), '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+
+        return {
+            blocks,
+            strippedText,
+        };
+    }
+
+    const unwrappedMatch = source.match(/(?:\r?\n|\n|^)\s*writer\s*:\s*([^\r\n]+?)\s*(?:\r?\n\s*|\s+)entry\s*:\s*(.+?)\s*$/is);
+    if (unwrappedMatch) {
+        const writer = String(unwrappedMatch[1] || '').trim();
+        const entry = String(unwrappedMatch[2] || '').trim();
+        const rawBlock = String(unwrappedMatch[0] || '');
+        const strippedText = source
+            .slice(0, Math.max(0, source.length - rawBlock.length))
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+
+        return {
+            blocks: [{
+                rawBlock,
+                body: `writer: ${writer}\nentry: ${entry}`,
+            }],
+            strippedText,
+        };
+    }
 
     return {
         blocks,
-        strippedText,
+        strippedText: source,
     };
 }
 
 function parseAiNotebookWriteBlock(blockBody) {
     const body = String(blockBody ?? '');
-    const lines = body.split(/\r?\n/);
     let writer = '';
     let entry = '';
+
+    const inlineMatch = body.match(/writer\s*:\s*(.+?)\s+entry\s*:\s*(.+?)\s*$/is);
+    if (inlineMatch) {
+        return {
+            writer: String(inlineMatch[1] || '').trim(),
+            entry: String(inlineMatch[2] || '').trim(),
+        };
+    }
+
+    const lines = body.split(/\r?\n/);
 
     for (const line of lines) {
         if (!writer) {
