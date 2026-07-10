@@ -4,6 +4,7 @@ export function registerEventHandlers({
     onChatChanged,
     onAssistantMessage,
     onMessageAdded,
+    onAssistantMessageFinalized,
     onUiRefresh,
 } = {}) {
     const context = globalThis.SillyTavern?.getContext?.() ?? null;
@@ -56,5 +57,27 @@ export function registerEventHandlers({
             refresh();
         }
     });
+
+    const finalizeAssistantMessage = async () => {
+        const latestContext = getContext();
+        const chat = Array.isArray(latestContext?.chat) ? latestContext.chat : [];
+        const lastIndex = chat.length - 1;
+        const lastMessage = lastIndex >= 0 ? chat[lastIndex] : null;
+        if (!lastMessage || lastMessage.is_system || lastMessage.is_user) {
+            return;
+        }
+
+        const changed = await onAssistantMessageFinalized?.(lastIndex, {
+            kind: 'received_finalized',
+            message: lastMessage,
+        });
+        if (changed) {
+            await persistChatChanges();
+            refresh();
+        }
+    };
+
+    eventSource.on(event_types.GENERATION_ENDED, finalizeAssistantMessage);
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, finalizeAssistantMessage);
 }
 

@@ -40,6 +40,9 @@ export function setupDeathNoteExtension() {
                 }
                 return aiNotebookWriteApplied || memoryTracked || nameLearned || confessionLearned || identityExposureConsumed;
             },
+            onAssistantMessageFinalized: async (messageIndex) => {
+                return processAssistantNotebookWriteMessage(messageIndex);
+            },
             onUiRefresh: refreshDeathNoteUi,
         });
         refreshDeathNoteUi();
