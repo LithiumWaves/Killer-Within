@@ -69,24 +69,6 @@ export async function persistChatChanges() {
     }
 }
 
-export async function requestChatRefresh() {
-    const context = getContext();
-    const eventSource = context?.eventSource;
-    const eventTypes = context?.event_types;
-    // #region debug-point D:request-chat-refresh
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"D",location:"deathnote/core.js:requestChatRefresh",msg:"[DEBUG] requestChatRefresh invoked",data:{hasEventSource:Boolean(eventSource),chatChangedType:String(eventTypes?.CHAT_CHANGED||""),contextFunctions:Object.keys(context||{}).filter((key)=>typeof context?.[key]==="function").slice(0,80)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
-    if (!eventSource || !eventTypes?.CHAT_CHANGED || typeof eventSource.emit !== 'function') {
-        return;
-    }
-
-    try {
-        await eventSource.emit(eventTypes.CHAT_CHANGED);
-    } catch (error) {
-        console.warn(`[${MODULE_NAME}] Failed to refresh chat view`, error);
-    }
-}
-
 export function notify(type, message) {
     if (globalThis.toastr?.[type]) {
         globalThis.toastr[type](message);
@@ -1033,9 +1015,6 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
     const state = getChatState();
     syncInventoryWithOwnership(state);
     const line = String(entryLine ?? '').trim();
-    // #region debug-point C:append-entry-start
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"C",location:"deathnote/core.js:appendAiNotebookLine:start",msg:"[DEBUG] appendAiNotebookLine start",data:{line,holder:String(actor?.name||actor?.type||""),pageCount:Array.isArray(state.notebookPages)?state.notebookPages.length:0,pagesPreview:(Array.isArray(state.notebookPages)?state.notebookPages:[]).map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim())})).slice(0,6)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!line) {
         return { applied: false, reason: 'empty_entry' };
     }
@@ -1067,13 +1046,7 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
     nextPages[lastIndex] = `${nextPages[lastIndex]}${separator}${line}`;
 
     const parsedEntry = parseNotebookLine(line);
-    // #region debug-point C:append-entry-target
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"C",location:"deathnote/core.js:appendAiNotebookLine:target",msg:"[DEBUG] appendAiNotebookLine target page prepared",data:{lastIndex,separatorApplied:Boolean(separator),parsedEntry:Boolean(parsedEntry),targetPageLength:String(nextPages[lastIndex]||"").length,targetPageTail:String(nextPages[lastIndex]||"").slice(-160)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     const changed = setNotebookPages(nextPages);
-    // #region debug-point C:append-entry-after-set
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"C",location:"deathnote/core.js:appendAiNotebookLine:afterSet",msg:"[DEBUG] appendAiNotebookLine after setNotebookPages",data:{changed,pageCount:Array.isArray(state.notebookPages)?state.notebookPages.length:0,pagesPreview:(Array.isArray(state.notebookPages)?state.notebookPages:[]).map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})).slice(0,6)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!changed) {
         return { applied: false, reason: 'no_change' };
     }
@@ -1109,9 +1082,6 @@ function syncAiNotebookWriteMessageVisibility(message, metadata = null) {
 
     const showBlock = Boolean(getSettings().showAiWriteDebugBlocks);
     const nextText = showBlock ? (rawMessage || String(message.mes ?? '')) : (strippedText || String(message.mes ?? ''));
-    // #region debug-point D:visibility-sync
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"D",location:"deathnote/core.js:syncAiNotebookWriteMessageVisibility",msg:"[DEBUG] syncAiNotebookWriteMessageVisibility",data:{showBlock,currentLength:String(message.mes||"").length,nextLength:String(nextText||"").length,rawLength:rawMessage.length,strippedLength:strippedText.length,hasBracketBlock:rawMessage.includes("[kwNoteWrite]")},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     if (String(message.mes ?? '') === nextText) {
         aiWrite.stripped = !showBlock;
         return false;
@@ -1969,13 +1939,7 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
     }
 
     const rawText = String(message.mes ?? '');
-    // #region debug-point A:process-start
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"A",location:"deathnote/core.js:processAssistantNotebookWriteMessage:start",msg:"[DEBUG] processAssistantNotebookWriteMessage start",data:{messageIndex,showDebug:Boolean(getSettings().showAiWriteDebugBlocks),messageLength:rawText.length,hasBracketBlock:rawText.includes("[kwNoteWrite]"),hasAngleBlock:rawText.includes("<kwNoteWrite>"),tail:rawText.slice(-220)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     const extracted = extractAiNotebookWriteBlocks(rawText);
-    // #region debug-point B:extraction
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"B",location:"deathnote/core.js:processAssistantNotebookWriteMessage:extracted",msg:"[DEBUG] AI write block extraction result",data:{blockCount:extracted.blocks.length,strippedLength:String(extracted.strippedText||"").length,rawBlock:String(extracted.blocks[0]?.rawBlock||""),body:String(extracted.blocks[0]?.body||"")},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!extracted.blocks.length) {
         cleanupMessageExtraState(message);
         return false;
@@ -2008,9 +1972,6 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
         const parsed = parseAiNotebookWriteBlock(extracted.blocks[0].body);
         metadata.writer = parsed.writer;
         metadata.entry = parsed.entry;
-        // #region debug-point B:parsed
-        fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"B",location:"deathnote/core.js:processAssistantNotebookWriteMessage:parsed",msg:"[DEBUG] AI write block parsed",data:{holder:String(holder?.name||holder?.type||""),writer:parsed.writer,entry:parsed.entry},ts:Date.now()})}).catch(()=>{});
-        // #endregion
 
         if (!parsed.writer || !parsed.entry) {
             metadata.reason = 'missing_fields';
@@ -2843,9 +2804,6 @@ export function setNotebookPages(pages) {
     const state = getChatState();
     const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, state.notebookText ?? ''));
     const nextText = normalized.join('');
-    // #region debug-point E:setNotebookPages-normalized
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"E",location:"deathnote/core.js:setNotebookPages:normalized",msg:"[DEBUG] setNotebookPages normalized",data:{incoming:Array.isArray(pages)?pages.map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})):[],normalized:normalized.map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})),nextTextLength:nextText.length},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     const sameLength = Array.isArray(state.notebookPages) && state.notebookPages.length === normalized.length;
     const samePages = sameLength && normalized.every((page, index) => state.notebookPages[index] === page);
 
@@ -2855,13 +2813,7 @@ export function setNotebookPages(pages) {
 
     state.notebookPages = normalized;
     state.notebookText = nextText;
-    // #region debug-point E:setNotebookPages-assigned
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"E",location:"deathnote/core.js:setNotebookPages:assigned",msg:"[DEBUG] setNotebookPages assigned before reconcile",data:{pageCount:Array.isArray(state.notebookPages)?state.notebookPages.length:0,pages:Array.isArray(state.notebookPages)?state.notebookPages.map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})):[],notebookTextLength:String(state.notebookText||"").length,notebookTextTail:String(state.notebookText||"").slice(-120)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     reconcileEntriesFromNotebookText();
-    // #region debug-point E:setNotebookPages-after-reconcile
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"E",location:"deathnote/core.js:setNotebookPages:afterReconcile",msg:"[DEBUG] setNotebookPages after reconcile",data:{pageCount:Array.isArray(state.notebookPages)?state.notebookPages.length:0,pages:Array.isArray(state.notebookPages)?state.notebookPages.map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})):[],notebookTextLength:String(state.notebookText||"").length,notebookTextTail:String(state.notebookText||"").slice(-120),entryCount:Array.isArray(state.entries)?state.entries.length:0},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     return true;
 }
 
@@ -2902,12 +2854,9 @@ export function reconcileEntriesFromNotebookPages() {
     const state = getChatState();
     syncNotebookTextFromPages(state);
     const lines = collectActiveDeathNoteSourceLines(state);
-    // #region debug-point E:reconcile-start
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"E",location:"deathnote/core.js:reconcileEntriesFromNotebookPages:start",msg:"[DEBUG] reconcileEntriesFromNotebookPages start",data:{pageCount:Array.isArray(state.notebookPages)?state.notebookPages.length:0,pages:Array.isArray(state.notebookPages)?state.notebookPages.map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})):[],notebookTextLength:String(state.notebookText||"").length,lines:lines.map((entry)=>({sourceId:entry.sourceId,line:entry.line}))},ts:Date.now()})}).catch(()=>{});
-    // #endregion
-
     const counts = buildLineCounts(lines);
     const retained = [];
+
 
     for (const entry of state.entries) {
         const key = String(entry?.noteText || '').trim();
@@ -2955,9 +2904,6 @@ export function reconcileEntriesFromNotebookPages() {
     }
 
     state.entries = retained;
-    // #region debug-point E:reconcile-end
-    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"E",location:"deathnote/core.js:reconcileEntriesFromNotebookPages:end",msg:"[DEBUG] reconcileEntriesFromNotebookPages end",data:{retainedEntries:retained.map((entry)=>({sourceId:entry.sourceId,noteText:entry.noteText,status:entry.status,targetName:entry.targetName})),pageCount:Array.isArray(state.notebookPages)?state.notebookPages.length:0,pages:Array.isArray(state.notebookPages)?state.notebookPages.map((page,index)=>({index,length:String(page||"").length,trimmed:Boolean(String(page||"").trim()),tail:String(page||"").slice(-120)})):[],notebookTextLength:String(state.notebookText||"").length},ts:Date.now()})}).catch(()=>{});
-    // #endregion
 }
 
 export function reconcileEntriesFromNotebookText() {

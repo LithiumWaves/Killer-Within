@@ -27,7 +27,6 @@ import {
     markNotebookPresenceRevealPending,
     notify,
     persistChatChanges,
-    requestChatRefresh,
     removeNotebookScrap,
     sanitizeNotebookPagesForRules,
     sanitizeNotebookPageText,
@@ -2033,7 +2032,6 @@ function bindSettingsUi() {
         scheduleSettingsSave();
         if (syncAllAiNotebookWriteMessageVisibility()) {
             await persistChatChanges();
-            await requestChatRefresh();
             refreshDeathNoteUi();
         }
     });
