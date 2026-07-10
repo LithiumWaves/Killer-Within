@@ -19,6 +19,7 @@ import {
     getLinkedShinigami,
     getNotebookPages,
     getNotebookOwnership,
+    getNotebookReturnRequest,
     getPermanentResolvedLineCounts,
     getRecentChatMemoryCandidates,
     getSettings,
@@ -27,6 +28,7 @@ import {
     markNotebookPresenceRevealPending,
     notify,
     persistChatChanges,
+    requestNotebookReturn,
     removeNotebookScrap,
     sanitizeNotebookPagesForRules,
     sanitizeNotebookPageText,
@@ -59,12 +61,14 @@ const SETTINGS_PANEL_ID = 'kw-deathnote-settings';
 const INVENTORY_ID = 'kw-deathnote-inventory';
 const NOTICE_LAYER_ID = 'kw-deathnote-notices';
 const INVENTORY_SETTINGS_MODAL_ID = 'kw-deathnote-inventory-settings-modal';
+const INVENTORY_MANAGE_MODAL_ID = 'kw-deathnote-inventory-manage-modal';
 let pendingFocus = null;
 let pageTurnTimer = null;
 let pageTurnCleanupTimer = null;
 let chatNameMaskObserver = null;
 let chatNameMaskQueued = false;
 let inventorySettingsOpen = false;
+let inventoryManageOpen = false;
 let inventoryDragState = {
     dragging: false,
     startX: 0,
@@ -1605,6 +1609,18 @@ function renderIdentityCardSelectionPanel(idCard) {
 function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
     const selectedKey = getSelectedInventoryItemKey(settings, inventory, ownership);
     if (!selectedKey) {
+        const request = getNotebookReturnRequest();
+        const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
+        const requestMatchesHolder = Boolean(
+            request.active
+            && holder
+            && String(request.actor?.name || '').trim().toLowerCase() === String(holder.name || '').trim().toLowerCase(),
+        );
+        const canRequestReturn = Boolean(
+            holder
+            && !inventory.notebook.destroyed
+            && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL,
+        );
         return `
             <div class="kw-dn-inventory__context-card kw-dn-inventory__context-card--id">
                 <div class="kw-dn-inventory__context-head">
@@ -1614,6 +1630,18 @@ function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
                     </div>
                     <div class="kw-dn-inventory__context-meta">Notebook is currently elsewhere</div>
                 </div>
+                ${holder ? `<div class="kw-dn-inventory__context-meta">Holder: ${escapeHtml(formatActorInventoryLabel(holder))}</div>` : ''}
+                ${canRequestReturn ? `
+                    <div class="kw-dn-inventory__context-actions">
+                        <button
+                            type="button"
+                            id="kw-dn-inventory-request-return"
+                            class="menu_button kw-dn-inventory__context-action"
+                            data-actor="${escapeHtml(encodeActorValue(holder))}"
+                            ${requestMatchesHolder ? 'disabled' : ''}
+                        >${requestMatchesHolder ? 'Return Requested' : 'Request Return'}</button>
+                    </div>
+                ` : ''}
             </div>
         `;
     }
@@ -1671,7 +1699,10 @@ function renderInventoryTrayHtml() {
                         <div class="kw-dn-inventory__eyebrow">Killer Within</div>
                         <h3 class="kw-dn-inventory__title">Inventory</h3>
                     </div>
-                    <button type="button" id="kw-dn-inventory-settings-open" class="menu_button kw-dn-inventory__header-action">Settings</button>
+                    <div class="kw-dn-inventory__header-buttons">
+                        <button type="button" id="kw-dn-inventory-manage-open" class="menu_button kw-dn-inventory__header-action">Manage Death Notes</button>
+                        <button type="button" id="kw-dn-inventory-settings-open" class="menu_button kw-dn-inventory__header-action">Settings</button>
+                    </div>
                 </div>
 
                 <div class="kw-dn-inventory__layout">
@@ -2520,6 +2551,127 @@ function renderInventorySettingsModalHtml() {
     `;
 }
 
+function renderInventoryManageContentHtml() {
+    const settings = getSettings();
+    const ownership = getNotebookOwnership();
+    const inventory = getDeathNoteInventory();
+    const linked = getLinkedShinigami();
+    const request = getNotebookReturnRequest();
+    const notebookAvailable = !inventory.notebook.destroyed;
+    const canGive = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
+    const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
+    const requestMatchesHolder = Boolean(
+        request.active
+        && holder
+        && String(request.actor?.name || '').trim().toLowerCase() === String(holder.name || '').trim().toLowerCase(),
+    );
+    const transferChoices = getActorChoices({
+        includeUser: false,
+        includeWorld: false,
+    });
+    const linkChoices = getActorChoices({
+        includeUser: false,
+        includeCharacters: true,
+        currentActor: linked.active ? {
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: linked.avatar || linked.actor.id,
+            name: linked.actor.name,
+        } : null,
+    });
+    const selectedLinkActor = linked.active ? {
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: linked.avatar || linked.actor.id,
+        name: linked.actor.name,
+    } : null;
+
+    return `
+        <div class="kw-dn-settings-modal__sections">
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Notebook</div>
+                    <div class="kw-dn-settings-modal__section-title">Death Note Assignment</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <div class="kw-deathnote-manager">
+                        <div class="kw-deathnote-manager__summary">
+                            <span><b>Owner:</b> ${escapeHtml(formatActorLabel(ownership.owner))}</span>
+                            <span><b>Holder:</b> ${escapeHtml(formatActorLabel(ownership.holder))}</span>
+                            <span><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
+                            <span><b>Status:</b> ${inventory.notebook.destroyed ? 'Destroyed / missing' : 'In play'}</span>
+                            <span><b>Linked:</b> ${escapeHtml(linked.active ? formatActorLabel(linked.actor) : 'None')}</span>
+                        </div>
+                        <div class="kw-deathnote-manager__actions">
+                            <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                                <span>Give Death Note to</span>
+                                <select id="kw-dn-manage-give-select" class="text_pole" ${canGive ? '' : 'disabled'}>
+                                    ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
+                                </select>
+                            </label>
+                            <button type="button" id="kw-dn-manage-give-notebook" class="menu_button" ${canGive ? '' : 'disabled'}>Give</button>
+                        </div>
+                        ${holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
+                            <div class="kw-deathnote-manager__actions">
+                                <div class="kw-deathnote-manager__grow kw-deathnote-manager__summary">
+                                    <span><b>Request return from:</b> ${escapeHtml(formatActorInventoryLabel(holder))}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    id="kw-dn-manage-request-return"
+                                    class="menu_button"
+                                    data-actor="${escapeHtml(encodeActorValue(holder))}"
+                                    ${requestMatchesHolder ? 'disabled' : ''}
+                                >${requestMatchesHolder ? 'Return Requested' : 'Request Return'}</button>
+                            </div>
+                        ` : ''}
+                        <div class="kw-deathnote-manager__actions">
+                            <button type="button" id="kw-dn-manage-toggle-floating" class="menu_button">${settings.showFloatingButton ? 'Hide floating button' : 'Show floating button'}</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Presence</div>
+                    <div class="kw-dn-settings-modal__section-title">Linked Shinigami</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <div class="kw-deathnote-manager">
+                        <div class="kw-deathnote-manager__actions">
+                            <label class="killer-within-settings__field kw-deathnote-manager__grow">
+                                <span>Character card to link</span>
+                                <select id="kw-dn-manage-shinigami-select" class="text_pole">
+                                    ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
+                                </select>
+                            </label>
+                            <button type="button" id="kw-dn-manage-link-shinigami" class="menu_button">Link</button>
+                            <button type="button" id="kw-dn-manage-unlink-shinigami" class="menu_button" ${linked.active ? '' : 'disabled'}>Clear link</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    `;
+}
+
+function renderInventoryManageModalHtml() {
+    return `
+        <div class="kw-dn-settings-modal__backdrop" data-close-manage-modal="true">
+            <div class="kw-dn-settings-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
+                <div class="kw-dn-settings-modal__header">
+                    <div>
+                        <div class="kw-dn-settings-modal__eyebrow">Killer Within</div>
+                        <h3 id="kw-dn-manage-modal-title" class="kw-dn-settings-modal__title">Manage Death Notes</h3>
+                    </div>
+                    <button type="button" class="menu_button kw-dn-settings-modal__close" data-close-manage-modal="true" aria-label="Close manager">Close</button>
+                </div>
+                <div class="kw-dn-settings-modal__body">
+                    ${renderInventoryManageContentHtml()}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function ensureInventorySettingsModal() {
     const existing = document.getElementById(INVENTORY_SETTINGS_MODAL_ID);
     if (!getSettings().enabled || !inventorySettingsOpen) {
@@ -2539,6 +2691,26 @@ function ensureInventorySettingsModal() {
     root.innerHTML = renderInventorySettingsModalHtml();
     bindSettingsUi();
     syncSettingsUi();
+    return root;
+}
+
+function ensureInventoryManageModal() {
+    const existing = document.getElementById(INVENTORY_MANAGE_MODAL_ID);
+    if (!getSettings().enabled || !inventoryManageOpen) {
+        if (existing) {
+            existing.remove();
+        }
+        return null;
+    }
+
+    let root = existing;
+    if (!root) {
+        root = document.createElement('div');
+        root.id = INVENTORY_MANAGE_MODAL_ID;
+        document.body.append(root);
+    }
+
+    root.innerHTML = renderInventoryManageModalHtml();
     return root;
 }
 
@@ -3243,6 +3415,12 @@ function bindInventoryUi() {
             inventorySettingsOpen = true;
             refreshDeathNoteUi();
         })
+        .off('click', '#kw-dn-inventory-manage-open')
+        .on('click', '#kw-dn-inventory-manage-open', (event) => {
+            event.preventDefault();
+            inventoryManageOpen = true;
+            refreshDeathNoteUi();
+        })
         .off('click', '#kw-deathnote-settings-open-drawer')
         .on('click', '#kw-deathnote-settings-open-drawer', (event) => {
             event.preventDefault();
@@ -3263,6 +3441,22 @@ function bindInventoryUi() {
         .on('click', `#${INVENTORY_SETTINGS_MODAL_ID} .kw-dn-settings-modal__close`, (event) => {
             event.preventDefault();
             inventorySettingsOpen = false;
+            refreshDeathNoteUi();
+        })
+        .off('click', `#${INVENTORY_MANAGE_MODAL_ID} [data-close-manage-modal="true"]`)
+        .on('click', `#${INVENTORY_MANAGE_MODAL_ID} [data-close-manage-modal="true"]`, (event) => {
+            if (event.target !== event.currentTarget) {
+                return;
+            }
+
+            event.preventDefault();
+            inventoryManageOpen = false;
+            refreshDeathNoteUi();
+        })
+        .off('click', `#${INVENTORY_MANAGE_MODAL_ID} .kw-dn-settings-modal__close`)
+        .on('click', `#${INVENTORY_MANAGE_MODAL_ID} .kw-dn-settings-modal__close`, (event) => {
+            event.preventDefault();
+            inventoryManageOpen = false;
             refreshDeathNoteUi();
         })
         .off('click', '.kw-dn-inventory__slot[data-item-key]')
@@ -3314,6 +3508,13 @@ function bindInventoryUi() {
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
+        .off('click', '#kw-dn-manage-toggle-floating')
+        .on('click', '#kw-dn-manage-toggle-floating', (event) => {
+            event.preventDefault();
+            getSettings().showFloatingButton = !getSettings().showFloatingButton;
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
         .off('click', '#kw-dn-inventory-give-notebook')
         .on('click', '#kw-dn-inventory-give-notebook', async (event) => {
             event.preventDefault();
@@ -3340,6 +3541,62 @@ function bindInventoryUi() {
                 setNotebookOpenState(false);
             }
         })
+        .off('click', '#kw-dn-manage-give-notebook')
+        .on('click', '#kw-dn-manage-give-notebook', async (event) => {
+            event.preventDefault();
+            const inventory = getDeathNoteInventory();
+            const ownership = getNotebookOwnership();
+            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+                notify('warning', 'You need full notebook access to hand the Death Note to someone else.');
+                return;
+            }
+
+            const actor = decodeActorValue($('#kw-dn-manage-give-select').val(), null);
+            if (!actor) {
+                notify('warning', 'Select an active character to receive the Death Note.');
+                return;
+            }
+
+            const transferred = await commitInventoryMutation(() => transferNotebookTo(actor, {
+                owner: ownership.owner,
+                userAccess: ownership.userAccess,
+                exists: !inventory.notebook.destroyed,
+                reason: `Notebook handed to ${actor.name || actor.type} via manager.`,
+            }), 'Death Note transferred.');
+            if (transferred) {
+                setNotebookOpenState(false);
+            }
+        })
+        .off('click', '#kw-dn-inventory-request-return')
+        .on('click', '#kw-dn-inventory-request-return', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            if (!actor) {
+                return;
+            }
+
+            const created = await commitInventoryMutation(() => requestNotebookReturn(actor, {
+                reason: `${actor.name || 'A character'} was asked to return the Death Note.`,
+            }), 'Return request queued.');
+            if (created) {
+                refreshDeathNoteUi();
+            }
+        })
+        .off('click', '#kw-dn-manage-request-return')
+        .on('click', '#kw-dn-manage-request-return', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            if (!actor) {
+                return;
+            }
+
+            const created = await commitInventoryMutation(() => requestNotebookReturn(actor, {
+                reason: `${actor.name || 'A character'} was asked to return the Death Note.`,
+            }), 'Return request queued.');
+            if (created) {
+                refreshDeathNoteUi();
+            }
+        })
         .off('click', '#kw-dn-inventory-link-shinigami')
         .on('click', '#kw-dn-inventory-link-shinigami', async (event) => {
             event.preventDefault();
@@ -3364,6 +3621,32 @@ function bindInventoryUi() {
             event.preventDefault();
             await commitInventoryMutation(() => unlinkNotebookShinigami({
                 reason: 'Linked Shinigami cleared via inventory.',
+            }), 'Linked Shinigami cleared.');
+        })
+        .off('click', '#kw-dn-manage-link-shinigami')
+        .on('click', '#kw-dn-manage-link-shinigami', async (event) => {
+            event.preventDefault();
+            const actor = decodeActorValue($('#kw-dn-manage-shinigami-select').val(), null);
+            if (!actor) {
+                notify('warning', 'Select a character to link as the notebook Shinigami.');
+                return;
+            }
+
+            await commitInventoryMutation(() => linkNotebookShinigami({
+                type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
+                id: actor.id,
+                name: actor.name,
+            }, {
+                avatar: actor.id,
+                name: actor.name,
+                reason: `${actor.name || 'Selected character'} linked via manager.`,
+            }), 'Linked Shinigami updated.');
+        })
+        .off('click', '#kw-dn-manage-unlink-shinigami')
+        .on('click', '#kw-dn-manage-unlink-shinigami', async (event) => {
+            event.preventDefault();
+            await commitInventoryMutation(() => unlinkNotebookShinigami({
+                reason: 'Linked Shinigami cleared via manager.',
             }), 'Linked Shinigami cleared.');
         })
         .off('click', '.kw-dn-inventory__scrap-give')
@@ -3409,11 +3692,12 @@ function bindInventoryUi() {
     $(document)
         .off('keydown.kw-deathnote-settings-modal')
         .on('keydown.kw-deathnote-settings-modal', (event) => {
-            if (!inventorySettingsOpen || event.key !== 'Escape') {
+            if ((!inventorySettingsOpen && !inventoryManageOpen) || event.key !== 'Escape') {
                 return;
             }
 
             inventorySettingsOpen = false;
+            inventoryManageOpen = false;
             refreshDeathNoteUi();
         });
 }
@@ -3538,6 +3822,7 @@ export function refreshDeathNoteUi() {
     syncSettingsUi();
     ensureInventoryTray();
     ensureInventorySettingsModal();
+    ensureInventoryManageModal();
     ensureWidget();
     ensureChatNameMaskObserver();
     queueMaskedChatNameRender();
@@ -3548,6 +3833,7 @@ export function setupDeathNoteUi() {
     syncSettingsUi();
     ensureInventoryTray();
     ensureInventorySettingsModal();
+    ensureInventoryManageModal();
     ensureWidget();
     bindWidgetUi();
     bindInventoryUi();

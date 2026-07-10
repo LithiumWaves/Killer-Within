@@ -3,6 +3,7 @@ export const FLOATING_ID = 'kw-deathnote';
 export const CHAT_METADATA_KEY = 'killerWithinDeathNote';
 export const MESSAGE_EXTRA_KEY = 'killerWithinDeathNote';
 export const AI_NOTEBOOK_WRITE_BLOCK_TAG = 'kwNoteWrite';
+export const NOTEBOOK_RETURN_BLOCK_TAG = 'kwNoteReturn';
 
 export const NOTEBOOK_ACTOR_TYPES = Object.freeze({
     USER: 'user',

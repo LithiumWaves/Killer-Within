@@ -5,6 +5,7 @@ import {
     MESSAGE_EXTRA_KEY,
     MODULE_NAME,
     NOTEBOOK_ACTOR_TYPES,
+    NOTEBOOK_RETURN_BLOCK_TAG,
     NOTEBOOK_USER_ACCESS,
 } from './config.js';
 
@@ -86,6 +87,7 @@ function createDefaultChatState() {
         shinigamiLink: createDefaultShinigamiLinkState(),
         nameKnowledge: createDefaultNameKnowledgeState(),
         identityTheft: createDefaultIdentityTheftState(),
+        notebookReturnRequest: createDefaultNotebookReturnRequestState(),
         notebookPresenceReveal: {
             pending: false,
             openedAt: null,
@@ -140,6 +142,15 @@ function createDefaultIdentityTheftState() {
             actor: createActorRef(NOTEBOOK_ACTOR_TYPES.NONE, ''),
             createdAt: null,
         },
+    };
+}
+
+function createDefaultNotebookReturnRequestState() {
+    return {
+        active: false,
+        actor: createActorRef(NOTEBOOK_ACTOR_TYPES.NONE, ''),
+        requestedAt: null,
+        resolvedAt: null,
     };
 }
 
@@ -314,6 +325,18 @@ function normalizeShinigamiLinkState(value) {
         avatar,
         notebookItemId: String(link.notebookItemId || defaults.notebookItemId).trim() || defaults.notebookItemId,
         linkedAt: normalizeTransferredAt(link.linkedAt),
+    };
+}
+
+function normalizeNotebookReturnRequestState(value) {
+    const defaults = createDefaultNotebookReturnRequestState();
+    const request = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(request.actor, defaults.actor.type, defaults.actor.name);
+    return {
+        active: Boolean(request.active) && Boolean(actor.name || actor.id),
+        actor,
+        requestedAt: normalizeTransferredAt(request.requestedAt),
+        resolvedAt: normalizeTransferredAt(request.resolvedAt),
     };
 }
 
@@ -1247,6 +1270,7 @@ export function getChatState() {
     state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
     state.identityTheft = normalizeIdentityTheftState(state.identityTheft);
+    state.notebookReturnRequest = normalizeNotebookReturnRequestState(state.notebookReturnRequest);
     state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
     if (!state.notebookPresenceReveal || typeof state.notebookPresenceReveal !== 'object') {
         state.notebookPresenceReveal = {
@@ -1314,6 +1338,58 @@ export function getLinkedShinigami() {
     const state = getChatState();
     state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
     return state.shinigamiLink;
+}
+
+export function getNotebookReturnRequest() {
+    const state = getChatState();
+    state.notebookReturnRequest = normalizeNotebookReturnRequestState(state.notebookReturnRequest);
+    return state.notebookReturnRequest;
+}
+
+export function requestNotebookReturn(actor, options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    if (normalized.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER || (!normalized.name && !normalized.id)) {
+        return false;
+    }
+
+    state.notebookReturnRequest = normalizeNotebookReturnRequestState({
+        active: true,
+        actor: normalized,
+        requestedAt: Date.now(),
+        resolvedAt: null,
+    });
+
+    pushInventoryHistory(state, {
+        action: 'request_notebook_return',
+        itemId: state.inventory.notebook.itemId,
+        detail: String(options.reason || '').trim() || `${normalized.name || 'A character'} was asked to return the Death Note.`,
+        actor: state.ownership.owner,
+        target: normalized,
+        timestamp: state.notebookReturnRequest.requestedAt ?? Date.now(),
+    });
+    return true;
+}
+
+export function clearNotebookReturnRequest(options = {}) {
+    const state = getChatState();
+    const existing = normalizeNotebookReturnRequestState(state.notebookReturnRequest);
+    if (!existing.active) {
+        state.notebookReturnRequest = existing;
+        return false;
+    }
+
+    state.notebookReturnRequest = createDefaultNotebookReturnRequestState();
+    pushInventoryHistory(state, {
+        action: 'clear_notebook_return_request',
+        itemId: state.inventory.notebook.itemId,
+        detail: String(options.reason || '').trim() || 'Pending Death Note return request cleared.',
+        actor: state.ownership.owner,
+        target: existing.actor,
+        timestamp: Date.now(),
+    });
+    return true;
 }
 
 export function isActorNameKnown(actor) {
@@ -1918,6 +1994,123 @@ export function setDeathNoteMemoryTracked(messageIndex, tracked = true, options 
     cleanupMessageExtraState(message);
 
     return true;
+}
+
+function extractNotebookReturnDecisionBlock(text) {
+    const source = String(text ?? '');
+    const tag = escapeRegExp(NOTEBOOK_RETURN_BLOCK_TAG);
+    const regex = new RegExp(`(?:<${tag}>|\\[${tag}\\])\\s*([\\s\\S]*?)\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'i');
+    const match = source.match(regex);
+    if (!match) {
+        return {
+            found: false,
+            body: '',
+            strippedText: source,
+        };
+    }
+
+    const strippedText = source
+        .replace(regex, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trimEnd();
+    return {
+        found: true,
+        body: String(match[1] || ''),
+        strippedText,
+    };
+}
+
+function parseNotebookReturnDecision(body) {
+    const source = String(body ?? '');
+    const lines = source.split(/\r?\n/).map((line) => String(line ?? '').trim()).filter(Boolean);
+    for (const line of lines) {
+        const match = line.match(/^(?:return|accept|concede)\s*:\s*(yes|no)\s*$/i);
+        if (match) {
+            return String(match[1] || '').trim().toLowerCase() === 'yes';
+        }
+    }
+    return false;
+}
+
+export function processAssistantNotebookReturnMessage(messageIndex) {
+    const request = getNotebookReturnRequest();
+    if (!request.active) {
+        return false;
+    }
+
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    if (!message || message.is_system || message.is_user) {
+        return false;
+    }
+
+    const speaker = getCharacterActorForMessage(message);
+    if (!speaker || !actorRefsMatch(speaker, request.actor)) {
+        return false;
+    }
+
+    const extra = ensureMessageExtraState(message);
+    if (extra?.notebookReturn?.processed) {
+        return false;
+    }
+
+    const extracted = extractNotebookReturnDecisionBlock(message.mes ?? '');
+    const accepted = extracted.found ? parseNotebookReturnDecision(extracted.body) : false;
+    if (extracted.found) {
+        message.mes = extracted.strippedText;
+    }
+
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const timestamp = Date.now();
+    const resolvedRequest = normalizeNotebookReturnRequestState({
+        ...request,
+        active: false,
+        resolvedAt: timestamp,
+    });
+    state.notebookReturnRequest = resolvedRequest;
+
+    extra.notebookReturn = {
+        processed: true,
+        requestedAt: request.requestedAt,
+        resolvedAt: timestamp,
+        accepted,
+        found: extracted.found,
+    };
+
+    pushInventoryHistory(state, {
+        action: 'notebook_return_response',
+        itemId: state.inventory.notebook.itemId,
+        detail: accepted
+            ? `${speaker.name || 'A character'} agreed to return the Death Note.`
+            : `${speaker.name || 'A character'} did not return the Death Note.`,
+        actor: speaker,
+        target: state.ownership.owner,
+        timestamp,
+    });
+
+    if (!accepted || !state.hasNotebook || state.inventory?.notebook?.destroyed) {
+        return true;
+    }
+
+    const userActor = normalizeActorRef({
+        type: NOTEBOOK_ACTOR_TYPES.USER,
+        id: '',
+        name: 'User',
+    }, NOTEBOOK_ACTOR_TYPES.USER, 'User');
+
+    return transferNotebookTo(userActor, {
+        owner: userActor,
+        userAccess: NOTEBOOK_USER_ACCESS.FULL,
+        exists: true,
+        reason: `${speaker.name || speaker.type} returned the Death Note to the user.`,
+    });
 }
 
 export function processAssistantNotebookWriteMessage(messageIndex) {

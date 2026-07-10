@@ -2,6 +2,7 @@ import {
     AI_NOTEBOOK_WRITE_BLOCK_TAG,
     MESSAGE_EXTRA_KEY,
     NOTEBOOK_ACTOR_TYPES,
+    NOTEBOOK_RETURN_BLOCK_TAG,
     NOTEBOOK_USER_ACCESS,
 } from './config.js';
 import {
@@ -11,6 +12,7 @@ import {
     getCurrentChatCharacterActors,
     getDeathNoteInventory,
     getNotebookOwnership,
+    getNotebookReturnRequest,
     getPendingIdentityTheftExposure,
     getSettings,
     getUserHeldNotebookScraps,
@@ -227,6 +229,35 @@ function buildAiNotebookWriteGuidance(ownership) {
     ].join('\n');
 }
 
+function buildNotebookReturnRequestGuidance(ownership) {
+    const request = getNotebookReturnRequest();
+    if (!request.active) {
+        return '';
+    }
+
+    const holder = ownership?.holder && typeof ownership.holder === 'object' ? ownership.holder : null;
+    const holderType = String(holder?.type || '').trim().toLowerCase();
+    const holderName = String(holder?.name || '').trim();
+    if (holderType !== NOTEBOOK_ACTOR_TYPES.CHARACTER || !holderName) {
+        return '';
+    }
+
+    const requestedName = String(request.actor?.name || '').trim();
+    if (!requestedName || holderName.toLowerCase() !== requestedName.toLowerCase()) {
+        return '';
+    }
+
+    return [
+        '[Death Note Return Request]',
+        `If the responding character is ${holderName}, the user has asked them to return the Death Note.`,
+        `If ${holderName} decides to concede and return it in this reply, append the following hidden block at the very end of the reply:`,
+        `[${NOTEBOOK_RETURN_BLOCK_TAG}]`,
+        'return: yes',
+        `[/${NOTEBOOK_RETURN_BLOCK_TAG}]`,
+        'If they do not return it, do not emit any block.',
+    ].join('\n');
+}
+
 function buildDeathNoteInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
@@ -256,7 +287,8 @@ function buildDeathNoteInjection() {
     }).trim();
     const npcGuidance = buildNpcDueGuidance(dueEntries);
     const aiWriteGuidance = buildAiNotebookWriteGuidance(ownership);
-    const extraSections = [npcGuidance, aiWriteGuidance].filter(Boolean);
+    const returnGuidance = buildNotebookReturnRequestGuidance(ownership);
+    const extraSections = [npcGuidance, aiWriteGuidance, returnGuidance].filter(Boolean);
     if (!extraSections.length) {
         return injection;
     }

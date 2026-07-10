@@ -168,6 +168,13 @@
     padding-bottom: 0.45rem;
 }
 
+.kw-dn-inventory__header-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: end;
+    gap: 0.45rem;
+}
+
 .kw-dn-inventory__header-action {
     min-height: 2rem;
     padding: 0.36rem 0.7rem;
