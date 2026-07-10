@@ -594,10 +594,11 @@
     color: rgba(234, 224, 214, 0.76);
 }
 
-#kw-deathnote-inventory-settings-modal {
+#kw-deathnote-inventory-settings-modal,
+#kw-deathnote-inventory-manage-modal {
     position: fixed;
     inset: 0;
-    z-index: 2147483646;
+    z-index: 2147483647;
 }
 
 .kw-dn-settings-modal__backdrop {
@@ -831,6 +832,19 @@
         padding: 0.72rem;
     }
 
+    .kw-dn-inventory__header {
+        align-items: stretch;
+    }
+
+    .kw-dn-inventory__header-buttons {
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .kw-dn-inventory__header-buttons > .kw-dn-inventory__header-action {
+        flex: 1 1 11rem;
+    }
+
     .kw-dn-settings-modal__section-title {
         font-size: 0.88rem;
     }
@@ -852,6 +866,14 @@
         padding: 0;
         border: 0;
         background: transparent;
+    }
+
+    .kw-deathnote-manager__actions {
+        align-items: stretch;
+    }
+
+    .kw-deathnote-manager__actions > .menu_button {
+        flex: 1 1 100%;
     }
 
     #kw-deathnote-notices {
@@ -882,6 +904,15 @@
 
     .kw-dn-inventory__header {
         align-items: center;
+    }
+
+    .kw-dn-inventory__header-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    .kw-dn-inventory__header-buttons > .kw-dn-inventory__header-action {
+        width: 100%;
+        flex-basis: 100%;
     }
 
     .kw-dn-inventory__header-action {
@@ -960,6 +991,14 @@
 
     .kw-dn-settings-modal__section {
         padding: 0.62rem;
+    }
+
+    .kw-deathnote-manager__summary {
+        font-size: 0.84em;
+    }
+
+    .kw-deathnote-manager__actions {
+        gap: 0.45rem;
     }
 
     .kw-dn-settings-modal__section-body,
