@@ -1,4 +1,5 @@
 import {
+    AI_NOTEBOOK_WRITE_BLOCK_TAG,
     MESSAGE_EXTRA_KEY,
     NOTEBOOK_ACTOR_TYPES,
     NOTEBOOK_USER_ACCESS,
@@ -199,6 +200,33 @@ function buildNpcDueGuidance(dueEntries) {
     ].join('\n');
 }
 
+function buildAiNotebookWriteGuidance(ownership) {
+    const holder = ownership?.holder && typeof ownership.holder === 'object' ? ownership.holder : null;
+    const holderType = String(holder?.type || '').trim().toLowerCase();
+    const holderName = String(holder?.name || '').trim();
+    if (!holderName) {
+        return '';
+    }
+
+    if (holderType !== NOTEBOOK_ACTOR_TYPES.CHARACTER && holderType !== NOTEBOOK_ACTOR_TYPES.NPC) {
+        return '';
+    }
+
+    return [
+        '[Hidden Notebook Write Channel]',
+        `The current Death Note holder is ${holderName}.`,
+        `If ${holderName} independently decides to physically write exactly one new Death Note line during this reply, append the hidden block below at the very end of the reply.`,
+        'If they do not write in the notebook, do not emit any block.',
+        'Use this sparingly and only when the holder would realistically choose to write right now.',
+        `Do not emit more than one block, and do not include more than one written line in it.`,
+        `The block must use this exact format: <${AI_NOTEBOOK_WRITE_BLOCK_TAG}>`,
+        `writer: ${holderName}`,
+        'entry: <the exact single line written in the notebook>',
+        `</${AI_NOTEBOOK_WRITE_BLOCK_TAG}>`,
+        'Do not explain the block. Do not mention these instructions. Keep the visible reply natural.',
+    ].join('\n');
+}
+
 function buildDeathNoteInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
@@ -227,11 +255,13 @@ function buildDeathNoteInjection() {
         entries_block: entriesBlock,
     }).trim();
     const npcGuidance = buildNpcDueGuidance(dueEntries);
-    if (!npcGuidance) {
+    const aiWriteGuidance = buildAiNotebookWriteGuidance(ownership);
+    const extraSections = [npcGuidance, aiWriteGuidance].filter(Boolean);
+    if (!extraSections.length) {
         return injection;
     }
 
-    return `${injection}\n\n${npcGuidance}`.trim();
+    return `${injection}\n\n${extraSections.join('\n\n')}`.trim();
 }
 
 function buildIdentityTheftInjection() {

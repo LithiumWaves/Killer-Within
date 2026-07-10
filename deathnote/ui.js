@@ -1877,6 +1877,7 @@ function syncSettingsUi() {
     $('#kw-deathnote-permanent-scrap').prop('checked', Boolean(settings.permanentResolvedScrapEntries));
     $('#kw-deathnote-open-sound').prop('checked', Boolean(settings.enableOpenSound));
     $('#kw-deathnote-writing-sound').prop('checked', Boolean(settings.enableWritingSound));
+    $('#kw-deathnote-show-ai-write-debug-blocks').prop('checked', Boolean(settings.showAiWriteDebugBlocks));
     $('#kw-deathnote-prompt-template').val(settings.deathNotePromptTemplate);
     $('#kw-deathnote-prompt-theft-template').val(settings.identityTheftPromptTemplate);
     $('#kw-deathnote-prompt-reveal-template').val(settings.notebookRevealPromptTemplate);
@@ -1963,6 +1964,11 @@ function bindSettingsUi() {
         if (!getSettings().enableWritingSound) {
             stopWritingSound();
         }
+    });
+
+    $('#kw-deathnote-show-ai-write-debug-blocks').off('change').on('change', (event) => {
+        getSettings().showAiWriteDebugBlocks = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
     });
 
     $('#kw-deathnote-prompt-template').off('input').on('input', (event) => {
@@ -2374,6 +2380,23 @@ function renderInventorySettingsContentHtml() {
                         <span>Hidden thought prompts</span>
                     </div>
                     ${renderThoughtPromptSettingsHtml()}
+                    </div>
+                </details>
+            </section>
+            <section class="kw-dn-settings-modal__section">
+                <details class="kw-dn-settings-modal__foldout">
+                    <summary class="kw-dn-settings-modal__foldout-summary">
+                        <span class="kw-dn-settings-modal__eyebrow">Debug</span>
+                        <span class="kw-dn-settings-modal__section-title">AI Write Debugging</span>
+                    </summary>
+                    <div class="kw-dn-settings-modal__foldout-body">
+                        <label class="killer-within-settings__row">
+                            <input id="kw-deathnote-show-ai-write-debug-blocks" type="checkbox" />
+                            <span>Show hidden AI notebook write blocks in assistant messages</span>
+                        </label>
+                        <div class="killer-within-settings__field">
+                            <small>When disabled, the module strips parsed AI write blocks from chat after applying them to the notebook.</small>
+                        </div>
                     </div>
                 </details>
             </section>

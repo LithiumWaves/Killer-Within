@@ -1,4 +1,5 @@
 import {
+    AI_NOTEBOOK_WRITE_BLOCK_TAG,
     CHAT_METADATA_KEY,
     DEFAULT_SETTINGS,
     MESSAGE_EXTRA_KEY,
@@ -877,6 +878,156 @@ function pushInventoryHistory(state, {
     }
 }
 
+function ensureMessageExtraState(message) {
+    if (!message || typeof message !== 'object') {
+        return null;
+    }
+
+    message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
+    message.extra[MESSAGE_EXTRA_KEY] = message.extra[MESSAGE_EXTRA_KEY] && typeof message.extra[MESSAGE_EXTRA_KEY] === 'object'
+        ? message.extra[MESSAGE_EXTRA_KEY]
+        : {};
+    return message.extra[MESSAGE_EXTRA_KEY];
+}
+
+function cleanupMessageExtraState(message) {
+    if (!message?.extra || typeof message.extra !== 'object') {
+        return;
+    }
+
+    if (message.extra[MESSAGE_EXTRA_KEY] && !Object.keys(message.extra[MESSAGE_EXTRA_KEY]).length) {
+        delete message.extra[MESSAGE_EXTRA_KEY];
+    }
+
+    if (!Object.keys(message.extra).length) {
+        delete message.extra;
+    }
+}
+
+function extractAiNotebookWriteBlocks(text) {
+    const source = String(text ?? '');
+    if (!source) {
+        return {
+            blocks: [],
+            strippedText: source,
+        };
+    }
+
+    const tag = escapeRegExp(AI_NOTEBOOK_WRITE_BLOCK_TAG);
+    const regex = new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*<\\/${tag}>`, 'gi');
+    const blocks = [];
+    let match = regex.exec(source);
+    while (match) {
+        blocks.push({
+            rawBlock: String(match[0] || ''),
+            body: String(match[1] || ''),
+        });
+        match = regex.exec(source);
+    }
+
+    const strippedText = source
+        .replace(new RegExp(`\\s*<${tag}>\\s*[\\s\\S]*?\\s*<\\/${tag}>`, 'gi'), '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trimEnd();
+
+    return {
+        blocks,
+        strippedText,
+    };
+}
+
+function parseAiNotebookWriteBlock(blockBody) {
+    const body = String(blockBody ?? '');
+    const lines = body.split(/\r?\n/);
+    let writer = '';
+    let entry = '';
+
+    for (const line of lines) {
+        if (!writer) {
+            const writerMatch = line.match(/^\s*writer\s*:\s*(.+?)\s*$/i);
+            if (writerMatch) {
+                writer = String(writerMatch[1] || '').trim();
+                continue;
+            }
+        }
+
+        if (!entry) {
+            const entryMatch = line.match(/^\s*entry\s*:\s*(.+?)\s*$/i);
+            if (entryMatch) {
+                entry = String(entryMatch[1] || '').trim();
+            }
+        }
+    }
+
+    return {
+        writer,
+        entry,
+    };
+}
+
+function canAiHolderWriteNotebook(actor) {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    return Boolean(
+        normalized.name
+        && (
+            normalized.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+            || normalized.type === NOTEBOOK_ACTOR_TYPES.NPC
+        )
+    );
+}
+
+function appendAiNotebookLine(entryLine, actor, options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const line = String(entryLine ?? '').trim();
+    if (!line) {
+        return { applied: false, reason: 'empty_entry' };
+    }
+
+    if (!state.hasNotebook || state.inventory?.notebook?.destroyed) {
+        return { applied: false, reason: 'notebook_unavailable' };
+    }
+
+    const writer = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!canAiHolderWriteNotebook(writer)) {
+        return { applied: false, reason: 'invalid_holder' };
+    }
+
+    if (!parseNotebookLine(line)) {
+        return { applied: false, reason: 'invalid_entry' };
+    }
+
+    const pages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
+    const nextPages = pages.slice();
+    if (!nextPages.length) {
+        nextPages.push('');
+    }
+
+    const lastIndex = nextPages.length - 1;
+    const separator = nextPages[lastIndex] && !nextPages[lastIndex].endsWith('\n') ? '\n' : '';
+    nextPages[lastIndex] = `${nextPages[lastIndex]}${separator}${line}`;
+
+    const changed = setNotebookPages(sanitizeNotebookPagesForRules(nextPages));
+    if (!changed) {
+        return { applied: false, reason: 'no_change' };
+    }
+
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    pushInventoryHistory(state, {
+        action: 'write_notebook',
+        itemId: state.inventory.notebook.itemId,
+        detail: String(options.reason || '').trim() || `${writer.name || writer.type} wrote in the Death Note.`,
+        actor: writer,
+        target: state.ownership.owner,
+        timestamp,
+    });
+
+    return {
+        applied: true,
+        reason: 'applied',
+    };
+}
+
 function getActorIdentityKey(actor) {
     const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
     return [
@@ -1681,10 +1832,7 @@ export function setDeathNoteMemoryTracked(messageIndex, tracked = true, options 
         return false;
     }
 
-    message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
-    message.extra[MESSAGE_EXTRA_KEY] = message.extra[MESSAGE_EXTRA_KEY] && typeof message.extra[MESSAGE_EXTRA_KEY] === 'object'
-        ? message.extra[MESSAGE_EXTRA_KEY]
-        : {};
+    ensureMessageExtraState(message);
 
     if (tracked) {
         const timestamp = normalizeTransferredAt(options.timestamp);
@@ -1702,12 +1850,80 @@ export function setDeathNoteMemoryTracked(messageIndex, tracked = true, options 
     }
 
     delete message.extra[MESSAGE_EXTRA_KEY].memoryTracked;
-    if (!Object.keys(message.extra[MESSAGE_EXTRA_KEY]).length) {
-        delete message.extra[MESSAGE_EXTRA_KEY];
+    cleanupMessageExtraState(message);
+
+    return true;
+}
+
+export function processAssistantNotebookWriteMessage(messageIndex) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
     }
 
-    if (!Object.keys(message.extra).length) {
-        delete message.extra;
+    const message = chat[index];
+    if (!message || message.is_system) {
+        return false;
+    }
+
+    const extra = ensureMessageExtraState(message);
+    if (extra?.aiNotebookWrite?.processed) {
+        return false;
+    }
+
+    const rawText = String(message.mes ?? '');
+    const extracted = extractAiNotebookWriteBlocks(rawText);
+    if (!extracted.blocks.length) {
+        cleanupMessageExtraState(message);
+        return false;
+    }
+
+    const settings = getSettings();
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const timestamp = Date.now();
+    const metadata = {
+        processed: true,
+        rawBlock: extracted.blocks[0].rawBlock,
+        blockCount: extracted.blocks.length,
+        writer: '',
+        entry: '',
+        applied: false,
+        reason: '',
+        stripped: !settings.showAiWriteDebugBlocks,
+        updatedAt: timestamp,
+    };
+
+    const holder = normalizeActorRef(state.ownership?.holder, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!state.hasNotebook || state.inventory?.notebook?.destroyed) {
+        metadata.reason = 'notebook_unavailable';
+    } else if (!canAiHolderWriteNotebook(holder)) {
+        metadata.reason = 'invalid_holder';
+    } else {
+        const parsed = parseAiNotebookWriteBlock(extracted.blocks[0].body);
+        metadata.writer = parsed.writer;
+        metadata.entry = parsed.entry;
+
+        if (!parsed.writer || !parsed.entry) {
+            metadata.reason = 'missing_fields';
+        } else if (normalizeKnowledgeKey(parsed.writer) !== normalizeKnowledgeKey(holder.name)) {
+            metadata.reason = 'writer_mismatch';
+        } else {
+            const appended = appendAiNotebookLine(parsed.entry, holder, {
+                timestamp,
+                reason: `${holder.name || holder.type} wrote "${parsed.entry}" during an assistant reply.`,
+            });
+            metadata.applied = appended.applied;
+            metadata.reason = appended.reason;
+        }
+    }
+
+    extra.aiNotebookWrite = metadata;
+
+    if (!settings.showAiWriteDebugBlocks) {
+        message.mes = extracted.strippedText;
     }
 
     return true;

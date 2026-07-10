@@ -1,5 +1,6 @@
 import {
     autoLearnCharacterNameFromMessage,
+    processAssistantNotebookWriteMessage,
     autoLearnQuotedCharacterNamesFromMessage,
     autoTrackDeathNoteMemoryMessage,
     consumePendingIdentityTheftExposureForMessage,
@@ -21,6 +22,9 @@ export function setupDeathNoteExtension() {
             onAssistantMessage: resolveDueEntriesForAssistantMessage,
             onMessageAdded: async (messageIndex, details = {}) => {
                 const assistantResult = details && details.assistantResult ? details.assistantResult : null;
+                const aiNotebookWriteApplied = details?.kind === 'received'
+                    ? processAssistantNotebookWriteMessage(messageIndex)
+                    : false;
                 const memoryTracked = autoTrackDeathNoteMemoryMessage(messageIndex, {
                     resolvedEntries: assistantResult && Array.isArray(assistantResult.resolvedEntries)
                         ? assistantResult.resolvedEntries
@@ -34,7 +38,7 @@ export function setupDeathNoteExtension() {
                 if (memoryTracked) {
                     await syncLinkedShinigamiVisibility();
                 }
-                return memoryTracked || nameLearned || confessionLearned || identityExposureConsumed;
+                return aiNotebookWriteApplied || memoryTracked || nameLearned || confessionLearned || identityExposureConsumed;
             },
             onUiRefresh: refreshDeathNoteUi,
         });
