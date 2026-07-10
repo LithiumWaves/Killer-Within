@@ -22,7 +22,12 @@ Status: OPEN
 - H5: Another later reconciliation or UI refresh path is overwriting the notebook pages after the AI write succeeds.
 
 ## Evidence Log
-- Pending instrumentation.
+- Pre-fix reproduction captured in `.dbg/trae-debug-log-ai-note-write.ndjson`.
+- H1 rejected: `processAssistantNotebookWriteMessage()` saw the final bracket block (`hasBracketBlock: true`) before stripping.
+- H2 rejected: extraction and parse succeeded for `writer: Mikayla` and `entry: Viktor Gonza`.
+- H3 narrowed/confirmed: `appendAiNotebookLine()` prepared `nextPages[0] = "Viktor Gonza"`, but page state was already empty immediately after `setNotebookPages()`.
+- H4 partially confirmed: the debug toggle computed the correct raw target text after generation, but the visible chat did not update retroactively.
+- H5 still inconclusive: need instrumentation inside `setNotebookPages()` and `reconcileEntriesFromNotebookPages()` to prove where the notebook text is wiped.
 
 ## Next Step
-- Add runtime instrumentation around block extraction, parse result, notebook page mutation, and post-refresh notebook page state.
+- Add one more instrumentation layer inside `setNotebookPages()` and `reconcileEntriesFromNotebookPages()` to capture normalized pages before assignment and notebook state after reconciliation.
