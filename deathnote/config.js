@@ -4,6 +4,7 @@ export const CHAT_METADATA_KEY = 'killerWithinDeathNote';
 export const MESSAGE_EXTRA_KEY = 'killerWithinDeathNote';
 export const AI_NOTEBOOK_WRITE_BLOCK_TAG = 'kwNoteWrite';
 export const NOTEBOOK_RETURN_BLOCK_TAG = 'kwNoteReturn';
+export const MAX_SIMULTANEOUS_DEATH_NOTES = 7;
 
 export const NOTEBOOK_ACTOR_TYPES = Object.freeze({
     USER: 'user',
@@ -90,6 +91,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     inventoryMobileY: null,
     inventoryCollapsed: false,
     inventorySelectedItemKey: 'notebook',
+    selectedNotebookId: '',
     draftText: '',
     fontMode: 'print',
     currentPageIndex: 0,

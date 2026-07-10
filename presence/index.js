@@ -1,6 +1,6 @@
 import {
     getDeathNoteMemoryAudienceActors,
-    getLinkedShinigamiPresenceBinding,
+    getLinkedShinigamiPresenceBindings,
     isDeathNoteMemoryMessage,
 } from '../deathnote/core.js';
 import {
@@ -39,8 +39,8 @@ async function syncLinkedShinigamiMessage(messageIndex) {
         return false;
     }
 
-    const binding = getLinkedShinigamiPresenceBinding();
-    if (!binding?.linked) {
+    const bindings = getLinkedShinigamiPresenceBindings();
+    if (!bindings.length) {
         return false;
     }
 
@@ -52,12 +52,19 @@ async function syncLinkedShinigamiMessage(messageIndex) {
     }
 
     const message = chat[index];
-    const shinigamiIdentity = String(binding.shinigami.avatar || binding.shinigami.actor.id || binding.shinigami.actor.name || '').trim();
-    if (!message || !shinigamiIdentity || !isMessageAuthoredByPresenceCharacter(message, shinigamiIdentity)) {
+    if (!message) {
         return false;
     }
 
-    return await setMessagePresenceAudience(index, getShinigamiAudience(binding));
+    for (const binding of bindings) {
+        const shinigamiIdentity = String(binding.shinigami.avatar || binding.shinigami.actor.id || binding.shinigami.actor.name || '').trim();
+        if (!shinigamiIdentity || !isMessageAuthoredByPresenceCharacter(message, shinigamiIdentity)) {
+            continue;
+        }
+        return await setMessagePresenceAudience(index, getShinigamiAudience(binding));
+    }
+
+    return false;
 }
 
 function getDeathNoteMemoryAudience() {

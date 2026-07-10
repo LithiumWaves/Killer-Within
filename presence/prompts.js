@@ -1,4 +1,4 @@
-import { getActorDisplayName, getDeathNotePresenceState, getLinkedShinigami, getSettings } from '../deathnote/core.js';
+import { getActorDisplayName, getDeathNotePresenceState, getDeathNotes, getSettings } from '../deathnote/core.js';
 
 function renderPromptTemplate(template, replacements = {}) {
     return String(template || '').replace(/\{\{([a-z0-9_]+)\}\}/gi, (_match, key) => {
@@ -83,14 +83,16 @@ function buildTouchersBlock(touchers) {
 function buildPresenceInjection() {
     const settings = getSettings();
     const state = getDeathNotePresenceState();
-    const shinigamiLink = getLinkedShinigami();
+    const linkedShinigami = getDeathNotes()
+        .map((entry) => entry?.linkedShinigami)
+        .filter((entry) => entry?.active);
     if (!state.notebookPresent && !state.touchers.length && !state.userCanSeeShinigami) {
         return '';
     }
 
     return renderPromptTemplate(settings.presencePromptTemplate, {
-        linked_shinigami: shinigamiLink && shinigamiLink.active
-            ? getActorDisplayName(shinigamiLink.actor, shinigamiLink.avatar || 'linked')
+        linked_shinigami: linkedShinigami.length
+            ? linkedShinigami.map((entry) => getActorDisplayName(entry.actor, entry.avatar || 'linked')).join(', ')
             : 'none currently linked',
         touchers_block: buildTouchersBlock(state.touchers),
     }).trim();
