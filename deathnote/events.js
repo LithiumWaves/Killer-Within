@@ -68,7 +68,7 @@ export function registerEventHandlers({
         }
 
         // #region debug-point A:finalize-event
-        fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"pre-fix",hypothesisId:"A",location:"deathnote/events.js:finalizeAssistantMessage",msg:"[DEBUG] finalizeAssistantMessage fired",data:{lastIndex,messageLength:String(lastMessage?.mes||"").length,hasBracketBlock:String(lastMessage?.mes||"").includes("[kwNoteWrite]"),tail:String(lastMessage?.mes||"").slice(-220)},ts:Date.now()})}).catch(()=>{});
+        fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"A",location:"deathnote/events.js:finalizeAssistantMessage",msg:"[DEBUG] finalizeAssistantMessage fired",data:{lastIndex,messageLength:String(lastMessage?.mes||"").length,hasBracketBlock:String(lastMessage?.mes||"").includes("[kwNoteWrite]"),tail:String(lastMessage?.mes||"").slice(-220)},ts:Date.now()})}).catch(()=>{});
         // #endregion
         const changed = await onAssistantMessageFinalized?.(lastIndex, {
             kind: 'received_finalized',
