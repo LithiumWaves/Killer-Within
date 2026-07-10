@@ -2,6 +2,7 @@ export const MODULE_NAME = 'killer_within_deathnote';
 export const FLOATING_ID = 'kw-deathnote';
 export const CHAT_METADATA_KEY = 'killerWithinDeathNote';
 export const MESSAGE_EXTRA_KEY = 'killerWithinDeathNote';
+export const AI_NOTEBOOK_WRITE_BLOCK_TAG = 'kwNoteWrite';
 
 export const NOTEBOOK_ACTOR_TYPES = Object.freeze({
     USER: 'user',
@@ -69,6 +70,7 @@ export const DEFAULT_PRESENCE_PROMPT_TEMPLATE = [
 export const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
     debug: false,
+    showAiWriteDebugBlocks: false,
     isOpen: false,
     requireKnownNamesForKills: true,
     permanentResolvedNotebookEntries: false,
@@ -95,4 +97,3 @@ export const DEFAULT_SETTINGS = Object.freeze({
     notebookRevealPromptTemplate: DEFAULT_NOTEBOOK_REVEAL_PROMPT_TEMPLATE,
     presencePromptTemplate: DEFAULT_PRESENCE_PROMPT_TEMPLATE,
 });
-

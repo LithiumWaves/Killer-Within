@@ -1,4 +1,5 @@
 import {
+    AI_NOTEBOOK_WRITE_BLOCK_TAG,
     CHAT_METADATA_KEY,
     DEFAULT_SETTINGS,
     MESSAGE_EXTRA_KEY,
@@ -877,6 +878,221 @@ function pushInventoryHistory(state, {
     }
 }
 
+function ensureMessageExtraState(message) {
+    if (!message || typeof message !== 'object') {
+        return null;
+    }
+
+    message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
+    message.extra[MESSAGE_EXTRA_KEY] = message.extra[MESSAGE_EXTRA_KEY] && typeof message.extra[MESSAGE_EXTRA_KEY] === 'object'
+        ? message.extra[MESSAGE_EXTRA_KEY]
+        : {};
+    return message.extra[MESSAGE_EXTRA_KEY];
+}
+
+function cleanupMessageExtraState(message) {
+    if (!message?.extra || typeof message.extra !== 'object') {
+        return;
+    }
+
+    if (message.extra[MESSAGE_EXTRA_KEY] && !Object.keys(message.extra[MESSAGE_EXTRA_KEY]).length) {
+        delete message.extra[MESSAGE_EXTRA_KEY];
+    }
+
+    if (!Object.keys(message.extra).length) {
+        delete message.extra;
+    }
+}
+
+function extractAiNotebookWriteBlocks(text) {
+    const source = String(text ?? '');
+    if (!source) {
+        return {
+            blocks: [],
+            strippedText: source,
+        };
+    }
+
+    const tag = escapeRegExp(AI_NOTEBOOK_WRITE_BLOCK_TAG);
+    const regex = new RegExp(`(?:<${tag}>|\\[${tag}\\])\\s*([\\s\\S]*?)\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'gi');
+    const blocks = [];
+    let match = regex.exec(source);
+    while (match) {
+        blocks.push({
+            rawBlock: String(match[0] || ''),
+            body: String(match[1] || ''),
+        });
+        match = regex.exec(source);
+    }
+
+    if (blocks.length) {
+        const strippedText = source
+            .replace(new RegExp(`\\s*(?:<${tag}>|\\[${tag}\\])\\s*[\\s\\S]*?\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'gi'), '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+
+        return {
+            blocks,
+            strippedText,
+        };
+    }
+
+    const unwrappedMatch = source.match(/(?:\r?\n|\n|^)\s*writer\s*:\s*([^\r\n]+?)\s*(?:\r?\n\s*|\s+)entry\s*:\s*(.+?)\s*$/is);
+    if (unwrappedMatch) {
+        const writer = String(unwrappedMatch[1] || '').trim();
+        const entry = String(unwrappedMatch[2] || '').trim();
+        const rawBlock = String(unwrappedMatch[0] || '');
+        const strippedText = source
+            .slice(0, Math.max(0, source.length - rawBlock.length))
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+
+        return {
+            blocks: [{
+                rawBlock,
+                body: `writer: ${writer}\nentry: ${entry}`,
+            }],
+            strippedText,
+        };
+    }
+
+    return {
+        blocks,
+        strippedText: source,
+    };
+}
+
+function parseAiNotebookWriteBlock(blockBody) {
+    const body = String(blockBody ?? '');
+    let writer = '';
+    let entry = '';
+
+    const inlineMatch = body.match(/writer\s*:\s*(.+?)\s+entry\s*:\s*(.+?)\s*$/is);
+    if (inlineMatch) {
+        return {
+            writer: String(inlineMatch[1] || '').trim(),
+            entry: String(inlineMatch[2] || '').trim(),
+        };
+    }
+
+    const lines = body.split(/\r?\n/);
+
+    for (const line of lines) {
+        if (!writer) {
+            const writerMatch = line.match(/^\s*writer\s*:\s*(.+?)\s*$/i);
+            if (writerMatch) {
+                writer = String(writerMatch[1] || '').trim();
+                continue;
+            }
+        }
+
+        if (!entry) {
+            const entryMatch = line.match(/^\s*entry\s*:\s*(.+?)\s*$/i);
+            if (entryMatch) {
+                entry = String(entryMatch[1] || '').trim();
+            }
+        }
+    }
+
+    return {
+        writer,
+        entry,
+    };
+}
+
+function canAiHolderWriteNotebook(actor) {
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    return Boolean(
+        normalized.name
+        && (
+            normalized.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+            || normalized.type === NOTEBOOK_ACTOR_TYPES.NPC
+        )
+    );
+}
+
+function appendAiNotebookLine(entryLine, actor, options = {}) {
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const line = String(entryLine ?? '').trim();
+    if (!line) {
+        return { applied: false, reason: 'empty_entry' };
+    }
+
+    if (!state.hasNotebook || state.inventory?.notebook?.destroyed) {
+        return { applied: false, reason: 'notebook_unavailable' };
+    }
+
+    const writer = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!canAiHolderWriteNotebook(writer)) {
+        return { applied: false, reason: 'invalid_holder' };
+    }
+
+    if (/[\r\n]/.test(line)) {
+        return { applied: false, reason: 'invalid_entry' };
+    }
+
+    const pages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
+    const nextPages = pages.slice();
+    while (nextPages.length > 1 && !String(nextPages[nextPages.length - 1] || '').trim()) {
+        nextPages.pop();
+    }
+    if (!nextPages.length) {
+        nextPages.push('');
+    }
+
+    const lastIndex = nextPages.length - 1;
+    const separator = nextPages[lastIndex] && !nextPages[lastIndex].endsWith('\n') ? '\n' : '';
+    nextPages[lastIndex] = `${nextPages[lastIndex]}${separator}${line}`;
+
+    const parsedEntry = parseNotebookLine(line);
+    const changed = setNotebookPages(nextPages);
+    if (!changed) {
+        return { applied: false, reason: 'no_change' };
+    }
+
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    pushInventoryHistory(state, {
+        action: 'write_notebook',
+        itemId: state.inventory.notebook.itemId,
+        detail: String(options.reason || '').trim() || `${writer.name || writer.type} wrote in the Death Note.`,
+        actor: writer,
+        target: state.ownership.owner,
+        timestamp,
+    });
+
+    return {
+        applied: true,
+        reason: parsedEntry ? 'applied' : 'written_only',
+    };
+}
+
+function syncAiNotebookWriteMessageVisibility(message, metadata = null) {
+    const extra = ensureMessageExtraState(message);
+    const aiWrite = metadata || extra?.aiNotebookWrite;
+    if (!aiWrite?.processed) {
+        return false;
+    }
+
+    const rawMessage = String(aiWrite.rawMessage || '');
+    const strippedText = String(aiWrite.strippedText || '');
+    if (!rawMessage && !strippedText) {
+        return false;
+    }
+
+    const showBlock = Boolean(getSettings().showAiWriteDebugBlocks);
+    const nextText = showBlock ? (rawMessage || String(message.mes ?? '')) : (strippedText || String(message.mes ?? ''));
+    if (String(message.mes ?? '') === nextText) {
+        aiWrite.stripped = !showBlock;
+        return false;
+    }
+
+    message.mes = nextText;
+    aiWrite.stripped = !showBlock;
+    aiWrite.updatedAt = Date.now();
+    return true;
+}
+
 function getActorIdentityKey(actor) {
     const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
     return [
@@ -1681,10 +1897,7 @@ export function setDeathNoteMemoryTracked(messageIndex, tracked = true, options 
         return false;
     }
 
-    message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
-    message.extra[MESSAGE_EXTRA_KEY] = message.extra[MESSAGE_EXTRA_KEY] && typeof message.extra[MESSAGE_EXTRA_KEY] === 'object'
-        ? message.extra[MESSAGE_EXTRA_KEY]
-        : {};
+    ensureMessageExtraState(message);
 
     if (tracked) {
         const timestamp = normalizeTransferredAt(options.timestamp);
@@ -1702,15 +1915,98 @@ export function setDeathNoteMemoryTracked(messageIndex, tracked = true, options 
     }
 
     delete message.extra[MESSAGE_EXTRA_KEY].memoryTracked;
-    if (!Object.keys(message.extra[MESSAGE_EXTRA_KEY]).length) {
-        delete message.extra[MESSAGE_EXTRA_KEY];
-    }
-
-    if (!Object.keys(message.extra).length) {
-        delete message.extra;
-    }
+    cleanupMessageExtraState(message);
 
     return true;
+}
+
+export function processAssistantNotebookWriteMessage(messageIndex) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    if (!message || message.is_system) {
+        return false;
+    }
+
+    const extra = ensureMessageExtraState(message);
+    if (extra?.aiNotebookWrite?.processed) {
+        return syncAiNotebookWriteMessageVisibility(message, extra.aiNotebookWrite);
+    }
+
+    const rawText = String(message.mes ?? '');
+    const extracted = extractAiNotebookWriteBlocks(rawText);
+    if (!extracted.blocks.length) {
+        cleanupMessageExtraState(message);
+        return false;
+    }
+
+    const settings = getSettings();
+    const state = getChatState();
+    syncInventoryWithOwnership(state);
+    const timestamp = Date.now();
+    const metadata = {
+        processed: true,
+        rawMessage: rawText,
+        strippedText: extracted.strippedText,
+        rawBlock: extracted.blocks[0].rawBlock,
+        blockCount: extracted.blocks.length,
+        writer: '',
+        entry: '',
+        applied: false,
+        reason: '',
+        stripped: !settings.showAiWriteDebugBlocks,
+        updatedAt: timestamp,
+    };
+
+    const holder = normalizeActorRef(state.ownership?.holder, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!state.hasNotebook || state.inventory?.notebook?.destroyed) {
+        metadata.reason = 'notebook_unavailable';
+    } else if (!canAiHolderWriteNotebook(holder)) {
+        metadata.reason = 'invalid_holder';
+    } else {
+        const parsed = parseAiNotebookWriteBlock(extracted.blocks[0].body);
+        metadata.writer = parsed.writer;
+        metadata.entry = parsed.entry;
+
+        if (!parsed.writer || !parsed.entry) {
+            metadata.reason = 'missing_fields';
+        } else if (normalizeKnowledgeKey(parsed.writer) !== normalizeKnowledgeKey(holder.name)) {
+            metadata.reason = 'writer_mismatch';
+        } else {
+            const appended = appendAiNotebookLine(parsed.entry, holder, {
+                timestamp,
+                reason: `${holder.name || holder.type} wrote "${parsed.entry}" during an assistant reply.`,
+            });
+            metadata.applied = appended.applied;
+            metadata.reason = appended.reason;
+        }
+    }
+
+    extra.aiNotebookWrite = metadata;
+    const visibilityChanged = syncAiNotebookWriteMessageVisibility(message, metadata);
+    return visibilityChanged || metadata.applied;
+}
+
+export function syncAllAiNotebookWriteMessageVisibility() {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    let changed = false;
+    for (const message of chat) {
+        if (!message || message.is_system) {
+            continue;
+        }
+
+        if (syncAiNotebookWriteMessageVisibility(message)) {
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 export function autoTrackDeathNoteMemoryMessage(messageIndex, options = {}) {
@@ -2409,8 +2705,9 @@ function enforcePermanentLinesForSource(text, sourceType, sourceId, maxLines = n
     const source = String(text ?? '');
     const lines = source ? source.split(/\r?\n/).map((line) => String(line ?? '')) : [];
     const lockedEntries = getPermanentResolvedEntriesForSource(sourceType, sourceId);
+    const hasLineLimit = maxLines !== null && maxLines !== undefined && Number.isFinite(Number(maxLines));
     if (!lockedEntries.length) {
-        if (!Number.isFinite(Number(maxLines))) {
+        if (!hasLineLimit) {
             return source;
         }
 
@@ -2447,7 +2744,7 @@ function enforcePermanentLinesForSource(text, sourceType, sourceId, maxLines = n
     }
 
     let nextLines = [...lines, ...missingLockedLines];
-    if (Number.isFinite(Number(maxLines))) {
+    if (hasLineLimit) {
         const limit = Math.max(0, Math.floor(Number(maxLines)));
         if (missingLockedLines.length >= limit) {
             nextLines = missingLockedLines.slice(0, limit);
@@ -2557,9 +2854,9 @@ export function reconcileEntriesFromNotebookPages() {
     const state = getChatState();
     syncNotebookTextFromPages(state);
     const lines = collectActiveDeathNoteSourceLines(state);
-
     const counts = buildLineCounts(lines);
     const retained = [];
+
 
     for (const entry of state.entries) {
         const key = String(entry?.noteText || '').trim();
