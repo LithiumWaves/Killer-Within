@@ -914,7 +914,7 @@ function extractAiNotebookWriteBlocks(text) {
     }
 
     const tag = escapeRegExp(AI_NOTEBOOK_WRITE_BLOCK_TAG);
-    const regex = new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*<\\/${tag}>`, 'gi');
+    const regex = new RegExp(`(?:<${tag}>|\\[${tag}\\])\\s*([\\s\\S]*?)\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'gi');
     const blocks = [];
     let match = regex.exec(source);
     while (match) {
@@ -927,7 +927,7 @@ function extractAiNotebookWriteBlocks(text) {
 
     if (blocks.length) {
         const strippedText = source
-            .replace(new RegExp(`\\s*<${tag}>\\s*[\\s\\S]*?\\s*<\\/${tag}>`, 'gi'), '')
+            .replace(new RegExp(`\\s*(?:<${tag}>|\\[${tag}\\])\\s*[\\s\\S]*?\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'gi'), '')
             .replace(/\n{3,}/g, '\n\n')
             .trimEnd();
 
@@ -1028,7 +1028,7 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
         return { applied: false, reason: 'invalid_holder' };
     }
 
-    if (!parseNotebookLine(line)) {
+    if (/[\r\n]/.test(line)) {
         return { applied: false, reason: 'invalid_entry' };
     }
 
@@ -1042,7 +1042,8 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
     const separator = nextPages[lastIndex] && !nextPages[lastIndex].endsWith('\n') ? '\n' : '';
     nextPages[lastIndex] = `${nextPages[lastIndex]}${separator}${line}`;
 
-    const changed = setNotebookPages(sanitizeNotebookPagesForRules(nextPages));
+    const parsedEntry = parseNotebookLine(line);
+    const changed = setNotebookPages(nextPages);
     if (!changed) {
         return { applied: false, reason: 'no_change' };
     }
@@ -1059,7 +1060,7 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
 
     return {
         applied: true,
-        reason: 'applied',
+        reason: parsedEntry ? 'applied' : 'written_only',
     };
 }
 
