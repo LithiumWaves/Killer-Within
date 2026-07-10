@@ -73,6 +73,9 @@ export async function requestChatRefresh() {
     const context = getContext();
     const eventSource = context?.eventSource;
     const eventTypes = context?.event_types;
+    // #region debug-point D:request-chat-refresh
+    fetch("http://127.0.0.1:7778/event",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:"ai-note-write",runId:"post-fix",hypothesisId:"D",location:"deathnote/core.js:requestChatRefresh",msg:"[DEBUG] requestChatRefresh invoked",data:{hasEventSource:Boolean(eventSource),chatChangedType:String(eventTypes?.CHAT_CHANGED||""),contextFunctions:Object.keys(context||{}).filter((key)=>typeof context?.[key]==="function").slice(0,80)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     if (!eventSource || !eventTypes?.CHAT_CHANGED || typeof eventSource.emit !== 'function') {
         return;
     }
