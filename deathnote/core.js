@@ -1034,6 +1034,9 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
 
     const pages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
     const nextPages = pages.slice();
+    while (nextPages.length > 1 && !String(nextPages[nextPages.length - 1] || '').trim()) {
+        nextPages.pop();
+    }
     if (!nextPages.length) {
         nextPages.push('');
     }
@@ -1062,6 +1065,32 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
         applied: true,
         reason: parsedEntry ? 'applied' : 'written_only',
     };
+}
+
+function syncAiNotebookWriteMessageVisibility(message, metadata = null) {
+    const extra = ensureMessageExtraState(message);
+    const aiWrite = metadata || extra?.aiNotebookWrite;
+    if (!aiWrite?.processed) {
+        return false;
+    }
+
+    const rawMessage = String(aiWrite.rawMessage || '');
+    const strippedText = String(aiWrite.strippedText || '');
+    if (!rawMessage && !strippedText) {
+        return false;
+    }
+
+    const showBlock = Boolean(getSettings().showAiWriteDebugBlocks);
+    const nextText = showBlock ? (rawMessage || String(message.mes ?? '')) : (strippedText || String(message.mes ?? ''));
+    if (String(message.mes ?? '') === nextText) {
+        aiWrite.stripped = !showBlock;
+        return false;
+    }
+
+    message.mes = nextText;
+    aiWrite.stripped = !showBlock;
+    aiWrite.updatedAt = Date.now();
+    return true;
 }
 
 function getActorIdentityKey(actor) {
@@ -1906,7 +1935,7 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
 
     const extra = ensureMessageExtraState(message);
     if (extra?.aiNotebookWrite?.processed) {
-        return false;
+        return syncAiNotebookWriteMessageVisibility(message, extra.aiNotebookWrite);
     }
 
     const rawText = String(message.mes ?? '');
@@ -1922,6 +1951,8 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
     const timestamp = Date.now();
     const metadata = {
         processed: true,
+        rawMessage: rawText,
+        strippedText: extracted.strippedText,
         rawBlock: extracted.blocks[0].rawBlock,
         blockCount: extracted.blocks.length,
         writer: '',
@@ -1957,12 +1988,25 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
     }
 
     extra.aiNotebookWrite = metadata;
+    const visibilityChanged = syncAiNotebookWriteMessageVisibility(message, metadata);
+    return visibilityChanged || metadata.applied;
+}
 
-    if (!settings.showAiWriteDebugBlocks) {
-        message.mes = extracted.strippedText;
+export function syncAllAiNotebookWriteMessageVisibility() {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    let changed = false;
+    for (const message of chat) {
+        if (!message || message.is_system) {
+            continue;
+        }
+
+        if (syncAiNotebookWriteMessageVisibility(message)) {
+            changed = true;
+        }
     }
 
-    return true;
+    return changed;
 }
 
 export function autoTrackDeathNoteMemoryMessage(messageIndex, options = {}) {

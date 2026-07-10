@@ -36,6 +36,7 @@ import {
     setNotebookOwnership,
     setNotebookPages,
     setUserNotebookAccess,
+    syncAllAiNotebookWriteMessageVisibility,
     transferNotebookScrap,
     transferNotebookTo,
     updateNotebookScrapText,
@@ -2026,9 +2027,13 @@ function bindSettingsUi() {
         }
     });
 
-    $('#kw-deathnote-show-ai-write-debug-blocks').off('change').on('change', (event) => {
+    $('#kw-deathnote-show-ai-write-debug-blocks').off('change').on('change', async (event) => {
         getSettings().showAiWriteDebugBlocks = Boolean($(event.currentTarget).prop('checked'));
         scheduleSettingsSave();
+        if (syncAllAiNotebookWriteMessageVisibility()) {
+            await persistChatChanges();
+            refreshDeathNoteUi();
+        }
     });
 
     $('#kw-deathnote-debug-retrieve-notebook').off('click').on('click', async (event) => {
