@@ -1415,7 +1415,16 @@ function renderInventoryGridSlots(inventory, selectedKey, coverUrl) {
 function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }) {
     const notebookAvailable = !inventory.notebook.destroyed;
     const canOpenNotebook = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
+    const canTransferNotebook = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
     const linkedLabel = linked.active ? formatActorInventoryLabel(linked.actor) : 'No link';
+    const selectedRecipient = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+        ? ownership.holder
+        : null;
+    const transferChoices = getActorChoices({
+        currentActor: selectedRecipient,
+        includeUser: false,
+        includeWorld: false,
+    });
     const linkChoices = getActorChoices({
         includeUser: false,
         includeCharacters: true,
@@ -1458,6 +1467,21 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                     id="kw-dn-inventory-toggle-floating"
                     class="menu_button kw-dn-inventory__context-action"
                 >${settings.showFloatingButton ? 'Hide Button' : 'Show Button'}</button>
+            </div>
+            <div class="kw-dn-inventory__context-link">
+                <select
+                    id="kw-dn-inventory-give-select"
+                    class="text_pole kw-dn-inventory__context-select"
+                    ${canTransferNotebook ? '' : 'disabled'}
+                >
+                    ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
+                </select>
+                <button
+                    type="button"
+                    id="kw-dn-inventory-give-notebook"
+                    class="menu_button kw-dn-inventory__context-action"
+                    ${canTransferNotebook ? '' : 'disabled'}
+                >Give</button>
             </div>
             <div class="kw-dn-inventory__context-link">
                 <select
@@ -3223,6 +3247,32 @@ function bindInventoryUi() {
             getSettings().showFloatingButton = !getSettings().showFloatingButton;
             scheduleSettingsSave();
             refreshDeathNoteUi();
+        })
+        .off('click', '#kw-dn-inventory-give-notebook')
+        .on('click', '#kw-dn-inventory-give-notebook', async (event) => {
+            event.preventDefault();
+            const inventory = getDeathNoteInventory();
+            const ownership = getNotebookOwnership();
+            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+                notify('warning', 'You need full notebook access to hand the Death Note to someone else.');
+                return;
+            }
+
+            const actor = decodeActorValue($('#kw-dn-inventory-give-select').val(), null);
+            if (!actor) {
+                notify('warning', 'Select an active character to receive the Death Note.');
+                return;
+            }
+
+            const transferred = await commitInventoryMutation(() => transferNotebookTo(actor, {
+                owner: ownership.owner,
+                userAccess: ownership.userAccess,
+                exists: !inventory.notebook.destroyed,
+                reason: `Notebook handed to ${actor.name || actor.type} from inventory.`,
+            }), 'Death Note transferred.');
+            if (transferred) {
+                setNotebookOpenState(false);
+            }
         })
         .off('click', '#kw-dn-inventory-link-shinigami')
         .on('click', '#kw-dn-inventory-link-shinigami', async (event) => {
