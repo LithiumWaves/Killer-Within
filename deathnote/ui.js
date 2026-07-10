@@ -1325,11 +1325,21 @@ function renderUserAccessOptions(selectedAccess) {
     }).join('');
 }
 
-function getSelectedInventoryItemKey(settings, inventory) {
+function shouldShowNotebookInInventory(inventory, ownership) {
+    return Boolean(
+        inventory?.notebook
+        && !inventory.notebook.destroyed
+        && ownership?.holder
+        && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.USER
+    );
+}
+
+function getSelectedInventoryItemKey(settings, inventory, ownership = getNotebookOwnership()) {
     const scraps = inventory.scraps.filter((scrap) => scrap && scrap.active);
     const ids = Array.isArray(inventory.ids) ? inventory.ids : [];
+    const showNotebook = shouldShowNotebookInInventory(inventory, ownership);
     const selected = String(settings.inventorySelectedItemKey || 'notebook').trim();
-    if (!selected || selected === 'notebook') {
+    if ((!selected || selected === 'notebook') && showNotebook) {
         return 'notebook';
     }
 
@@ -1347,27 +1357,37 @@ function getSelectedInventoryItemKey(settings, inventory) {
         }
     }
 
-    return 'notebook';
+    if (scraps.length) {
+        return `scrap:${scraps[0].id}`;
+    }
+
+    if (ids.length) {
+        return `id:${ids[0].id}`;
+    }
+
+    return showNotebook ? 'notebook' : '';
 }
 
-function renderInventoryGridSlots(inventory, selectedKey, coverUrl) {
+function renderInventoryGridSlots(inventory, ownership, selectedKey, coverUrl) {
     const slots = [];
-    slots.push(`
-        <button
-            type="button"
-            class="kw-dn-inventory__slot ${selectedKey === 'notebook' ? 'is-selected' : ''} ${inventory.notebook.destroyed ? 'is-disabled' : ''}"
-            data-item-key="notebook"
-            aria-pressed="${selectedKey === 'notebook' ? 'true' : 'false'}"
-        >
-            <img
-                class="kw-dn-inventory__slot-art"
-                src="${coverUrl}"
-                alt="Death Note cover"
-                draggable="false"
-            />
-            <span class="kw-dn-inventory__slot-label">Death Note</span>
-        </button>
-    `);
+    if (shouldShowNotebookInInventory(inventory, ownership)) {
+        slots.push(`
+            <button
+                type="button"
+                class="kw-dn-inventory__slot ${selectedKey === 'notebook' ? 'is-selected' : ''} ${inventory.notebook.destroyed ? 'is-disabled' : ''}"
+                data-item-key="notebook"
+                aria-pressed="${selectedKey === 'notebook' ? 'true' : 'false'}"
+            >
+                <img
+                    class="kw-dn-inventory__slot-art"
+                    src="${coverUrl}"
+                    alt="Death Note cover"
+                    draggable="false"
+                />
+                <span class="kw-dn-inventory__slot-label">Death Note</span>
+            </button>
+        `);
+    }
 
     const scraps = inventory.scraps.filter((scrap) => scrap && scrap.active);
     for (const scrap of scraps) {
@@ -1468,40 +1488,43 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                     class="menu_button kw-dn-inventory__context-action"
                 >${settings.showFloatingButton ? 'Hide Button' : 'Show Button'}</button>
             </div>
-            <div class="kw-dn-inventory__context-link">
-                <select
-                    id="kw-dn-inventory-give-select"
-                    class="text_pole kw-dn-inventory__context-select"
-                    ${canTransferNotebook ? '' : 'disabled'}
-                >
-                    ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
-                </select>
-                <button
-                    type="button"
-                    id="kw-dn-inventory-give-notebook"
-                    class="menu_button kw-dn-inventory__context-action"
-                    ${canTransferNotebook ? '' : 'disabled'}
-                >Give</button>
-            </div>
-            <div class="kw-dn-inventory__context-link">
-                <select
-                    id="kw-dn-inventory-shinigami-select"
-                    class="text_pole kw-dn-inventory__context-select"
-                >
-                    ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
-                </select>
-                <button
-                    type="button"
-                    id="kw-dn-inventory-link-shinigami"
-                    class="menu_button kw-dn-inventory__context-action"
-                >Link Shinigami</button>
-                <button
-                    type="button"
-                    id="kw-dn-inventory-unlink-shinigami"
-                    class="menu_button kw-dn-inventory__context-action"
-                    ${linked.active ? '' : 'disabled'}
-                >Clear Link</button>
-            </div>
+            <details class="kw-dn-inventory__context-advanced">
+                <summary class="kw-dn-inventory__context-meta">Transfer And Shinigami</summary>
+                <div class="kw-dn-inventory__context-link">
+                    <select
+                        id="kw-dn-inventory-give-select"
+                        class="text_pole kw-dn-inventory__context-select"
+                        ${canTransferNotebook ? '' : 'disabled'}
+                    >
+                        ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
+                    </select>
+                    <button
+                        type="button"
+                        id="kw-dn-inventory-give-notebook"
+                        class="menu_button kw-dn-inventory__context-action"
+                        ${canTransferNotebook ? '' : 'disabled'}
+                    >Give</button>
+                </div>
+                <div class="kw-dn-inventory__context-link">
+                    <select
+                        id="kw-dn-inventory-shinigami-select"
+                        class="text_pole kw-dn-inventory__context-select"
+                    >
+                        ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
+                    </select>
+                    <button
+                        type="button"
+                        id="kw-dn-inventory-link-shinigami"
+                        class="menu_button kw-dn-inventory__context-action"
+                    >Link Shinigami</button>
+                    <button
+                        type="button"
+                        id="kw-dn-inventory-unlink-shinigami"
+                        class="menu_button kw-dn-inventory__context-action"
+                        ${linked.active ? '' : 'disabled'}
+                    >Clear Link</button>
+                </div>
+            </details>
         </div>
     `;
 }
@@ -1579,7 +1602,20 @@ function renderIdentityCardSelectionPanel(idCard) {
 }
 
 function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
-    const selectedKey = getSelectedInventoryItemKey(settings, inventory);
+    const selectedKey = getSelectedInventoryItemKey(settings, inventory, ownership);
+    if (!selectedKey) {
+        return `
+            <div class="kw-dn-inventory__context-card kw-dn-inventory__context-card--id">
+                <div class="kw-dn-inventory__context-head">
+                    <div>
+                        <div class="kw-dn-inventory__item-eyebrow">Inventory</div>
+                        <div class="kw-dn-inventory__context-title">No Death Note Held</div>
+                    </div>
+                    <div class="kw-dn-inventory__context-meta">Notebook is currently elsewhere</div>
+                </div>
+            </div>
+        `;
+    }
     if (selectedKey === 'notebook') {
         return renderNotebookSelectionPanel({ settings, inventory, ownership, linked });
     }
@@ -1611,10 +1647,10 @@ function renderInventoryTrayHtml() {
     const inventory = getDeathNoteInventory();
     const linked = getLinkedShinigami();
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
-    const itemCount = (inventory.notebook.destroyed ? 0 : 1)
+    const itemCount = (shouldShowNotebookInInventory(inventory, ownership) ? 1 : 0)
         + inventory.scraps.filter((scrap) => scrap && scrap.active).length
         + (Array.isArray(inventory.ids) ? inventory.ids.length : 0);
-    const selectedKey = getSelectedInventoryItemKey(settings, inventory);
+    const selectedKey = getSelectedInventoryItemKey(settings, inventory, ownership);
 
     return `
         <div class="kw-dn-inventory__shell ${settings.inventoryCollapsed ? 'is-collapsed' : ''}">
@@ -1640,7 +1676,7 @@ function renderInventoryTrayHtml() {
                 <div class="kw-dn-inventory__layout">
                     <div class="kw-dn-inventory__grid-wrap">
                         <div class="kw-dn-inventory__grid">
-                            ${renderInventoryGridSlots(inventory, selectedKey, coverUrl)}
+                            ${renderInventoryGridSlots(inventory, ownership, selectedKey, coverUrl)}
                         </div>
                     </div>
                     <section class="kw-dn-inventory__context">
@@ -1993,6 +2029,28 @@ function bindSettingsUi() {
     $('#kw-deathnote-show-ai-write-debug-blocks').off('change').on('change', (event) => {
         getSettings().showAiWriteDebugBlocks = Boolean($(event.currentTarget).prop('checked'));
         scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-debug-retrieve-notebook').off('click').on('click', async (event) => {
+        event.preventDefault();
+        const inventory = getDeathNoteInventory();
+        if (inventory.notebook.destroyed) {
+            notify('warning', 'The Death Note is destroyed or missing.');
+            return;
+        }
+
+        const settings = getSettings();
+        const ownership = getNotebookOwnership();
+        const retrieved = await commitInventoryMutation(() => transferNotebookTo(getUserActor(), {
+            owner: ownership.owner,
+            userAccess: NOTEBOOK_USER_ACCESS.FULL,
+            exists: true,
+            reason: 'Notebook forcibly retrieved via debug settings.',
+        }), 'Death Note retrieved.');
+        if (retrieved) {
+            settings.inventorySelectedItemKey = 'notebook';
+            scheduleSettingsSave();
+        }
     });
 
     $('#kw-deathnote-prompt-template').off('input').on('input', (event) => {
@@ -2420,6 +2478,9 @@ function renderInventorySettingsContentHtml() {
                         </label>
                         <div class="killer-within-settings__field">
                             <small>When disabled, the module strips parsed AI write blocks from chat after applying them to the notebook.</small>
+                        </div>
+                        <div class="killer-within-settings__field">
+                            <button type="button" id="kw-deathnote-debug-retrieve-notebook" class="menu_button">Retrieve Death Note</button>
                         </div>
                     </div>
                 </details>
