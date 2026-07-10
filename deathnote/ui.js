@@ -2557,18 +2557,12 @@ function renderInventoryManageContentHtml() {
     const inventory = getDeathNoteInventory();
     const linked = getLinkedShinigami();
     const request = getNotebookReturnRequest();
-    const notebookAvailable = !inventory.notebook.destroyed;
-    const canGive = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
     const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
     const requestMatchesHolder = Boolean(
         request.active
         && holder
         && String(request.actor?.name || '').trim().toLowerCase() === String(holder.name || '').trim().toLowerCase(),
     );
-    const transferChoices = getActorChoices({
-        includeUser: false,
-        includeWorld: false,
-    });
     const linkChoices = getActorChoices({
         includeUser: false,
         includeCharacters: true,
@@ -2583,46 +2577,47 @@ function renderInventoryManageContentHtml() {
         id: linked.avatar || linked.actor.id,
         name: linked.actor.name,
     } : null;
+    const ownerLabel = formatActorLabel(ownership.owner);
+    const holderLabel = formatActorLabel(ownership.holder);
+    const accessLabel = formatAccessLabel(ownership.userAccess);
+    const linkedLabel = linked.active ? formatActorLabel(linked.actor) : 'None';
+    const notebookStatus = inventory.notebook.destroyed ? 'Destroyed / missing' : 'In play';
+    const notebookStateLabel = inventory.notebook.destroyed ? 'Missing' : `Held by ${holderLabel}`;
 
     return `
         <div class="kw-dn-settings-modal__sections">
             <section class="kw-dn-settings-modal__section">
                 <div class="kw-dn-settings-modal__section-head">
-                    <div class="kw-dn-settings-modal__eyebrow">Notebook</div>
-                    <div class="kw-dn-settings-modal__section-title">Death Note Assignment</div>
+                    <div class="kw-dn-settings-modal__eyebrow">Registry</div>
+                    <div class="kw-dn-settings-modal__section-title">Death Note Creation & Ownership</div>
                 </div>
                 <div class="kw-dn-settings-modal__section-body">
                     <div class="kw-deathnote-manager">
                         <div class="kw-deathnote-manager__summary">
-                            <span><b>Owner:</b> ${escapeHtml(formatActorLabel(ownership.owner))}</span>
-                            <span><b>Holder:</b> ${escapeHtml(formatActorLabel(ownership.holder))}</span>
-                            <span><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
-                            <span><b>Status:</b> ${inventory.notebook.destroyed ? 'Destroyed / missing' : 'In play'}</span>
-                            <span><b>Linked:</b> ${escapeHtml(linked.active ? formatActorLabel(linked.actor) : 'None')}</span>
+                            <span><b>Purpose:</b> Track each created Death Note by owner and current holder.</span>
+                            <span><b>Recovery:</b> Return requests stay attached to the notebook currently in someone else's hands.</span>
                         </div>
-                        <div class="kw-deathnote-manager__actions">
-                            <label class="killer-within-settings__field kw-deathnote-manager__grow">
-                                <span>Give Death Note to</span>
-                                <select id="kw-dn-manage-give-select" class="text_pole" ${canGive ? '' : 'disabled'}>
-                                    ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
-                                </select>
-                            </label>
-                            <button type="button" id="kw-dn-manage-give-notebook" class="menu_button" ${canGive ? '' : 'disabled'}>Give</button>
-                        </div>
-                        ${holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
-                            <div class="kw-deathnote-manager__actions">
-                                <div class="kw-deathnote-manager__grow kw-deathnote-manager__summary">
-                                    <span><b>Request return from:</b> ${escapeHtml(formatActorInventoryLabel(holder))}</span>
+                        <div class="kw-deathnote-manager__list">
+                            <div class="kw-deathnote-item">
+                                <div class="kw-deathnote-item__meta">
+                                    <b>Current Death Note</b>
+                                    <span>${escapeHtml(`Belongs to ${ownerLabel} | Held by ${holderLabel}`)}</span>
+                                    <span>${escapeHtml(`User access: ${accessLabel} | Status: ${notebookStatus} | Linked Shinigami: ${linkedLabel}`)}</span>
                                 </div>
-                                <button
-                                    type="button"
-                                    id="kw-dn-manage-request-return"
-                                    class="menu_button"
-                                    data-actor="${escapeHtml(encodeActorValue(holder))}"
-                                    ${requestMatchesHolder ? 'disabled' : ''}
-                                >${requestMatchesHolder ? 'Return Requested' : 'Request Return'}</button>
+                                <span class="kw-deathnote-name-state">${escapeHtml(notebookStateLabel)}</span>
+                                <div class="kw-deathnote-item__actions">
+                                    ${holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
+                                        <button
+                                            type="button"
+                                            id="kw-dn-manage-request-return"
+                                            class="menu_button"
+                                            data-actor="${escapeHtml(encodeActorValue(holder))}"
+                                            ${requestMatchesHolder ? 'disabled' : ''}
+                                        >${requestMatchesHolder ? 'Return Requested' : `Request Return From ${escapeHtml(formatActorInventoryLabel(holder))}`}</button>
+                                    ` : ''}
+                                </div>
                             </div>
-                        ` : ''}
+                        </div>
                         <div class="kw-deathnote-manager__actions">
                             <button type="button" id="kw-dn-manage-toggle-floating" class="menu_button">${settings.showFloatingButton ? 'Hide floating button' : 'Show floating button'}</button>
                         </div>
@@ -3536,32 +3531,6 @@ function bindInventoryUi() {
                 userAccess: ownership.userAccess,
                 exists: !inventory.notebook.destroyed,
                 reason: `Notebook handed to ${actor.name || actor.type} from inventory.`,
-            }), 'Death Note transferred.');
-            if (transferred) {
-                setNotebookOpenState(false);
-            }
-        })
-        .off('click', '#kw-dn-manage-give-notebook')
-        .on('click', '#kw-dn-manage-give-notebook', async (event) => {
-            event.preventDefault();
-            const inventory = getDeathNoteInventory();
-            const ownership = getNotebookOwnership();
-            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
-                notify('warning', 'You need full notebook access to hand the Death Note to someone else.');
-                return;
-            }
-
-            const actor = decodeActorValue($('#kw-dn-manage-give-select').val(), null);
-            if (!actor) {
-                notify('warning', 'Select an active character to receive the Death Note.');
-                return;
-            }
-
-            const transferred = await commitInventoryMutation(() => transferNotebookTo(actor, {
-                owner: ownership.owner,
-                userAccess: ownership.userAccess,
-                exists: !inventory.notebook.destroyed,
-                reason: `Notebook handed to ${actor.name || actor.type} via manager.`,
             }), 'Death Note transferred.');
             if (transferred) {
                 setNotebookOpenState(false);
