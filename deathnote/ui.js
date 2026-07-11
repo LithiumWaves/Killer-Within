@@ -2684,18 +2684,40 @@ function renderInventorySettingsModalHtml() {
 function renderInventoryManageContentHtml() {
     const settings = getSettings();
     const inventory = getDeathNoteInventory();
-    const notebooks = getDeathNotes();
+    const selectedNotebookId = resolveUiNotebookId(settings.selectedNotebookId);
+    const notebooks = [...getDeathNotes()].sort((left, right) => {
+        const leftSelected = String(left?.itemId || '') === selectedNotebookId ? 1 : 0;
+        const rightSelected = String(right?.itemId || '') === selectedNotebookId ? 1 : 0;
+        if (leftSelected !== rightSelected) {
+            return rightSelected - leftSelected;
+        }
+
+        const leftReadable = getNotebookOwnership(left?.itemId).userAccess === NOTEBOOK_USER_ACCESS.FULL ? 1 : 0;
+        const rightReadable = getNotebookOwnership(right?.itemId).userAccess === NOTEBOOK_USER_ACCESS.FULL ? 1 : 0;
+        if (leftReadable !== rightReadable) {
+            return rightReadable - leftReadable;
+        }
+
+        return String(left?.label || '').localeCompare(String(right?.label || ''));
+    });
     const createChoices = getActorChoices({
         includeUser: true,
         includeCharacters: true,
         includeWorld: false,
     });
     const activeCount = notebooks.filter((entry) => entry && !entry.destroyed).length;
+    const readableCount = notebooks.filter((entry) => getNotebookOwnership(entry?.itemId).userAccess === NOTEBOOK_USER_ACCESS.FULL && !entry?.destroyed).length;
+    const awayCount = notebooks.filter((entry) => {
+        const ownership = getNotebookOwnership(entry?.itemId);
+        return !entry?.destroyed && ownership.holder?.type !== NOTEBOOK_ACTOR_TYPES.USER;
+    }).length;
     const canCreate = activeCount < 7;
     const rows = notebooks.map((notebook) => {
         const ownership = getNotebookOwnership(notebook.itemId);
         const linked = getLinkedShinigami(notebook.itemId);
         const request = getNotebookReturnRequest(notebook.itemId);
+        const isSelected = notebook.itemId === selectedNotebookId;
+        const isUserReadable = ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL && !notebook.destroyed;
         const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
         const requestMatchesHolder = Boolean(
             request.active
@@ -2704,14 +2726,39 @@ function renderInventoryManageContentHtml() {
         );
         const statusLabel = notebook.destroyed ? 'Destroyed / missing' : `Held by ${formatActorLabel(ownership.holder)}`;
         return `
-            <div class="kw-deathnote-item">
-                <div class="kw-deathnote-item__meta">
-                    <b>${escapeHtml(notebook.label || 'Death Note')}</b>
-                    <span>${escapeHtml(`Belongs to ${formatActorLabel(ownership.owner)} | Held by ${formatActorLabel(ownership.holder)}`)}</span>
-                    <span>${escapeHtml(`User access: ${formatAccessLabel(ownership.userAccess)} | Linked Shinigami: ${linked.active ? formatActorLabel(linked.actor) : 'None'}`)}</span>
+            <div class="kw-deathnote-item ${isSelected ? 'is-selected' : ''}">
+                <div class="kw-deathnote-item__head">
+                    <div class="kw-deathnote-item__title-wrap">
+                        <b class="kw-deathnote-item__title">${escapeHtml(notebook.label || 'Death Note')}</b>
+                        <span class="kw-deathnote-name-state">${escapeHtml(statusLabel)}</span>
+                    </div>
+                    <div class="kw-deathnote-item__badges">
+                        ${isSelected ? '<span class="kw-deathnote-item__badge is-selected">Selected</span>' : ''}
+                        ${isUserReadable ? '<span class="kw-deathnote-item__badge is-readable">Readable</span>' : ''}
+                        ${requestMatchesHolder ? '<span class="kw-deathnote-item__badge is-pending">Return queued</span>' : ''}
+                        ${linked.active ? '<span class="kw-deathnote-item__badge is-linked">Shinigami linked</span>' : ''}
+                        ${notebook.destroyed ? '<span class="kw-deathnote-item__badge is-destroyed">Destroyed</span>' : ''}
+                    </div>
                 </div>
-                <span class="kw-deathnote-name-state">${escapeHtml(statusLabel)}</span>
+                <div class="kw-deathnote-item__meta-grid">
+                    <span class="kw-deathnote-item__meta-line"><b>Owner:</b> ${escapeHtml(formatActorLabel(ownership.owner))}</span>
+                    <span class="kw-deathnote-item__meta-line"><b>Holder:</b> ${escapeHtml(formatActorLabel(ownership.holder))}</span>
+                    <span class="kw-deathnote-item__meta-line"><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
+                    <span class="kw-deathnote-item__meta-line"><b>Linked Shinigami:</b> ${escapeHtml(linked.active ? formatActorLabel(linked.actor) : 'None')}</span>
+                </div>
                 <div class="kw-deathnote-item__actions">
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-manage-select-note"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                    >${isSelected ? 'Current Note' : 'Make Current'}</button>
+                    ${isUserReadable ? `
+                        <button
+                            type="button"
+                            class="menu_button kw-dn-manage-open-note"
+                            data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        >Open Notebook</button>
+                    ` : ''}
                     ${holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
                         <button
                             type="button"
@@ -2737,6 +2784,8 @@ function renderInventoryManageContentHtml() {
                     <div class="kw-deathnote-manager">
                         <div class="kw-deathnote-manager__summary">
                             <span><b>Active notebooks:</b> ${activeCount} / 7</span>
+                            <span><b>User-readable:</b> ${readableCount}</span>
+                            <span><b>Away from user:</b> ${awayCount}</span>
                             <span><b>Purpose:</b> Create distinct Death Notes and keep ownership visible per notebook.</span>
                         </div>
                         <div class="kw-deathnote-manager__actions">
@@ -2747,9 +2796,11 @@ function renderInventoryManageContentHtml() {
                                 </select>
                             </label>
                             <button type="button" id="kw-dn-manage-create-notebook" class="menu_button" ${canCreate ? '' : 'disabled'}>Create Death Note</button>
+                            <button type="button" id="kw-dn-manage-create-user-notebook" class="menu_button" ${canCreate ? '' : 'disabled'}>Create for User</button>
                         </div>
                         <div class="kw-deathnote-manager__list">${rows}</div>
                         <div class="kw-deathnote-manager__actions">
+                            <button type="button" id="kw-dn-manage-open-selected" class="menu_button" ${inventory.notebook.userAccess === NOTEBOOK_USER_ACCESS.FULL && !inventory.notebook.destroyed ? '' : 'disabled'}>Open selected notebook</button>
                             <button type="button" id="kw-dn-manage-toggle-floating" class="menu_button">${settings.showFloatingButton ? 'Hide floating button' : 'Show floating button'}</button>
                         </div>
                     </div>
@@ -2762,7 +2813,7 @@ function renderInventoryManageContentHtml() {
 function renderInventoryManageModalHtml() {
     return `
         <div class="kw-dn-settings-modal__backdrop" data-close-manage-modal="true">
-            <div class="kw-dn-settings-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
+            <div class="kw-dn-settings-modal__dialog kw-dn-settings-modal__dialog--manage" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
                 <div class="kw-dn-settings-modal__header">
                     <div>
                         <div class="kw-dn-settings-modal__eyebrow">Killer Within</div>
@@ -3193,6 +3244,7 @@ function commitVisibleNotebookDrafts(state) {
 }
 
 function runPageTurn(direction, callback) {
+    stopWritingSound(false);
     const root = document.getElementById(FLOATING_ID);
     if (!root) {
         callback();
@@ -3330,6 +3382,7 @@ function bindWidgetUi() {
                     state.handlersInstalled = false;
 
                     if (!state.moved && state.toggleOnTap) {
+                        stopWritingSound(false);
                         commitVisibleNotebookDrafts(state);
                         const settings = getSettings();
                         setNotebookOpenState(!settings.isOpen);
@@ -3697,6 +3750,56 @@ function bindInventoryUi() {
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
+        .off('click', '.kw-dn-manage-select-note')
+        .on('click', '.kw-dn-manage-select-note', (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const settings = getSettings();
+            const ownership = getNotebookOwnership(notebookId);
+            settings.selectedNotebookId = notebookId;
+            if (ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL) {
+                settings.inventorySelectedItemKey = `notebook:${notebookId}`;
+            }
+            setSelectedNotebookId(notebookId);
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '.kw-dn-manage-open-note')
+        .on('click', '.kw-dn-manage-open-note', (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const ownership = getNotebookOwnership(notebookId);
+            if (ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+                notify('warning', 'You cannot open a notebook unless the user can currently read it.');
+                return;
+            }
+            const settings = getSettings();
+            settings.selectedNotebookId = notebookId;
+            settings.inventorySelectedItemKey = `notebook:${notebookId}`;
+            settings.isOpen = true;
+            inventoryManageOpen = false;
+            setSelectedNotebookId(notebookId);
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '#kw-dn-manage-open-selected')
+        .on('click', '#kw-dn-manage-open-selected', (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId(getSettings().selectedNotebookId);
+            const ownership = getNotebookOwnership(notebookId);
+            if (ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+                notify('warning', 'The selected notebook is not currently readable by the user.');
+                return;
+            }
+            const settings = getSettings();
+            settings.selectedNotebookId = notebookId;
+            settings.inventorySelectedItemKey = `notebook:${notebookId}`;
+            settings.isOpen = true;
+            inventoryManageOpen = false;
+            setSelectedNotebookId(notebookId);
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
         .off('click', '#kw-dn-inventory-give-notebook')
         .on('click', '#kw-dn-inventory-give-notebook', async (event) => {
             event.preventDefault();
@@ -3805,6 +3908,25 @@ function bindInventoryUi() {
                 const settings = getSettings();
                 settings.selectedNotebookId = created.itemId;
                 settings.inventorySelectedItemKey = actor.type === NOTEBOOK_ACTOR_TYPES.USER ? `notebook:${created.itemId}` : settings.inventorySelectedItemKey;
+                setSelectedNotebookId(created.itemId);
+                scheduleSettingsSave();
+                refreshDeathNoteUi();
+            }
+        })
+        .off('click', '#kw-dn-manage-create-user-notebook')
+        .on('click', '#kw-dn-manage-create-user-notebook', async (event) => {
+            event.preventDefault();
+            const actor = getUserActor();
+            const created = await commitInventoryMutation(() => createDeathNote({
+                owner: actor,
+                holder: actor,
+                userAccess: NOTEBOOK_USER_ACCESS.FULL,
+                reason: 'The user received a newly created Death Note.',
+            }), 'Death Note created for the user.');
+            if (created?.itemId) {
+                const settings = getSettings();
+                settings.selectedNotebookId = created.itemId;
+                settings.inventorySelectedItemKey = `notebook:${created.itemId}`;
                 setSelectedNotebookId(created.itemId);
                 scheduleSettingsSave();
                 refreshDeathNoteUi();
