@@ -541,6 +541,7 @@ function setNotebookOpenState(nextOpen) {
     const settings = getSettings();
     const root = document.getElementById(FLOATING_ID);
     const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+    const ownership = notebookId ? getNotebookOwnership(notebookId) : null;
     let anchorX = null;
     let anchorY = null;
 
@@ -571,6 +572,9 @@ function setNotebookOpenState(nextOpen) {
     }
 
     settings.isOpen = Boolean(nextOpen);
+    if (!nextOpen && ownership?.holder?.type !== NOTEBOOK_ACTOR_TYPES.USER) {
+        selectPreferredUserNotebook();
+    }
     scheduleSettingsSave();
     if (nextOpen) {
         playNotebookOpenSound();
@@ -1429,6 +1433,54 @@ function getUserHeldNotebookItems(inventory) {
 function getNotebookSummaryById(inventory, notebookId) {
     const targetId = String(notebookId || '').trim();
     return (Array.isArray(inventory?.notebooks) ? inventory.notebooks : []).find((entry) => entry && entry.itemId === targetId) || null;
+}
+
+function getNotebookOrderRank(notebook) {
+    const itemId = String(notebook?.itemId || '').trim().toLowerCase();
+    if (itemId === 'death-note-main') {
+        return 1;
+    }
+
+    const label = String(notebook?.label || '').trim();
+    const labelMatch = /^Death Note(?:\s+(\d+))?$/i.exec(label);
+    if (labelMatch) {
+        return Number(labelMatch[1] || 1);
+    }
+
+    const numericMatch = label.match(/(\d+)/);
+    if (numericMatch) {
+        return Number(numericMatch[1]);
+    }
+
+    return Number.MAX_SAFE_INTEGER;
+}
+
+function selectPreferredUserNotebook({ closeIfMissing = false } = {}) {
+    const settings = getSettings();
+    const inventory = getDeathNoteInventory();
+    const candidates = getUserHeldNotebookItems(inventory).slice().sort((left, right) => {
+        const rankDiff = getNotebookOrderRank(left) - getNotebookOrderRank(right);
+        if (rankDiff !== 0) {
+            return rankDiff;
+        }
+        return String(left?.label || '').localeCompare(String(right?.label || ''));
+    });
+    const preferred = candidates[0] || null;
+    if (!preferred?.itemId) {
+        settings.selectedNotebookId = '';
+        if (String(settings.inventorySelectedItemKey || '').startsWith('notebook')) {
+            settings.inventorySelectedItemKey = 'notebook';
+        }
+        if (closeIfMissing) {
+            settings.isOpen = false;
+        }
+        return '';
+    }
+
+    settings.selectedNotebookId = preferred.itemId;
+    settings.inventorySelectedItemKey = `notebook:${preferred.itemId}`;
+    setSelectedNotebookId(preferred.itemId);
+    return preferred.itemId;
 }
 
 function resolveUiNotebookId(preferredId = '') {
@@ -3817,6 +3869,9 @@ function bindInventoryUi() {
                 notebookItemId: notebookId,
                 reason: 'Death Note destroyed via manager.',
             }), 'Death Note destroyed.');
+            selectPreferredUserNotebook({ closeIfMissing: true });
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
         })
         .off('click', '#kw-dn-inventory-give-notebook')
         .on('click', '#kw-dn-inventory-give-notebook', async (event) => {

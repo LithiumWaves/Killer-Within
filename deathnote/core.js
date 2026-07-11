@@ -274,7 +274,7 @@ function normalizeNotebookCollection(rawNotebooks, state = {}) {
         collection.push(notebook);
     }
 
-    if (!collection.length) {
+    if (!collection.length && !Array.isArray(rawNotebooks)) {
         const migrated = normalizeNotebookState(buildLegacyNotebookState(state), 0);
         collection.push(migrated);
     }
@@ -303,8 +303,11 @@ function getSelectedNotebookId(state) {
         return requested;
     }
     const notebooks = Array.isArray(state?.notebooks) ? state.notebooks : [];
+    if (!notebooks.length) {
+        return '';
+    }
     const firstExisting = notebooks.find((entry) => entry && !entry.destroyed);
-    return String(firstExisting?.itemId || notebooks[0]?.itemId || createDefaultNotebookState().itemId).trim();
+    return String(firstExisting?.itemId || notebooks[0]?.itemId || '').trim();
 }
 
 function getNotebookById(state, notebookId = '') {
@@ -2825,29 +2828,33 @@ export function transferNotebookTo(holder, options = {}) {
 
 export function destroyNotebook(options = {}) {
     const state = getChatState();
-    const notebook = getNotebookById(state, options.notebookItemId);
-    if (!notebook) {
+    const notebookIndex = getNotebookIndexById(state, options.notebookItemId);
+    if (notebookIndex < 0) {
         return false;
     }
+    const notebook = state.notebooks[notebookIndex];
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
     const wasAvailable = Boolean(notebook.exists) || !notebook.destroyed;
     if (!wasAvailable) {
         return false;
     }
 
-    notebook.exists = false;
-    notebook.destroyed = true;
-    notebook.userAccess = NOTEBOOK_USER_ACCESS.NONE;
-    notebook.lastTransferredAt = timestamp;
-    notebook.updatedAt = timestamp;
+    const removedNotebook = {
+        ...notebook,
+        owner: cloneActorRef(notebook.owner, notebook.owner?.type, notebook.owner?.name),
+        holder: cloneActorRef(notebook.holder, notebook.holder?.type, notebook.holder?.name),
+    };
+    state.notebooks.splice(notebookIndex, 1);
+    state.selectedNotebookId = getSelectedNotebookId(state);
+    state.hasNotebook = state.notebooks.length > 0;
     syncInventoryWithOwnership(state);
     refreshUserNotebookAccess(state, NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'destroy_notebook',
-        itemId: notebook.itemId,
+        itemId: removedNotebook.itemId,
         detail: String(options.reason || '').trim() || 'Notebook destroyed or removed from play.',
-        actor: notebook.holder,
-        target: notebook.owner,
+        actor: removedNotebook.holder,
+        target: removedNotebook.owner,
         timestamp,
     });
     return true;
