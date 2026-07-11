@@ -1556,6 +1556,18 @@ export function getChatState() {
         state.hasNotebook = true;
     }
 
+    const rawSelectedNotebookId = String(state?.selectedNotebookId || '').trim();
+    const rawSelectedNotebook = Array.isArray(state?.notebooks)
+        ? state.notebooks.find((entry) => String(entry?.itemId || '').trim() === rawSelectedNotebookId)
+        : null;
+    const rawSelectedPreview = String(rawSelectedNotebook?.pages?.[0] ?? rawSelectedNotebook?.text ?? '').slice(0, 80);
+    const legacyPreview = String(state?.notebookPages?.[0] ?? state?.notebookText ?? '').slice(0, 80);
+    if (legacyPreview || rawSelectedPreview) {
+        // #region debug-point D:chat-state-before-normalize
+        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:getChatState:before-normalize",msg:"[DEBUG] chat state before notebook normalization",data:{rawSelectedNotebookId,rawNotebookCount:Array.isArray(state?.notebooks)?state.notebooks.length:0,rawSelectedPreview,legacyPreview},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+    }
+
     state.notebooks = normalizeNotebookCollection(state.notebooks, state);
     state.selectedNotebookId = getSelectedNotebookId(state);
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
@@ -3436,6 +3448,13 @@ export function getNotebookPages(notebookId = '') {
     const notebook = getNotebookById(state, notebookId);
     if (!notebook) {
         return [''];
+    }
+    const legacyPreview = String(state?.notebookPages?.[0] ?? state?.notebookText ?? '').slice(0, 80);
+    const notebookPreview = String(notebook?.pages?.[0] ?? notebook?.text ?? '').slice(0, 80);
+    if (legacyPreview || notebookPreview) {
+        // #region debug-point D:get-notebook-pages
+        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:getNotebookPages",msg:"[DEBUG] getNotebookPages resolved notebook content",data:{requestedNotebookId:String(notebookId||''),resolvedNotebookId:String(notebook?.itemId||''),selectedNotebookId:String(state?.selectedNotebookId||''),notebookPreview,legacyPreview,pageCount:Array.isArray(notebook?.pages)?notebook.pages.length:0},ts:Date.now()})}).catch(()=>{});
+        // #endregion
     }
     notebook.pages = normalizeNotebookPages(notebook.pages, notebook.text ?? '');
     notebook.text = notebook.pages.join('');
