@@ -73,6 +73,8 @@ let chatNameMaskObserver = null;
 let chatNameMaskQueued = false;
 let inventorySettingsOpen = false;
 let inventoryManageOpen = false;
+let notebookPageSessionCache = new Map();
+let notebookPageSessionKey = '';
 let inventoryDragState = {
     dragging: false,
     startX: 0,
@@ -93,6 +95,75 @@ let deathNoteAudioState = {
     writingStopTimer: null,
 };
 let deathNoteNoticeTimer = null;
+
+function getNotebookPageSessionKey() {
+    const context = getContext();
+    if (!context) {
+        return 'global';
+    }
+
+    const chatId = String(context.chatId ?? '').trim();
+    const groupId = String(context.groupId ?? '').trim();
+    const characterId = Number.isFinite(Number(context.characterId))
+        ? `character:${Number(context.characterId)}`
+        : '';
+    return [chatId && `chat:${chatId}`, groupId && `group:${groupId}`, characterId].filter(Boolean).join('|') || 'global';
+}
+
+function syncNotebookPageSessionCache() {
+    const nextKey = getNotebookPageSessionKey();
+    if (nextKey === notebookPageSessionKey) {
+        return;
+    }
+
+    notebookPageSessionKey = nextKey;
+    notebookPageSessionCache = new Map();
+}
+
+function cloneNotebookPagesForUi(pages) {
+    if (!Array.isArray(pages) || !pages.length) {
+        return [''];
+    }
+
+    return pages.map((page) => String(page ?? ''));
+}
+
+function getNotebookPagesScore(pages) {
+    const normalized = cloneNotebookPagesForUi(pages);
+    return normalized.join('').length + (normalized.length * 1000);
+}
+
+function getUiNotebookPages(notebookId) {
+    syncNotebookPageSessionCache();
+    const key = String(notebookId || '').trim();
+    const corePages = cloneNotebookPagesForUi(getNotebookPages(notebookId));
+    if (!key) {
+        return corePages;
+    }
+
+    const cachedPages = notebookPageSessionCache.get(key);
+    if (!cachedPages) {
+        notebookPageSessionCache.set(key, corePages);
+        return cloneNotebookPagesForUi(corePages);
+    }
+
+    if (getNotebookPagesScore(corePages) > getNotebookPagesScore(cachedPages)) {
+        notebookPageSessionCache.set(key, corePages);
+        return cloneNotebookPagesForUi(corePages);
+    }
+
+    return cloneNotebookPagesForUi(cachedPages);
+}
+
+function setUiNotebookPages(notebookId, pages) {
+    syncNotebookPageSessionCache();
+    const key = String(notebookId || '').trim();
+    const normalized = cloneNotebookPagesForUi(pages);
+    if (key) {
+        notebookPageSessionCache.set(key, normalized);
+    }
+    return cloneNotebookPagesForUi(normalized);
+}
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -2825,7 +2896,7 @@ function buildWidgetHtml() {
     const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
     const settings = getSettings();
     const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
-    const pages = ensurePageCapacity(getNotebookPages(notebookId), 0);
+    const pages = ensurePageCapacity(getUiNotebookPages(notebookId), 0);
     const currentSpreadIndex = getClampedSpreadIndex(pages);
     const visible = getVisiblePageIndices(currentSpreadIndex);
     const expandedPages = ensurePageCapacity(pages, visible.rightPageIndex);
@@ -3011,7 +3082,7 @@ function commitNotebookTextareaValue(textarea, state, {
         return false;
     }
 
-    const pages = ensurePageCapacity(getNotebookPages(notebookId), pageIndex);
+    const pages = ensurePageCapacity(getUiNotebookPages(notebookId), pageIndex);
     const settings = getSettings();
     const currentSpreadIndex = getClampedSpreadIndex(pages);
     const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
@@ -3025,7 +3096,7 @@ function commitNotebookTextareaValue(textarea, state, {
     }
     syncPermanentLineOverlay(textarea, 'notebook', `notebook:${notebookId}:page:${pageIndex}`, value);
     const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
-    const nextPages = sanitizeNotebookPagesForRules(update.pages);
+    const nextPages = setUiNotebookPages(notebookId, sanitizeNotebookPagesForRules(update.pages));
     const changed = setNotebookPages(nextPages, notebookId);
     // #region debug-point C:textarea-input
     fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/ui.js:entry-textarea-input",msg:"[DEBUG] textarea input attempted notebook write",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,pageIndex,currentSpreadIndex,inputLength:value.length,changed,overflowed:Boolean(update.overflowed),beforeLeft:String(beforeVisible.left||'').slice(0,80),beforeRight:String(beforeVisible.right||'').slice(0,80),afterPagePreview:String(nextPages[pageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
@@ -3352,7 +3423,7 @@ function bindWidgetUi() {
             commitVisibleNotebookDrafts(state);
             const direction = String($(event.currentTarget).data('pageNav') || '').trim().toLowerCase();
             const notebookId = resolveUiNotebookId(getSettings().selectedNotebookId);
-            const pages = getNotebookPages(notebookId);
+            const pages = getUiNotebookPages(notebookId);
             const settings = getSettings();
             const currentSpreadIndex = getClampedSpreadIndex(pages);
             // #region debug-point A:page-turn-click
@@ -3374,7 +3445,7 @@ function bindWidgetUi() {
             if (direction === 'next') {
                 const nextSpreadIndex = currentSpreadIndex + 1;
                 const nextVisible = getVisiblePageIndices(nextSpreadIndex);
-                const expanded = ensurePageCapacity(pages, nextVisible.rightPageIndex);
+                const expanded = setUiNotebookPages(notebookId, ensurePageCapacity(pages, nextVisible.rightPageIndex));
 
                 runPageTurn('next', () => {
                     setNotebookPages(expanded, notebookId);
