@@ -12,9 +12,51 @@ import {
 
 const INVENTORY_HISTORY_LIMIT = 40;
 const ID_THEFT_COOLDOWN_MS = 5 * 60 * 1000;
+const liveChatStateCache = new Map();
 
 export function getContext() {
     return globalThis.SillyTavern?.getContext?.() ?? null;
+}
+
+function getActiveChatCacheKey(context) {
+    if (!context) {
+        return '';
+    }
+
+    const chatId = String(context?.chatId ?? '').trim();
+    if (chatId) {
+        return `chat:${chatId}`;
+    }
+
+    const groupId = String(context?.groupId ?? '').trim();
+    if (groupId) {
+        return `group:${groupId}`;
+    }
+
+    if (Number.isFinite(Number(context?.characterId))) {
+        return `character:${Number(context.characterId)}`;
+    }
+
+    return '';
+}
+
+function bindCachedChatState(context) {
+    if (!context) {
+        return createDefaultChatState();
+    }
+
+    const cacheKey = getActiveChatCacheKey(context);
+    const cachedState = cacheKey ? liveChatStateCache.get(cacheKey) : null;
+    context.chatMetadata ??= {};
+    if (cachedState && context.chatMetadata[CHAT_METADATA_KEY] !== cachedState) {
+        context.chatMetadata[CHAT_METADATA_KEY] = cachedState;
+    }
+    context.chatMetadata[CHAT_METADATA_KEY] ??= createDefaultChatState();
+    const state = context.chatMetadata[CHAT_METADATA_KEY];
+    if (cacheKey) {
+        liveChatStateCache.set(cacheKey, state);
+    }
+    return state;
 }
 
 export function getSettings() {
@@ -46,6 +88,7 @@ export function scheduleSettingsSave() {
 
 export async function persistChatChanges() {
     const context = getContext();
+    bindCachedChatState(context);
 
     try {
         if (typeof context?.saveChat === 'function') {
@@ -1535,9 +1578,7 @@ export function getChatState() {
         return createDefaultChatState();
     }
 
-    context.chatMetadata ??= {};
-    context.chatMetadata[CHAT_METADATA_KEY] ??= createDefaultChatState();
-    const state = context.chatMetadata[CHAT_METADATA_KEY];
+    const state = bindCachedChatState(context);
 
     if (!Array.isArray(state.entries)) {
         state.entries = [];

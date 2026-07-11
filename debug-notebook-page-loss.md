@@ -29,4 +29,5 @@
 
 ## Verification Conclusion
 - Applied minimal fix: reconcile notebook entries against the already-mutated live `state` object instead of calling `getChatState()` again from inside `setNotebookPages`, `setNotebookText`, and scrap writes.
+- Applied persistence fix: bind the Death Note state to the active `chatId`/group/character cache key and reattach that live object to `context.chatMetadata` on each read/save.
 - Pending post-fix user verification.
