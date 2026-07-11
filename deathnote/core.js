@@ -672,6 +672,22 @@ function getCurrentChatActorByName(name) {
     return roster.find((actor) => normalizeKnowledgeKey(actor.name) === search) || null;
 }
 
+function getKnownActorByName(name) {
+    const search = normalizeKnowledgeKey(name);
+    if (!search) {
+        return null;
+    }
+
+    const knowledge = getNameKnowledgeState();
+    const known = Array.isArray(knowledge?.known) ? knowledge.known : [];
+    const match = known.find((entry) => normalizeKnowledgeKey(entry?.actor?.name) === search);
+    return match?.actor ? normalizeActorRef(match.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, match.actor.name) : null;
+}
+
+function getResolvableActorByName(name) {
+    return getCurrentChatActorByName(name) || getKnownActorByName(name);
+}
+
 function getMessageForceAvatarFile(message) {
     const raw = String(message && message.force_avatar ? message.force_avatar : '').trim();
     if (!raw) {
@@ -975,7 +991,7 @@ function resolveDeathEntryTargetType(targetName) {
         return '';
     }
 
-    return getCurrentChatActorByName(name) ? NOTEBOOK_ACTOR_TYPES.CHARACTER : NOTEBOOK_ACTOR_TYPES.NPC;
+    return getResolvableActorByName(name) ? NOTEBOOK_ACTOR_TYPES.CHARACTER : NOTEBOOK_ACTOR_TYPES.NPC;
 }
 
 function getDeathEntrySourceKey(sourceType, sourceId, noteText) {
@@ -3212,32 +3228,26 @@ function looksLikeNameOnly(text) {
     }
 
     const lowered = value.toLowerCase();
-    const explicitTerms = [
-        ' will ',
-        ' die',
-        ' dies',
-        ' died',
-        ' killed',
-        ' kill',
-        ' heart attack',
-        ' poison',
-        ' poisoned',
-        ' stabbed',
-        ' shot',
-        ' burned',
-        ' drowned',
-        ' strangle',
-        ' suicide',
-        ' accident',
-        ' truck',
-        ' car',
-        ' next message',
-        ' minute',
-        ' hour',
-        ' day',
+    const explicitCausePatterns = [
+        /\b(?:die|dies|died)\b/i,
+        /\b(?:kill|killed)\b/i,
+        /\bheart attack\b/i,
+        /\b(?:poison|poisoned)\b/i,
+        /\bstabbed\b/i,
+        /\bshot\b/i,
+        /\bburned\b/i,
+        /\bdrowned\b/i,
+        /\bstrangle(?:d|s|ing)?\b/i,
+        /\bsuicide\b/i,
+        /\baccident\b/i,
+        /\btruck\b/i,
+        /\bcar\b/i,
+        /\bnext assistant message\b/i,
+        /\bnext message\b/i,
+        /\bwill\s+(?:die|be killed|suffer|have)\b/i,
     ];
 
-    if (explicitTerms.some((term) => lowered.includes(term.trim()) || lowered.includes(term))) {
+    if (explicitCausePatterns.some((pattern) => pattern.test(lowered))) {
         return false;
     }
 
@@ -3268,7 +3278,7 @@ function parseNotebookLine(line) {
     if (targetName) {
         const settings = getSettings();
         if (settings.requireKnownNamesForKills) {
-            const actor = getCurrentChatActorByName(targetName);
+            const actor = getResolvableActorByName(targetName);
             if (actor && !isActorNameKnown(actor)) {
                 return null;
             }
