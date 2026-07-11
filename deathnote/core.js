@@ -265,8 +265,12 @@ function getSelectedNotebookId(state) {
 }
 
 function getNotebookById(state, notebookId = '') {
-    const selectedId = String(notebookId || getSelectedNotebookId(state)).trim();
-    const index = getNotebookIndexById(state, selectedId);
+    const requestedId = String(notebookId || '').trim();
+    const fallbackId = getSelectedNotebookId(state);
+    const targetId = requestedId && getNotebookIndexById(state, requestedId) >= 0
+        ? requestedId
+        : fallbackId;
+    const index = getNotebookIndexById(state, targetId);
     if (index < 0) {
         return null;
     }
@@ -1547,8 +1551,8 @@ export function getChatState() {
         state.hasNotebook = true;
     }
 
-    state.selectedNotebookId = getSelectedNotebookId(state);
     state.notebooks = normalizeNotebookCollection(state.notebooks, state);
+    state.selectedNotebookId = getSelectedNotebookId(state);
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
     state.identityTheft = normalizeIdentityTheftState(state.identityTheft);
     const selectedNotebook = ensureSelectedNotebook(state) || createDefaultNotebookState();
