@@ -1595,6 +1595,11 @@
     display: none;
 }
 
+.kw-deathnote__paper--readonly .kw-deathnote__entry-textarea {
+    cursor: default;
+    caret-color: transparent;
+}
+
 .kw-deathnote__locked-overlay {
     z-index: 2;
     padding: calc(var(--kw-dn-editor-top) + 0.72rem) 1rem 0 calc(var(--kw-dn-editor-left) + 1.1rem);

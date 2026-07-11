@@ -645,8 +645,18 @@ function renderNotebookPage(text, extraClass = '') {
     `;
 }
 
-function renderEditablePage({ notebookId, pageIndex, side, text, extraClass = '' }) {
-    const classes = ['kw-deathnote__paper', 'kw-deathnote__paper--editable', extraClass].filter(Boolean).join(' ');
+function isNotebookWritableByUser(ownership) {
+    return ownership?.userAccess === NOTEBOOK_USER_ACCESS.FULL
+        && ownership?.holder?.type === NOTEBOOK_ACTOR_TYPES.USER;
+}
+
+function renderEditablePage({ notebookId, pageIndex, side, text, extraClass = '', readOnly = false }) {
+    const classes = [
+        'kw-deathnote__paper',
+        'kw-deathnote__paper--editable',
+        readOnly ? 'kw-deathnote__paper--readonly' : '',
+        extraClass,
+    ].filter(Boolean).join(' ');
     const sourceId = `notebook:${notebookId}:page:${pageIndex}`;
     return `
         <div class="${classes}">
@@ -658,6 +668,7 @@ function renderEditablePage({ notebookId, pageIndex, side, text, extraClass = ''
                 data-page-side="${side}"
                 autocomplete="off"
                 spellcheck="false"
+                ${readOnly ? 'readonly aria-readonly="true"' : ''}
             >${escapeHtml(String(text || ''))}</textarea>
             ${renderPermanentLineOverlay('notebook', sourceId, text, 'kw-deathnote__locked-overlay')}
         </div>
@@ -2718,6 +2729,7 @@ function renderInventoryManageContentHtml() {
         const request = getNotebookReturnRequest(notebook.itemId);
         const isSelected = notebook.itemId === selectedNotebookId;
         const isUserReadable = ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL && !notebook.destroyed;
+        const isOwnedByUser = ownership.owner?.type === NOTEBOOK_ACTOR_TYPES.USER;
         const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
         const requestMatchesHolder = Boolean(
             request.active
@@ -2751,7 +2763,7 @@ function renderInventoryManageContentHtml() {
                         type="button"
                         class="menu_button kw-dn-manage-select-note"
                         data-notebook-id="${escapeHtml(notebook.itemId)}"
-                    >${isSelected ? 'Current Note' : 'Make Current'}</button>
+                    >${isSelected ? 'Selected Note' : 'Select Note'}</button>
                     ${isUserReadable ? `
                         <button
                             type="button"
@@ -2759,7 +2771,7 @@ function renderInventoryManageContentHtml() {
                             data-notebook-id="${escapeHtml(notebook.itemId)}"
                         >Open Notebook</button>
                     ` : ''}
-                    ${holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
+                    ${isOwnedByUser && holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
                         <button
                             type="button"
                             class="menu_button kw-dn-manage-request-return"
@@ -2947,6 +2959,8 @@ function buildWidgetHtml() {
     const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
     const settings = getSettings();
     const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+    const ownership = getNotebookOwnership(notebookId);
+    const notebookWritable = isNotebookWritableByUser(ownership);
     const pages = ensurePageCapacity(getUiNotebookPages(notebookId), 0);
     const currentSpreadIndex = getClampedSpreadIndex(pages);
     const visible = getVisiblePageIndices(currentSpreadIndex);
@@ -2961,6 +2975,7 @@ function buildWidgetHtml() {
             side: 'left',
             text: expandedPages[visible.leftPageIndex] || '',
             extraClass: 'kw-deathnote__paper--left',
+            readOnly: !notebookWritable,
         })
         : `
             <div class="kw-deathnote__inside-cover-panel">
@@ -3017,6 +3032,7 @@ function buildWidgetHtml() {
                         pageIndex: visible.rightPageIndex,
                         side: 'right',
                         text: expandedPages[visible.rightPageIndex] || '',
+                        readOnly: !notebookWritable,
                     })}
                     <button
                         type="button"
@@ -3123,6 +3139,9 @@ function commitNotebookTextareaValue(textarea, state, {
     playSound = true,
 } = {}) {
     if (!(textarea instanceof HTMLTextAreaElement)) {
+        return false;
+    }
+    if (textarea.readOnly) {
         return false;
     }
 

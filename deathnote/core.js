@@ -1746,6 +1746,9 @@ export function requestNotebookReturn(actor, options = {}) {
     if (!notebook || notebook.destroyed) {
         return false;
     }
+    if (!isUserActor(notebook.owner)) {
+        return false;
+    }
     const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
     if (normalized.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER || (!normalized.name && !normalized.id)) {
         return false;
