@@ -2994,6 +2994,133 @@ function getVisibleTexts(pages, spreadIndex) {
     };
 }
 
+function commitNotebookTextareaValue(textarea, state, {
+    sourceEvent = null,
+    allowRefresh = true,
+    allowFocusRestore = true,
+    playSound = true,
+} = {}) {
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+        return false;
+    }
+
+    const pageIndex = Number(textarea.dataset.pageIndex);
+    const notebookId = resolveUiNotebookId(textarea.dataset.notebookId || getSettings().selectedNotebookId);
+    const pageSide = String(textarea.dataset.pageSide || 'right').trim().toLowerCase();
+    if (!Number.isFinite(pageIndex) || pageIndex < 0) {
+        return false;
+    }
+
+    const pages = ensurePageCapacity(getNotebookPages(notebookId), pageIndex);
+    const settings = getSettings();
+    const currentSpreadIndex = getClampedSpreadIndex(pages);
+    const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
+    const rawValue = $(textarea).val();
+    const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
+    const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
+    const value = sanitizedInput.value;
+    const inputType = String(sourceEvent?.originalEvent?.inputType || sourceEvent?.inputType || '');
+    if (playSound && shouldPlayWritingSoundForInputType(inputType)) {
+        pulseWritingSound();
+    }
+    syncPermanentLineOverlay(textarea, 'notebook', `notebook:${notebookId}:page:${pageIndex}`, value);
+    const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
+    const nextPages = sanitizeNotebookPagesForRules(update.pages);
+    const changed = setNotebookPages(nextPages, notebookId);
+    // #region debug-point C:textarea-input
+    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/ui.js:entry-textarea-input",msg:"[DEBUG] textarea input attempted notebook write",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,pageIndex,currentSpreadIndex,inputLength:value.length,changed,overflowed:Boolean(update.overflowed),beforeLeft:String(beforeVisible.left||'').slice(0,80),beforeRight:String(beforeVisible.right||'').slice(0,80),afterPagePreview:String(nextPages[pageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    if (!changed) {
+        if (value !== inputValue) {
+            textarea.value = value;
+        }
+        return false;
+    }
+    if (sanitizedInput.blockedName) {
+        notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);
+    }
+
+    if (value !== inputValue) {
+        if (allowFocusRestore) {
+            queueFocusRestore(pageIndex, pageSide, 'end');
+        }
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+        scheduleSettingsSave();
+        scheduleChatSave(state);
+        return true;
+    }
+
+    const activePageChanged = String(nextPages[pageIndex] || '') !== value;
+    const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
+    const otherSideChanged = pageSide === 'left'
+        ? beforeVisible.right !== afterVisible.right
+        : beforeVisible.left !== afterVisible.left;
+
+    if (update.overflowed) {
+        const nextPageIndex = pageIndex + 1;
+        const nextSpreadIndex = nextPageIndex === 0 ? 0 : Math.floor((nextPageIndex + 1) / 2);
+        settings.currentSpreadIndex = nextSpreadIndex;
+        if (allowFocusRestore) {
+            queueFocusRestore(nextPageIndex, nextPageIndex % 2 === 1 ? 'left' : 'right', 'start');
+        }
+        scheduleSettingsSave();
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+        scheduleChatSave(state);
+        return true;
+    }
+
+    if (activePageChanged) {
+        if (allowFocusRestore) {
+            queueFocusRestore(pageIndex, pageSide, 'end');
+        }
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+        scheduleSettingsSave();
+        scheduleChatSave(state);
+        return true;
+    }
+
+    if (otherSideChanged) {
+        if (allowFocusRestore) {
+            queueFocusRestore(pageIndex, pageSide, 'end');
+        }
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+    } else {
+        textarea.dataset.pageIndex = String(pageIndex);
+    }
+
+    scheduleSettingsSave();
+    scheduleChatSave(state);
+    return true;
+}
+
+function commitVisibleNotebookDrafts(state) {
+    const root = document.getElementById(FLOATING_ID);
+    if (!root) {
+        return false;
+    }
+
+    let changed = false;
+    const textareas = root.querySelectorAll('.kw-deathnote__entry-textarea');
+    for (const textarea of textareas) {
+        changed = commitNotebookTextareaValue(textarea, state, {
+            allowRefresh: false,
+            allowFocusRestore: false,
+            playSound: false,
+        }) || changed;
+    }
+
+    return changed;
+}
+
 function runPageTurn(direction, callback) {
     const root = document.getElementById(FLOATING_ID);
     if (!root) {
@@ -3132,6 +3259,7 @@ function bindWidgetUi() {
                     state.handlersInstalled = false;
 
                     if (!state.moved && state.toggleOnTap) {
+                        commitVisibleNotebookDrafts(state);
                         const settings = getSettings();
                         setNotebookOpenState(!settings.isOpen);
                     }
@@ -3144,92 +3272,11 @@ function bindWidgetUi() {
 
             installHandlers();
         })
-        .off('input', `#${FLOATING_ID} .kw-deathnote__entry-textarea`)
-        .on('input', `#${FLOATING_ID} .kw-deathnote__entry-textarea`, (event) => {
-            const textarea = event.currentTarget;
-            if (!(textarea instanceof HTMLTextAreaElement)) {
-                return;
-            }
-
-            const pageIndex = Number(textarea.dataset.pageIndex);
-            const notebookId = resolveUiNotebookId(textarea.dataset.notebookId || getSettings().selectedNotebookId);
-            const pageSide = String(textarea.dataset.pageSide || 'right').trim().toLowerCase();
-            if (!Number.isFinite(pageIndex) || pageIndex < 0) {
-                return;
-            }
-
-            const pages = ensurePageCapacity(getNotebookPages(notebookId), pageIndex);
-            const settings = getSettings();
-            const currentSpreadIndex = getClampedSpreadIndex(pages);
-            const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
-            const rawValue = $(textarea).val();
-            const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
-            const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
-            const value = sanitizedInput.value;
-            const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
-            if (shouldPlayWritingSoundForInputType(inputType)) {
-                pulseWritingSound();
-            }
-            syncPermanentLineOverlay(textarea, 'notebook', `notebook:${notebookId}:page:${pageIndex}`, value);
-            const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
-            const nextPages = sanitizeNotebookPagesForRules(update.pages);
-            const changed = setNotebookPages(nextPages, notebookId);
-            // #region debug-point C:textarea-input
-            fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/ui.js:entry-textarea-input",msg:"[DEBUG] textarea input attempted notebook write",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,pageIndex,currentSpreadIndex,inputLength:value.length,changed,overflowed:Boolean(update.overflowed),beforeLeft:String(beforeVisible.left||'').slice(0,80),beforeRight:String(beforeVisible.right||'').slice(0,80),afterPagePreview:String(nextPages[pageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
-            // #endregion
-
-            if (!changed) {
-                if (value !== inputValue) {
-                    textarea.value = value;
-                }
-                return;
-            }
-            if (sanitizedInput.blockedName) {
-                notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);
-            }
-
-            if (value !== inputValue) {
-                queueFocusRestore(pageIndex, pageSide, 'end');
-                refreshDeathNoteUi();
-                scheduleSettingsSave();
-                scheduleChatSave(state);
-                return;
-            }
-
-            const activePageChanged = String(nextPages[pageIndex] || '') !== value;
-            const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
-            const otherSideChanged = pageSide === 'left'
-                ? beforeVisible.right !== afterVisible.right
-                : beforeVisible.left !== afterVisible.left;
-
-            if (update.overflowed) {
-                const nextPageIndex = pageIndex + 1;
-                const nextSpreadIndex = nextPageIndex === 0 ? 0 : Math.floor((nextPageIndex + 1) / 2);
-                settings.currentSpreadIndex = nextSpreadIndex;
-                queueFocusRestore(nextPageIndex, nextPageIndex % 2 === 1 ? 'left' : 'right', 'start');
-                scheduleSettingsSave();
-                refreshDeathNoteUi();
-                scheduleChatSave(state);
-                return;
-            }
-
-            if (activePageChanged) {
-                queueFocusRestore(pageIndex, pageSide, 'end');
-                refreshDeathNoteUi();
-                scheduleSettingsSave();
-                scheduleChatSave(state);
-                return;
-            }
-
-            if (otherSideChanged) {
-                queueFocusRestore(pageIndex, pageSide, 'end');
-                refreshDeathNoteUi();
-            } else {
-                textarea.dataset.pageIndex = String(pageIndex);
-            }
-
-            scheduleSettingsSave();
-            scheduleChatSave(state);
+        .off('input change blur', `#${FLOATING_ID} .kw-deathnote__entry-textarea`)
+        .on('input change blur', `#${FLOATING_ID} .kw-deathnote__entry-textarea`, (event) => {
+            commitNotebookTextareaValue(event.currentTarget, state, {
+                sourceEvent: event,
+            });
         })
         .off('keydown', '.kw-dn-inventory__scrap-textarea')
         .on('keydown', '.kw-dn-inventory__scrap-textarea', (event) => {
@@ -3302,6 +3349,7 @@ function bindWidgetUi() {
         .off('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`, (event) => {
             event.preventDefault();
+            commitVisibleNotebookDrafts(state);
             const direction = String($(event.currentTarget).data('pageNav') || '').trim().toLowerCase();
             const notebookId = resolveUiNotebookId(getSettings().selectedNotebookId);
             const pages = getNotebookPages(notebookId);
