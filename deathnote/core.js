@@ -1290,15 +1290,6 @@ function parseAiNotebookWriteBlock(blockBody) {
     let entry = '';
     let notebook = '';
 
-    const inlineMatch = body.match(/writer\s*:\s*(.+?)\s+entry\s*:\s*(.+?)\s*$/is);
-    if (inlineMatch) {
-        return {
-            writer: String(inlineMatch[1] || '').trim(),
-            entry: String(inlineMatch[2] || '').trim(),
-            notebook,
-        };
-    }
-
     const lines = body.split(/\r?\n/);
 
     for (const line of lines) {
@@ -1325,6 +1316,14 @@ function parseAiNotebookWriteBlock(blockBody) {
         }
     }
 
+    if (!writer || !entry) {
+        const inlineMatch = body.match(/writer\s*:\s*(.+?)\s+entry\s*:\s*(.+?)\s*$/is);
+        if (inlineMatch) {
+            writer ||= String(inlineMatch[1] || '').trim();
+            entry ||= String(inlineMatch[2] || '').trim();
+        }
+    }
+
     return {
         writer,
         entry,
@@ -1344,12 +1343,26 @@ function canAiHolderWriteNotebook(actor) {
 }
 
 function resolveNotebookForActorWriter(state, actor, notebookItemId = '') {
-    const explicit = getNotebookById(state, notebookItemId);
-    if (explicit) {
-        return explicit;
+    const writer = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    const explicitNotebookKey = normalizeKnowledgeKey(notebookItemId);
+    if (explicitNotebookKey) {
+        const explicit = Array.isArray(state?.notebooks)
+            ? state.notebooks.find((entry) => {
+                return entry
+                    && !entry.destroyed
+                    && entry.exists
+                    && actorRefsMatch(normalizeActorRef(entry.holder, writer.type, writer.name), writer)
+                    && (
+                        normalizeKnowledgeKey(entry.itemId) === explicitNotebookKey
+                        || normalizeKnowledgeKey(entry.label) === explicitNotebookKey
+                    );
+            })
+            : null;
+        if (explicit) {
+            return explicit;
+        }
     }
 
-    const writer = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
     const matches = Array.isArray(state.notebooks)
         ? state.notebooks.filter((entry) => {
             return entry
