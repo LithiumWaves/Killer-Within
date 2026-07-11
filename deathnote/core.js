@@ -20,7 +20,7 @@ export function getContext() {
 
 function getActiveChatCacheKey(context) {
     if (!context) {
-        return '';
+        return 'global';
     }
 
     const chatId = String(context?.chatId ?? '').trim();
@@ -37,7 +37,7 @@ function getActiveChatCacheKey(context) {
         return `character:${Number(context.characterId)}`;
     }
 
-    return '';
+    return 'global';
 }
 
 function bindCachedChatState(context) {
