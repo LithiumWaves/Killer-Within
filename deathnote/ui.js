@@ -469,6 +469,7 @@ function getTogglePosition(left, top, isOpening) {
 function setNotebookOpenState(nextOpen) {
     const settings = getSettings();
     const root = document.getElementById(FLOATING_ID);
+    const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
     let anchorX = null;
     let anchorY = null;
 
@@ -508,6 +509,9 @@ function setNotebookOpenState(nextOpen) {
     } else {
         stopWritingSound();
     }
+    // #region debug-point A:open-close-refresh
+    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"A",location:"deathnote/ui.js:setNotebookOpenState",msg:"[DEBUG] notebook open state changed before refresh",data:{nextOpen:Boolean(nextOpen),settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,currentSpreadIndex:Number(settings.currentSpreadIndex??settings.currentPageIndex??0),anchorX,anchorY},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     refreshDeathNoteUi();
 }
 
@@ -2825,6 +2829,9 @@ function buildWidgetHtml() {
     const currentSpreadIndex = getClampedSpreadIndex(pages);
     const visible = getVisiblePageIndices(currentSpreadIndex);
     const expandedPages = ensurePageCapacity(pages, visible.rightPageIndex);
+    // #region debug-point E:widget-render
+    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"E",location:"deathnote/ui.js:buildWidgetHtml",msg:"[DEBUG] widget rendered visible pages",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,currentSpreadIndex,pageCount:pages.length,leftPageIndex:visible.leftPageIndex,rightPageIndex:visible.rightPageIndex,leftPreview:String(visible.leftPageIndex===null?'[inside-cover]':expandedPages[visible.leftPageIndex]||'').slice(0,80),rightPreview:String(expandedPages[visible.rightPageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     const leftPageHtml = visible.leftPageIndex !== null
         ? renderEditablePage({
             notebookId,
@@ -3167,6 +3174,9 @@ function bindWidgetUi() {
             const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
             const nextPages = sanitizeNotebookPagesForRules(update.pages);
             const changed = setNotebookPages(nextPages, notebookId);
+            // #region debug-point C:textarea-input
+            fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/ui.js:entry-textarea-input",msg:"[DEBUG] textarea input attempted notebook write",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,pageIndex,currentSpreadIndex,inputLength:value.length,changed,overflowed:Boolean(update.overflowed),beforeLeft:String(beforeVisible.left||'').slice(0,80),beforeRight:String(beforeVisible.right||'').slice(0,80),afterPagePreview:String(nextPages[pageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
+            // #endregion
 
             if (!changed) {
                 if (value !== inputValue) {
@@ -3297,10 +3307,16 @@ function bindWidgetUi() {
             const pages = getNotebookPages(notebookId);
             const settings = getSettings();
             const currentSpreadIndex = getClampedSpreadIndex(pages);
+            // #region debug-point A:page-turn-click
+            fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"A",location:"deathnote/ui.js:page-turn-click",msg:"[DEBUG] page turn requested",data:{direction,settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,currentSpreadIndex,pageCount:pages.length,currentLeft:String(getVisibleTexts(pages,currentSpreadIndex).left||'').slice(0,80),currentRight:String(getVisibleTexts(pages,currentSpreadIndex).right||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
+            // #endregion
 
             if (direction === 'prev' && currentSpreadIndex > 0) {
                 runPageTurn('prev', () => {
                     settings.currentSpreadIndex = Math.max(0, currentSpreadIndex - 1);
+                    // #region debug-point E:page-turn-prev-callback
+                    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"E",location:"deathnote/ui.js:page-turn-prev-callback",msg:"[DEBUG] previous page turn callback applied",data:{resolvedNotebookId:notebookId,nextSpreadIndex:Number(settings.currentSpreadIndex||0)},ts:Date.now()})}).catch(()=>{});
+                    // #endregion
                     queueFocusRestore(getVisiblePageIndices(settings.currentSpreadIndex).rightPageIndex, 'right', 'end');
                     scheduleSettingsSave();
                 });
@@ -3315,6 +3331,9 @@ function bindWidgetUi() {
                 runPageTurn('next', () => {
                     setNotebookPages(expanded, notebookId);
                     settings.currentSpreadIndex = nextSpreadIndex;
+                    // #region debug-point E:page-turn-next-callback
+                    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"E",location:"deathnote/ui.js:page-turn-next-callback",msg:"[DEBUG] next page turn callback applied",data:{resolvedNotebookId:notebookId,nextSpreadIndex,pageCount:expanded.length,leftPreview:String(nextVisible.leftPageIndex===null?'[inside-cover]':expanded[nextVisible.leftPageIndex]||'').slice(0,80),rightPreview:String(expanded[nextVisible.rightPageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
+                    // #endregion
                     queueFocusRestore(
                         nextVisible.leftPageIndex === null ? nextVisible.rightPageIndex : nextVisible.leftPageIndex,
                         nextVisible.leftPageIndex === null ? 'right' : 'left',

@@ -270,6 +270,11 @@ function getNotebookById(state, notebookId = '') {
     const targetId = requestedId && getNotebookIndexById(state, requestedId) >= 0
         ? requestedId
         : fallbackId;
+    if (requestedId && requestedId !== targetId) {
+        // #region debug-point B:notebook-id-fallback
+        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"B",location:"deathnote/core.js:getNotebookById",msg:"[DEBUG] notebook id fell back during lookup",data:{requestedId,fallbackId,targetId,selectedNotebookId:String(state?.selectedNotebookId||''),notebookIds:Array.isArray(state?.notebooks)?state.notebooks.map((entry)=>String(entry?.itemId||'')):[]},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+    }
     const index = getNotebookIndexById(state, targetId);
     if (index < 0) {
         return null;
@@ -3444,6 +3449,9 @@ export function setNotebookPages(pages, notebookId = '') {
     const state = getChatState();
     const notebook = getNotebookById(state, notebookId);
     if (!notebook) {
+        // #region debug-point D:set-pages-missing-notebook
+        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages could not resolve notebook",data:{requestedNotebookId:String(notebookId||''),selectedNotebookId:String(state?.selectedNotebookId||''),notebookIds:Array.isArray(state?.notebooks)?state.notebooks.map((entry)=>String(entry?.itemId||'')):[],incomingPageCount:Array.isArray(pages)?pages.length:null},ts:Date.now()})}).catch(()=>{});
+        // #endregion
         return false;
     }
     const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, notebook.text ?? ''), notebook.itemId);
@@ -3452,13 +3460,20 @@ export function setNotebookPages(pages, notebookId = '') {
     const samePages = sameLength && normalized.every((page, index) => notebook.pages[index] === page);
 
     if (samePages && notebook.text === nextText) {
+        // #region debug-point C:set-pages-no-change
+        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages detected no state change",data:{notebookId:notebook.itemId,pageCount:normalized.length,textLength:nextText.length,selectedNotebookId:String(state?.selectedNotebookId||'')},ts:Date.now()})}).catch(()=>{});
+        // #endregion
         return false;
     }
 
+    const previousPages = Array.isArray(notebook.pages) ? [...notebook.pages] : [];
     notebook.pages = normalized;
     notebook.text = nextText;
     notebook.updatedAt = Date.now();
     syncLegacyNotebookState(state);
+    // #region debug-point D:set-pages-applied
+    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages applied update",data:{notebookId:notebook.itemId,selectedNotebookId:String(state?.selectedNotebookId||''),previousPageCount:previousPages.length,nextPageCount:normalized.length,previousFirstPage:String(previousPages[0]||'').slice(0,80),nextFirstPage:String(normalized[0]||'').slice(0,80),previousLastPage:String(previousPages[previousPages.length-1]||'').slice(0,80),nextLastPage:String(normalized[normalized.length-1]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     reconcileEntriesFromNotebookText();
     return true;
 }
