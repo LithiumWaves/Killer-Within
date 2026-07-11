@@ -3439,7 +3439,7 @@ export function setNotebookText(text, notebookId = '') {
     notebook.pages = [value];
     notebook.updatedAt = Date.now();
     syncLegacyNotebookState(state);
-    reconcileEntriesFromNotebookPages();
+    reconcileEntriesFromNotebookPages(state);
     return true;
 }
 
@@ -3493,7 +3493,7 @@ export function setNotebookPages(pages, notebookId = '') {
     // #region debug-point D:set-pages-applied
     fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages applied update",data:{notebookId:notebook.itemId,selectedNotebookId:String(state?.selectedNotebookId||''),previousPageCount:previousPages.length,nextPageCount:normalized.length,previousFirstPage:String(previousPages[0]||'').slice(0,80),nextFirstPage:String(normalized[0]||'').slice(0,80),previousLastPage:String(previousPages[previousPages.length-1]||'').slice(0,80),nextLastPage:String(normalized[normalized.length-1]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
     // #endregion
-    reconcileEntriesFromNotebookText();
+    reconcileEntriesFromNotebookText(state);
     return true;
 }
 
@@ -3526,12 +3526,11 @@ export function updateNotebookScrapText(scrapId, noteText, options = {}) {
         target: scrap.owner,
         timestamp,
     });
-    reconcileEntriesFromNotebookText();
+    reconcileEntriesFromNotebookText(state);
     return true;
 }
 
-export function reconcileEntriesFromNotebookPages() {
-    const state = getChatState();
+function reconcileEntriesFromState(state) {
     syncNotebookTextFromPages(state);
     const lines = collectActiveDeathNoteSourceLines(state);
     const counts = buildLineCounts(lines);
@@ -3586,8 +3585,12 @@ export function reconcileEntriesFromNotebookPages() {
     state.entries = retained;
 }
 
-export function reconcileEntriesFromNotebookText() {
-    reconcileEntriesFromNotebookPages();
+export function reconcileEntriesFromNotebookPages(state = null) {
+    reconcileEntriesFromState(state || getChatState());
+}
+
+export function reconcileEntriesFromNotebookText(state = null) {
+    reconcileEntriesFromState(state || getChatState());
 }
 
 export function removeDeathEntry(entryId) {
