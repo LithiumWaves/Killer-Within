@@ -128,6 +128,14 @@ function cloneNotebookPagesForUi(pages) {
     return pages.map((page) => String(page ?? ''));
 }
 
+function notebookPagesMatch(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((page, index) => String(page ?? '') === String(right[index] ?? ''));
+}
+
 function getNotebookPagesScore(pages) {
     const normalized = cloneNotebookPagesForUi(pages);
     return normalized.join('').length + (normalized.length * 1000);
@@ -147,7 +155,9 @@ function getUiNotebookPages(notebookId) {
         return cloneNotebookPagesForUi(corePages);
     }
 
-    if (getNotebookPagesScore(corePages) > getNotebookPagesScore(cachedPages)) {
+    const coreScore = getNotebookPagesScore(corePages);
+    const cachedScore = getNotebookPagesScore(cachedPages);
+    if (!notebookPagesMatch(corePages, cachedPages) && coreScore >= cachedScore) {
         notebookPageSessionCache.set(key, corePages);
         return cloneNotebookPagesForUi(corePages);
     }
@@ -537,11 +547,13 @@ function getTogglePosition(left, top, isOpening) {
     };
 }
 
-function setNotebookOpenState(nextOpen) {
+function setNotebookOpenState(nextOpen, { notebookId = '' } = {}) {
     const settings = getSettings();
     const root = document.getElementById(FLOATING_ID);
-    const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
-    const ownership = notebookId ? getNotebookOwnership(notebookId) : null;
+    const resolvedNotebookId = nextOpen
+        ? resolveUiNotebookId(notebookId || settings.selectedNotebookId)
+        : getActiveWidgetNotebookId(notebookId || settings.openNotebookItemId || settings.selectedNotebookId);
+    const ownership = resolvedNotebookId ? getNotebookOwnership(resolvedNotebookId) : null;
     let anchorX = null;
     let anchorY = null;
 
@@ -572,6 +584,15 @@ function setNotebookOpenState(nextOpen) {
     }
 
     settings.isOpen = Boolean(nextOpen);
+    if (nextOpen) {
+        settings.openNotebookItemId = resolvedNotebookId;
+        if (resolvedNotebookId) {
+            settings.selectedNotebookId = resolvedNotebookId;
+            setSelectedNotebookId(resolvedNotebookId);
+        }
+    } else {
+        settings.openNotebookItemId = '';
+    }
     if (!nextOpen && ownership?.holder?.type !== NOTEBOOK_ACTOR_TYPES.USER) {
         selectPreferredUserNotebook();
     }
@@ -579,13 +600,13 @@ function setNotebookOpenState(nextOpen) {
     if (nextOpen) {
         playNotebookOpenSound();
         if (shouldTriggerNotebookPresenceReveal()) {
-            markNotebookPresenceRevealPending(null, resolveUiNotebookId(settings.selectedNotebookId));
+            markNotebookPresenceRevealPending(null, resolvedNotebookId);
         }
     } else {
         stopWritingSound();
     }
     // #region debug-point A:open-close-refresh
-    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"A",location:"deathnote/ui.js:setNotebookOpenState",msg:"[DEBUG] notebook open state changed before refresh",data:{nextOpen:Boolean(nextOpen),settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,currentSpreadIndex:Number(settings.currentSpreadIndex??settings.currentPageIndex??0),anchorX,anchorY},ts:Date.now()})}).catch(()=>{});
+    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"A",location:"deathnote/ui.js:setNotebookOpenState",msg:"[DEBUG] notebook open state changed before refresh",data:{nextOpen:Boolean(nextOpen),settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:resolvedNotebookId,currentSpreadIndex:Number(settings.currentSpreadIndex??settings.currentPageIndex??0),anchorX,anchorY},ts:Date.now()})}).catch(()=>{});
     // #endregion
     refreshDeathNoteUi();
 }
@@ -1473,6 +1494,7 @@ function selectPreferredUserNotebook({ closeIfMissing = false } = {}) {
         }
         if (closeIfMissing) {
             settings.isOpen = false;
+            settings.openNotebookItemId = '';
         }
         return '';
     }
@@ -1490,6 +1512,20 @@ function resolveUiNotebookId(preferredId = '') {
         return candidate;
     }
     return String(getSelectedNotebookIdState() || '').trim();
+}
+
+function getPinnedOpenNotebookId(preferredId = '') {
+    const settings = getSettings();
+    const candidate = String(settings.openNotebookItemId || preferredId || settings.selectedNotebookId).trim();
+    return resolveUiNotebookId(candidate);
+}
+
+function getActiveWidgetNotebookId(preferredId = '') {
+    const settings = getSettings();
+    if (settings.isOpen) {
+        return getPinnedOpenNotebookId(preferredId);
+    }
+    return resolveUiNotebookId(preferredId || settings.selectedNotebookId);
 }
 
 function getSelectedInventoryItemKey(settings, inventory, ownership = getNotebookOwnership()) {
@@ -3018,7 +3054,7 @@ function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
     const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
     const settings = getSettings();
-    const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+    const notebookId = getActiveWidgetNotebookId(settings.selectedNotebookId);
     const ownership = getNotebookOwnership(notebookId);
     const notebookWritable = isNotebookWritableByUser(ownership);
     const pages = ensurePageCapacity(getUiNotebookPages(notebookId), 0);
@@ -3206,7 +3242,7 @@ function commitNotebookTextareaValue(textarea, state, {
     }
 
     const pageIndex = Number(textarea.dataset.pageIndex);
-    const notebookId = resolveUiNotebookId(textarea.dataset.notebookId || getSettings().selectedNotebookId);
+    const notebookId = getActiveWidgetNotebookId(textarea.dataset.notebookId || getSettings().selectedNotebookId);
     const pageSide = String(textarea.dataset.pageSide || 'right').trim().toLowerCase();
     if (!Number.isFinite(pageIndex) || pageIndex < 0) {
         return false;
@@ -3464,7 +3500,9 @@ function bindWidgetUi() {
                         stopWritingSound(false);
                         commitVisibleNotebookDrafts(state);
                         const settings = getSettings();
-                        setNotebookOpenState(!settings.isOpen);
+                        setNotebookOpenState(!settings.isOpen, {
+                            notebookId: getActiveWidgetNotebookId(settings.selectedNotebookId),
+                        });
                     }
                 };
 
@@ -3554,7 +3592,7 @@ function bindWidgetUi() {
             event.preventDefault();
             commitVisibleNotebookDrafts(state);
             const direction = String($(event.currentTarget).data('pageNav') || '').trim().toLowerCase();
-            const notebookId = resolveUiNotebookId(getSettings().selectedNotebookId);
+            const notebookId = getActiveWidgetNotebookId(getSettings().selectedNotebookId);
             const pages = getUiNotebookPages(notebookId);
             const settings = getSettings();
             const currentSpreadIndex = getClampedSpreadIndex(pages);
@@ -3789,7 +3827,7 @@ function bindInventoryUi() {
                 return;
             }
 
-            setNotebookOpenState(!settings.isOpen);
+            setNotebookOpenState(!settings.isOpen, { notebookId });
         })
         .off('click', '#kw-dn-inventory-tear')
         .on('click', '#kw-dn-inventory-tear', async (event) => {
@@ -3851,11 +3889,10 @@ function bindInventoryUi() {
             const settings = getSettings();
             settings.selectedNotebookId = notebookId;
             settings.inventorySelectedItemKey = `notebook:${notebookId}`;
-            settings.isOpen = true;
             inventoryManageOpen = false;
             setSelectedNotebookId(notebookId);
             scheduleSettingsSave();
-            refreshDeathNoteUi();
+            setNotebookOpenState(true, { notebookId });
         })
         .off('click', '.kw-dn-manage-destroy-note')
         .on('click', '.kw-dn-manage-destroy-note', async (event) => {
@@ -4222,4 +4259,3 @@ export function setupDeathNoteUi() {
     ensureChatNameMaskObserver();
     queueMaskedChatNameRender();
 }
-

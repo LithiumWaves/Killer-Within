@@ -74,6 +74,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     debug: false,
     showAiWriteDebugBlocks: false,
     isOpen: false,
+    openNotebookItemId: '',
     requireKnownNamesForKills: true,
     permanentResolvedNotebookEntries: false,
     permanentResolvedScrapEntries: false,
