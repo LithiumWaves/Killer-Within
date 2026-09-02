@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Special+Elite&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Noto+Serif+JP:wght@500;700&family=Special+Elite&display=swap");
 
 @font-face {
     font-family: "UnifrakturMaguntia";
@@ -2446,4 +2446,158 @@
 
 .kw-dn-settings-modal__dialog input[type="checkbox"] {
     accent-color: var(--dn-blood);
+}
+
+
+/* ============================================================
+   Shinigami Eyes — anime/manga floating name + lifespan overlay
+   ============================================================ */
+
+.kw-shinigami-eyes-mount {
+    position: relative !important;
+}
+
+.kw-shinigami-eyes-overlay {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 0.15rem);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.12rem;
+    width: max-content;
+    max-width: 14rem;
+    padding: 0.15rem 0.35rem 0.2rem;
+    pointer-events: none;
+    transform: translateX(-50%) perspective(220px) rotateX(12deg);
+    transform-origin: center bottom;
+    filter:
+        drop-shadow(0 0 4px rgba(255, 32, 48, 0.95))
+        drop-shadow(0 0 12px rgba(220, 0, 24, 0.75))
+        drop-shadow(0 0 28px rgba(160, 0, 20, 0.45));
+    animation: kw-shinigami-eyes-flicker 2.8s ease-in-out infinite;
+}
+
+.kw-shinigami-eyes-overlay__name,
+.kw-shinigami-eyes-overlay__lifespan {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    color: #ff2a3a;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1;
+    text-shadow:
+        0 0 1px rgba(255, 220, 220, 0.95),
+        0 0 4px rgba(255, 40, 55, 1),
+        0 0 10px rgba(255, 0, 30, 0.95),
+        0 0 18px rgba(200, 0, 25, 0.8),
+        0 0 30px rgba(140, 0, 18, 0.55);
+}
+
+.kw-shinigami-eyes-overlay__name {
+    gap: 0.01em;
+    font-family: "Noto Serif JP", "UnifrakturMaguntia", "Cinzel", "Yu Mincho", serif;
+    font-size: clamp(0.78rem, 1.7vw, 1.05rem);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+.kw-shinigami-eyes-overlay__glyph {
+    display: inline-block;
+    transform: translateY(var(--kw-se-y, 0px)) rotate(var(--kw-se-rot, 0deg));
+    transform-origin: center bottom;
+}
+
+.kw-shinigami-eyes-overlay__lifespan {
+    gap: 0.42em;
+    margin-top: 0.05rem;
+    font-family: "Special Elite", "Courier New", ui-monospace, monospace;
+    font-size: clamp(0.72rem, 1.55vw, 0.98rem);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    opacity: 0.96;
+}
+
+.kw-shinigami-eyes-overlay__digit {
+    display: inline-block;
+    min-width: 0.55em;
+}
+
+.kw-mes--shinigami-eyes .mesAvatarWrapper,
+.kw-mes--shinigami-eyes .avatarWrapper,
+.kw-mes--shinigami-eyes .avatar {
+    overflow: visible !important;
+}
+
+.kw-shinigami-eyes-card {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.85rem 0.95rem;
+    border: 1px solid rgba(255, 48, 64, 0.28);
+    background:
+        radial-gradient(circle at 12% 0%, rgba(160, 12, 28, 0.28), transparent 55%),
+        linear-gradient(180deg, rgba(28, 10, 12, 0.95), rgba(8, 4, 5, 0.98));
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        0 0 24px rgba(122, 18, 31, 0.18);
+}
+
+.kw-shinigami-eyes-card__status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.kw-shinigami-eyes-card__warning {
+    margin: 0;
+    color: #f0b4b8;
+    font-family: var(--dn-body);
+    font-size: 0.95rem;
+    line-height: 1.35;
+}
+
+.kw-shinigami-eyes-card__remaining {
+    color: #ff8a93 !important;
+}
+
+@keyframes kw-shinigami-eyes-flicker {
+    0%, 100% {
+        opacity: 0.92;
+        filter:
+            drop-shadow(0 0 4px rgba(255, 32, 48, 0.95))
+            drop-shadow(0 0 12px rgba(220, 0, 24, 0.75))
+            drop-shadow(0 0 28px rgba(160, 0, 20, 0.45));
+    }
+    46% {
+        opacity: 1;
+        filter:
+            drop-shadow(0 0 5px rgba(255, 60, 70, 1))
+            drop-shadow(0 0 16px rgba(255, 0, 30, 0.88))
+            drop-shadow(0 0 34px rgba(180, 0, 24, 0.55));
+    }
+    52% {
+        opacity: 0.78;
+    }
+    58% {
+        opacity: 0.98;
+    }
+}
+
+@media (max-width: 720px) {
+    .kw-shinigami-eyes-overlay {
+        max-width: 10.5rem;
+        bottom: calc(100% + 0.05rem);
+    }
+
+    .kw-shinigami-eyes-overlay__name {
+        font-size: 0.72rem;
+    }
+
+    .kw-shinigami-eyes-overlay__lifespan {
+        font-size: 0.68rem;
+        gap: 0.32em;
+    }
 }

@@ -14,7 +14,10 @@ import {
     getDeathNoteInventory,
     getPendingIdentityTheftExposure,
     getSettings,
+    getShinigamiEyesRoster,
+    getShinigamiEyesState,
     getUserHeldNotebookScraps,
+    userHasShinigamiEyes,
 } from './core.js';
 
 function renderPromptTemplate(template, replacements = {}) {
@@ -350,6 +353,46 @@ function buildNotebookPresenceRevealInjection() {
     }).trim();
 }
 
+function buildShinigamiEyesInjection() {
+    const settings = getSettings();
+    if (!settings.enabled || !userHasShinigamiEyes()) {
+        return '';
+    }
+
+    const eyes = getShinigamiEyesState();
+    const roster = getShinigamiEyesRoster();
+    const eyesRosterBlock = roster.length
+        ? roster.map((entry, index) => {
+            return `${index + 1}. ${entry.trueName || 'Unknown'} / ${entry.displayCode || '?'} / ${entry.yearsRemaining ?? '?'} years`;
+        }).join('\n')
+        : 'No human characters are currently visible in this chat.';
+
+    let userLabel = 'User';
+    try {
+        const context = getContext();
+        const resolved = String(context?.substituteParams?.('{{user}}') || '').trim();
+        if (resolved && resolved !== '{{user}}') {
+            userLabel = resolved;
+        }
+    } catch (_error) {
+        // Ignore macro substitution failures.
+    }
+
+    const dealCount = Math.max(1, Math.floor(Number(eyes.dealCount) || 1));
+    const dealCountClause = dealCount > 1
+        ? ` (${dealCount} deals total; lifespan has been halved ${dealCount} times)`
+        : '';
+
+    return renderPromptTemplate(settings.shinigamiEyesPromptTemplate || '', {
+        user_label: userLabel,
+        deal_count_clause: dealCountClause,
+        granted_by: formatActorLabel(eyes.grantedBy, 'a Shinigami'),
+        original_lifespan_years: String(eyes.originalLifespanYears ?? ''),
+        remaining_lifespan_years: String(eyes.remainingLifespanYears ?? ''),
+        eyes_roster_block: eyesRosterBlock,
+    }).trim();
+}
+
 export function getDeathNotePromptInjectionMessage() {
     const injection = buildDeathNoteInjection();
     if (!injection) {
@@ -407,6 +450,27 @@ export function getNotebookRevealPromptInjectionMessage() {
             [MESSAGE_EXTRA_KEY]: {
                 injected: true,
                 notebookReveal: true,
+            },
+        },
+    };
+}
+
+export function getShinigamiEyesPromptInjectionMessage() {
+    const injection = buildShinigamiEyesInjection();
+    if (!injection) {
+        return null;
+    }
+
+    return {
+        name: 'Shinigami Eyes',
+        is_user: false,
+        is_system: true,
+        send_date: Date.now(),
+        mes: injection,
+        extra: {
+            [MESSAGE_EXTRA_KEY]: {
+                injected: true,
+                shinigamiEyes: true,
             },
         },
     };
