@@ -23,6 +23,7 @@ import {
     getCharacterShinigamiEyesPromptInjectionMessage,
 } from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
+import { getInvestigatorCasePromptInjectionMessage } from '../investigator/prompts.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
 
@@ -282,6 +283,12 @@ export function installInterceptor() {
         if (characterShinigamiEyesInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
             chat.splice(insertAt, 0, characterShinigamiEyesInjection);
+        }
+
+        const investigatorCaseInjection = getInvestigatorCasePromptInjectionMessage();
+        if (investigatorCaseInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, investigatorCaseInjection);
         }
 
         const settings = getSettings();

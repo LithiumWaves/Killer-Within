@@ -64,7 +64,14 @@ import {
     renderThoughtPromptSettingsHtml,
     syncThoughtSettingsUi,
 } from '../thoughts/ui.js';
-import { isInvestigatorRole, setPlayRole } from '../investigator/core.js';
+import {
+    getInvestigatorSettings,
+    isInvestigatorRole,
+    scheduleInvestigatorSettingsSave,
+    setPlayRole,
+    syncAllCaseActionMessageVisibility,
+} from '../investigator/core.js';
+import { DEFAULT_CASE_PROMPT_TEMPLATE } from '../investigator/config.js';
 import { closeHub, openHub, refreshInvestigatorUi } from '../investigator/ui.js';
 
 const PAGE_TURN_MS = 240;
@@ -2318,6 +2325,9 @@ function syncSettingsUi() {
     $('#kw-deathnote-default-user-lifespan').val(String(Number(settings.defaultUserLifespanYears) || DEFAULT_USER_LIFESPAN_YEARS));
     $('#kw-deathnote-eyes-decay-enabled').prop('checked', settings.shinigamiEyesDecayEnabled !== false);
     $('#kw-deathnote-eyes-decay-years').val(String(Number(settings.shinigamiEyesDecayYearsPerGeneration) || 0.05));
+    const investigatorSettings = getInvestigatorSettings();
+    $('#kw-investigator-case-prompt-template-settings').val(investigatorSettings.casePromptTemplate || DEFAULT_CASE_PROMPT_TEMPLATE);
+    $('#kw-investigator-show-case-action-debug-settings').prop('checked', Boolean(investigatorSettings.showCaseActionDebugBlocks));
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
     syncThoughtSettingsUi();
@@ -2480,6 +2490,23 @@ function bindSettingsUi() {
     $('#kw-deathnote-prompt-character-eyes-template').off('input').on('input', (event) => {
         getSettings().characterShinigamiEyesPromptTemplate = String($(event.currentTarget).val() || '');
         scheduleSettingsSave();
+    });
+
+    $('#kw-investigator-case-prompt-template-settings').off('input').on('input', (event) => {
+        const investigatorSettings = getInvestigatorSettings();
+        investigatorSettings.casePromptTemplate = String($(event.currentTarget).val() || '').trim() || DEFAULT_CASE_PROMPT_TEMPLATE;
+        scheduleInvestigatorSettingsSave();
+    });
+
+    $('#kw-investigator-show-case-action-debug-settings').off('change').on('change', async (event) => {
+        const investigatorSettings = getInvestigatorSettings();
+        investigatorSettings.showCaseActionDebugBlocks = Boolean($(event.currentTarget).prop('checked'));
+        scheduleInvestigatorSettingsSave();
+        if (syncAllCaseActionMessageVisibility()) {
+            await persistChatChanges();
+            refreshDeathNoteUi();
+            refreshInvestigatorUi();
+        }
     });
 
     $('#kw-deathnote-default-user-lifespan').off('change').on('change', (event) => {
@@ -2932,6 +2959,15 @@ function renderInventorySettingsContentHtml() {
                     <label class="killer-within-settings__field">
                         <span>Character Shinigami Eyes template</span>
                         <textarea id="kw-deathnote-prompt-character-eyes-template" class="text_pole" rows="8"></textarea>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Task Force case context template</span>
+                        <textarea id="kw-investigator-case-prompt-template-settings" class="text_pole" rows="12"></textarea>
+                        <small>Placeholders: <code>{{play_role}}</code>, <code>{{case_id}}</code>, <code>{{case_title}}</code>, <code>{{officers_block}}</code>, <code>{{suspects_block}}</code>, <code>{{evidence_block}}</code>, <code>{{restrained_block}}</code>, <code>{{case_action_tag}}</code>, <code>{{example_officer}}</code>.</small>
+                    </label>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-investigator-show-case-action-debug-settings" type="checkbox" />
+                        <span>Show hidden officer case-action blocks in chat</span>
                     </label>
                     <div class="killer-within-settings__field">
                         <span>Hidden thought prompts</span>

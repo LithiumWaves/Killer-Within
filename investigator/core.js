@@ -1,7 +1,11 @@
 import {
+    CASE_ACTIONS,
+    CASE_ACTION_BLOCK_TAG,
+    DEFAULT_CASE_PROMPT_TEMPLATE,
     DEFAULT_INVESTIGATOR_SETTINGS,
     EVIDENCE_TYPES,
     INVESTIGATOR_CHAT_METADATA_KEY,
+    INVESTIGATOR_MESSAGE_EXTRA_KEY,
     INVESTIGATOR_MODULE_NAME,
     PLAY_ROLES,
     SUSPECT_STATUSES,
@@ -13,6 +17,7 @@ import {
 } from '../deathnote/config.js';
 import {
     getChatState as getDeathNoteChatState,
+    getCharacterActorForMessage,
     getContext,
     getDeathNoteInventory,
     getDeathNotes,
@@ -28,12 +33,13 @@ import {
 
 function createDefaultInvestigatorState() {
     return {
-        version: 1,
+        version: 2,
         caseId: `TF-${String(Date.now()).slice(-6)}`,
         caseTitle: 'Kira Case File',
         suspects: [],
         evidence: [],
         restrained: [],
+        officers: [],
         seizedNotebookIds: [],
         seizedScrapIds: [],
         log: [],
@@ -127,16 +133,30 @@ function normalizeRestrained(value, index = 0) {
     };
 }
 
+function normalizeOfficer(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(entry.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = String(entry.key || getActorKey(actor) || `officer-${index + 1}`).trim();
+    return {
+        key,
+        actor,
+        rank: String(entry.rank || 'Officer').trim() || 'Officer',
+        notes: String(entry.notes || '').trim(),
+        assignedAt: Number.isFinite(Number(entry.assignedAt)) ? Number(entry.assignedAt) : Date.now(),
+    };
+}
+
 function normalizeInvestigatorState(value) {
     const defaults = createDefaultInvestigatorState();
     const state = value && typeof value === 'object' ? value : {};
     return {
-        version: 1,
+        version: 2,
         caseId: String(state.caseId || defaults.caseId).trim() || defaults.caseId,
         caseTitle: String(state.caseTitle || defaults.caseTitle).trim() || defaults.caseTitle,
         suspects: (Array.isArray(state.suspects) ? state.suspects : []).map(normalizeSuspect),
         evidence: (Array.isArray(state.evidence) ? state.evidence : []).map(normalizeEvidence),
         restrained: (Array.isArray(state.restrained) ? state.restrained : []).map(normalizeRestrained),
+        officers: (Array.isArray(state.officers) ? state.officers : []).map(normalizeOfficer),
         seizedNotebookIds: (Array.isArray(state.seizedNotebookIds) ? state.seizedNotebookIds : [])
             .map((id) => String(id || '').trim())
             .filter(Boolean),
@@ -595,9 +615,349 @@ export async function commitInvestigatorMutation(mutate, successMessage = '') {
     }
 }
 
+export function assignOfficer(actor, options = {}) {
+    const state = getInvestigatorState();
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKey(normalized);
+    if (!key || !normalized.name || normalized.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        return { applied: false, reason: 'invalid_actor' };
+    }
+
+    const existingIndex = state.officers.findIndex((entry) => entry.key === key);
+    if (existingIndex >= 0) {
+        state.officers[existingIndex] = normalizeOfficer({
+            ...state.officers[existingIndex],
+            rank: Object.hasOwn(options, 'rank') ? options.rank : state.officers[existingIndex].rank,
+            notes: Object.hasOwn(options, 'notes') ? options.notes : state.officers[existingIndex].notes,
+        }, existingIndex);
+        pushCaseLog(state, `Updated Task Force officer: ${normalized.name}.`);
+        return { applied: true, reason: 'updated', officer: state.officers[existingIndex] };
+    }
+
+    const officer = normalizeOfficer({
+        key,
+        actor: normalized,
+        rank: String(options.rank || 'Officer').trim() || 'Officer',
+        notes: String(options.notes || '').trim(),
+        assignedAt: Date.now(),
+    });
+    state.officers.push(officer);
+    pushCaseLog(state, `Assigned Task Force officer: ${normalized.name}.`);
+    return { applied: true, reason: 'created', officer };
+}
+
+export function removeOfficer(actorOrKey) {
+    const state = getInvestigatorState();
+    const key = typeof actorOrKey === 'string'
+        ? String(actorOrKey || '').trim()
+        : getActorKey(actorOrKey);
+    const before = state.officers.length;
+    state.officers = state.officers.filter((entry) => entry.key !== key);
+    if (state.officers.length === before) {
+        return { applied: false, reason: 'missing_officer' };
+    }
+    pushCaseLog(state, `Removed Task Force officer: ${key}.`);
+    return { applied: true };
+}
+
+export function isTaskForceOfficer(actor) {
+    const key = getActorKey(actor);
+    if (!key) {
+        return false;
+    }
+    return getInvestigatorState().officers.some((entry) => entry.key === key);
+}
+
+function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function ensureInvestigatorMessageExtra(message) {
+    if (!message || typeof message !== 'object') {
+        return null;
+    }
+    message.extra ??= {};
+    if (!message.extra[INVESTIGATOR_MESSAGE_EXTRA_KEY] || typeof message.extra[INVESTIGATOR_MESSAGE_EXTRA_KEY] !== 'object') {
+        message.extra[INVESTIGATOR_MESSAGE_EXTRA_KEY] = {};
+    }
+    return message.extra[INVESTIGATOR_MESSAGE_EXTRA_KEY];
+}
+
+function extractCaseActionBlocks(text) {
+    const source = String(text ?? '');
+    if (!source) {
+        return { blocks: [], strippedText: source };
+    }
+    const tag = escapeRegExp(CASE_ACTION_BLOCK_TAG);
+    const regex = new RegExp(`(?:<${tag}>|\\[${tag}\\])\\s*([\\s\\S]*?)\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'gi');
+    const blocks = [];
+    let match = regex.exec(source);
+    while (match) {
+        blocks.push({
+            rawBlock: String(match[0] || ''),
+            body: String(match[1] || ''),
+        });
+        match = regex.exec(source);
+    }
+    if (!blocks.length) {
+        return { blocks, strippedText: source };
+    }
+    const strippedText = source
+        .replace(new RegExp(`\\s*(?:<${tag}>|\\[${tag}\\])\\s*[\\s\\S]*?\\s*(?:<\\/${tag}>|\\[\\/${tag}\\])`, 'gi'), '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trimEnd();
+    return { blocks, strippedText };
+}
+
+function parseCaseActionBlock(blockBody) {
+    const fields = {
+        officer: '',
+        action: '',
+        target: '',
+        status: '',
+        title: '',
+        detail: '',
+        reason: '',
+        type: '',
+    };
+    for (const line of String(blockBody ?? '').split(/\r?\n/)) {
+        const match = line.match(/^\s*([a-z_]+)\s*:\s*(.+?)\s*$/i);
+        if (!match) {
+            continue;
+        }
+        const key = String(match[1] || '').trim().toLowerCase();
+        const value = String(match[2] || '').trim();
+        if (Object.hasOwn(fields, key)) {
+            fields[key] = value;
+        }
+    }
+    fields.action = String(fields.action || '').trim().toLowerCase();
+    fields.status = String(fields.status || '').trim().toLowerCase();
+    fields.type = String(fields.type || '').trim().toLowerCase();
+    return fields;
+}
+
+function resolveTargetActorByName(name) {
+    const search = normalizeKnowledgeKey(name);
+    if (!search) {
+        return null;
+    }
+    const choices = getCharacterNameDirectory()
+        .map((entry) => entry.actor)
+        .filter((actor) => actor && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER);
+    const match = choices.find((actor) => normalizeKnowledgeKey(actor.name) === search);
+    if (match) {
+        return normalizeActorRef(match, NOTEBOOK_ACTOR_TYPES.CHARACTER, match.name);
+    }
+    return normalizeActorRef({
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        name: String(name || '').trim(),
+    }, NOTEBOOK_ACTOR_TYPES.CHARACTER, String(name || '').trim());
+}
+
+export function applyCaseAction(parsed, speaker) {
+    const action = String(parsed?.action || '').trim().toLowerCase();
+    if (!Object.values(CASE_ACTIONS).includes(action)) {
+        return { applied: false, reason: 'invalid_action' };
+    }
+    if (!isTaskForceOfficer(speaker)) {
+        return { applied: false, reason: 'not_officer' };
+    }
+    if (normalizeKnowledgeKey(parsed.officer) !== normalizeKnowledgeKey(speaker.name)) {
+        return { applied: false, reason: 'officer_mismatch' };
+    }
+
+    if (action === CASE_ACTIONS.LOG) {
+        const evidence = logEvidence({
+            type: Object.values(EVIDENCE_TYPES).includes(parsed.type) ? parsed.type : EVIDENCE_TYPES.STATEMENT,
+            title: parsed.title || `Officer report: ${speaker.name}`,
+            detail: parsed.detail || parsed.reason || '',
+            source: `officer:${speaker.name}`,
+        }).evidence;
+        return { applied: true, reason: 'logged', evidence };
+    }
+
+    if (action === CASE_ACTIONS.PIN) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const result = pinSuspect(target, {
+            status: parsed.status || SUSPECT_STATUSES.PERSON_OF_INTEREST,
+            notes: parsed.detail || parsed.reason || `Pinned by officer ${speaker.name}.`,
+        });
+        return { applied: Boolean(result.applied), reason: result.reason || 'pinned', suspect: result.suspect };
+    }
+
+    if (action === CASE_ACTIONS.STATUS) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const key = getActorKey(target);
+        let suspect = getInvestigatorState().suspects.find((entry) => entry.key === key);
+        if (!suspect) {
+            pinSuspect(target, { status: parsed.status || SUSPECT_STATUSES.PERSON_OF_INTEREST });
+            suspect = getInvestigatorState().suspects.find((entry) => entry.key === key);
+        }
+        if (!suspect) {
+            return { applied: false, reason: 'missing_suspect' };
+        }
+        const result = setSuspectStatus(suspect.key, parsed.status || SUSPECT_STATUSES.PERSON_OF_INTEREST);
+        return { applied: Boolean(result.applied), reason: result.reason || 'status_updated', suspect: result.suspect };
+    }
+
+    if (action === CASE_ACTIONS.RESTRAIN) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const result = restrainActor(target, {
+            reason: parsed.reason || parsed.detail || `Restrained by officer ${speaker.name}.`,
+        });
+        return { applied: Boolean(result.applied), reason: result.reason || 'restrained', entry: result.entry };
+    }
+
+    if (action === CASE_ACTIONS.RELEASE) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const result = releaseRestrainedActor(target);
+        return { applied: Boolean(result.applied), reason: result.reason || 'released' };
+    }
+
+    return { applied: false, reason: 'unhandled_action' };
+}
+
+function syncCaseActionMessageVisibility(message, metadata = null) {
+    const extra = ensureInvestigatorMessageExtra(message);
+    const caseAction = metadata || extra?.caseAction;
+    if (!caseAction?.processed) {
+        return false;
+    }
+    const settings = getInvestigatorSettings();
+    const showBlock = Boolean(settings.showCaseActionDebugBlocks);
+    const rawMessage = String(caseAction.rawMessage || '');
+    const strippedText = String(caseAction.strippedText || '');
+    const nextText = showBlock
+        ? (rawMessage || String(message.mes ?? ''))
+        : (strippedText || String(message.mes ?? ''));
+    if (String(message.mes ?? '') === nextText) {
+        caseAction.stripped = !showBlock;
+        return false;
+    }
+    message.mes = nextText;
+    caseAction.stripped = !showBlock;
+    return true;
+}
+
+export function processAssistantCaseActionMessage(messageIndex) {
+    const context = getContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+
+    const message = chat[index];
+    if (!message || message.is_system || message.is_user) {
+        return false;
+    }
+
+    const extra = ensureInvestigatorMessageExtra(message);
+    if (extra?.caseAction?.processed) {
+        return syncCaseActionMessageVisibility(message, extra.caseAction);
+    }
+
+    const rawText = String(message.mes ?? '');
+    const extracted = extractCaseActionBlocks(rawText);
+    if (!extracted.blocks.length) {
+        return false;
+    }
+
+    const settings = getInvestigatorSettings();
+    const speaker = getCharacterActorForMessage(message);
+    const metadata = {
+        processed: true,
+        rawMessage: rawText,
+        strippedText: extracted.strippedText,
+        rawBlock: extracted.blocks[0].rawBlock,
+        officer: '',
+        action: '',
+        applied: false,
+        reason: '',
+        stripped: !settings.showCaseActionDebugBlocks,
+        updatedAt: Date.now(),
+    };
+
+    if (!speaker || speaker.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+        metadata.reason = 'invalid_speaker';
+    } else {
+        const parsed = parseCaseActionBlock(extracted.blocks[0].body);
+        metadata.officer = parsed.officer;
+        metadata.action = parsed.action;
+        const result = applyCaseAction(parsed, speaker);
+        metadata.applied = Boolean(result.applied);
+        metadata.reason = result.reason || '';
+    }
+
+    extra.caseAction = metadata;
+    const visibilityChanged = syncCaseActionMessageVisibility(message, metadata);
+    return visibilityChanged || metadata.applied;
+}
+
+export function syncAllCaseActionMessageVisibility() {
+    const context = getContext();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    let changed = false;
+    for (let index = 0; index < chat.length; index += 1) {
+        const message = chat[index];
+        const caseAction = message?.extra?.[INVESTIGATOR_MESSAGE_EXTRA_KEY]?.caseAction;
+        if (!caseAction?.processed) {
+            continue;
+        }
+        if (syncCaseActionMessageVisibility(message, caseAction)) {
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+export function buildCasePromptReplacements() {
+    const state = getInvestigatorState();
+    const officers = state.officers || [];
+    const suspects = state.suspects || [];
+    const evidence = (state.evidence || []).slice(0, 12);
+    const restrained = state.restrained || [];
+
+    return {
+        play_role: getPlayRole(),
+        case_id: state.caseId,
+        case_title: state.caseTitle,
+        case_action_tag: CASE_ACTION_BLOCK_TAG,
+        example_officer: officers[0]?.actor?.name || 'Officer Name',
+        officers_block: officers.length
+            ? officers.map((entry) => `- ${entry.actor?.name || 'Officer'} (${entry.rank || 'Officer'})`).join('\n')
+            : 'No Task Force officers assigned yet.',
+        suspects_block: suspects.length
+            ? suspects.map((entry) => `- ${entry.actor?.name || 'Unknown'} [${entry.status}]${entry.notes ? `: ${entry.notes}` : ''}`).join('\n')
+            : 'No suspects pinned.',
+        evidence_block: evidence.length
+            ? evidence.map((entry) => `- ${entry.title}: ${entry.detail || '(no detail)'}`).join('\n')
+            : 'No evidence logged.',
+        restrained_block: restrained.length
+            ? restrained.map((entry) => `- ${entry.actor?.name || 'Unknown'}${entry.reason ? `: ${entry.reason}` : ''}`).join('\n')
+            : 'Nobody currently marked restrained.',
+    };
+}
+
 export {
     PLAY_ROLES,
     SUSPECT_STATUSES,
     EVIDENCE_TYPES,
+    CASE_ACTIONS,
+    CASE_ACTION_BLOCK_TAG,
+    DEFAULT_CASE_PROMPT_TEMPLATE,
     getActorKey,
 };
