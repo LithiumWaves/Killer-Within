@@ -30,6 +30,7 @@ import {
     getSelectedNotebookIdState,
     getSettings,
     getShinigamiEyesState,
+    getCharacterShinigamiEyesHolders,
     learnCharacterName,
     linkNotebookShinigami,
     markNotebookPresenceRevealPending,
@@ -2306,7 +2307,10 @@ function syncSettingsUi() {
     $('#kw-deathnote-prompt-reveal-template').val(settings.notebookRevealPromptTemplate);
     $('#kw-deathnote-prompt-presence-template').val(settings.presencePromptTemplate);
     $('#kw-deathnote-prompt-eyes-template').val(settings.shinigamiEyesPromptTemplate);
+    $('#kw-deathnote-prompt-character-eyes-template').val(settings.characterShinigamiEyesPromptTemplate);
     $('#kw-deathnote-default-user-lifespan').val(String(Number(settings.defaultUserLifespanYears) || DEFAULT_USER_LIFESPAN_YEARS));
+    $('#kw-deathnote-eyes-decay-enabled').prop('checked', settings.shinigamiEyesDecayEnabled !== false);
+    $('#kw-deathnote-eyes-decay-years').val(String(Number(settings.shinigamiEyesDecayYearsPerGeneration) || 0.05));
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
     syncThoughtSettingsUi();
@@ -2453,12 +2457,32 @@ function bindSettingsUi() {
         scheduleSettingsSave();
     });
 
+    $('#kw-deathnote-prompt-character-eyes-template').off('input').on('input', (event) => {
+        getSettings().characterShinigamiEyesPromptTemplate = String($(event.currentTarget).val() || '');
+        scheduleSettingsSave();
+    });
+
     $('#kw-deathnote-default-user-lifespan').off('change').on('change', (event) => {
         const years = Math.max(1, Math.min(200, Math.round(Number($(event.currentTarget).val()) || DEFAULT_USER_LIFESPAN_YEARS)));
         getSettings().defaultUserLifespanYears = years;
         $(event.currentTarget).val(String(years));
         scheduleSettingsSave();
         // Refresh Eyes panel so pre-deal remaining life mirrors the new default.
+        refreshDeathNoteUi();
+    });
+
+    $('#kw-deathnote-eyes-decay-enabled').off('change').on('change', (event) => {
+        getSettings().shinigamiEyesDecayEnabled = Boolean($(event.currentTarget).prop('checked'));
+        scheduleSettingsSave();
+        refreshDeathNoteUi();
+    });
+
+    $('#kw-deathnote-eyes-decay-years').off('change').on('change', (event) => {
+        const raw = Number($(event.currentTarget).val());
+        const years = Number.isFinite(raw) ? Math.max(0, Math.min(5, Math.round(raw * 100) / 100)) : 0.05;
+        getSettings().shinigamiEyesDecayYearsPerGeneration = years;
+        $(event.currentTarget).val(String(years));
+        scheduleSettingsSave();
         refreshDeathNoteUi();
     });
 
@@ -2830,11 +2854,20 @@ function renderInventorySettingsContentHtml() {
                     <div class="kw-dn-settings-modal__foldout-body">
                     <div class="killer-within-settings__field">
                         <span>Template placeholders</span>
-                        <small>Use <code>{{ownership_block}}</code>, <code>{{inventory_block}}</code>, <code>{{due_block}}</code>, <code>{{entries_block}}</code>, <code>{{user_label}}</code>, <code>{{target_label}}</code>, <code>{{linked_shinigami}}</code>, <code>{{touchers_block}}</code>, <code>{{granted_by}}</code>, <code>{{original_lifespan_years}}</code>, <code>{{remaining_lifespan_years}}</code>, <code>{{deal_count_clause}}</code>, and <code>{{eyes_roster_block}}</code>.</small>
+                        <small>Use <code>{{ownership_block}}</code>, <code>{{inventory_block}}</code>, <code>{{due_block}}</code>, <code>{{entries_block}}</code>, <code>{{user_label}}</code>, <code>{{target_label}}</code>, <code>{{linked_shinigami}}</code>, <code>{{touchers_block}}</code>, <code>{{granted_by}}</code>, <code>{{original_lifespan_years}}</code>, <code>{{remaining_lifespan_years}}</code>, <code>{{deal_count_clause}}</code>, <code>{{eyes_roster_block}}</code>, and <code>{{character_eyes_block}}</code>.</small>
                     </div>
                     <label class="killer-within-settings__field">
                         <span>Default user lifespan (years, before Eye deals)</span>
                         <input id="kw-deathnote-default-user-lifespan" class="text_pole" type="number" min="1" max="200" step="1" />
+                    </label>
+                    <label class="killer-within-settings__row">
+                        <input id="kw-deathnote-eyes-decay-enabled" type="checkbox" />
+                        <span>Slow Eyes lifespan decay each generation</span>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Eyes decay years per generation</span>
+                        <input id="kw-deathnote-eyes-decay-years" class="text_pole" type="number" min="0" max="5" step="0.01" />
+                        <small>Applies to user and character Eye holders while Eyes are active.</small>
                     </label>
                     <label class="killer-within-settings__field">
                         <span>Death Note context template</span>
@@ -2853,8 +2886,12 @@ function renderInventorySettingsContentHtml() {
                         <textarea id="kw-deathnote-prompt-presence-template" class="text_pole" rows="9"></textarea>
                     </label>
                     <label class="killer-within-settings__field">
-                        <span>Shinigami Eyes template</span>
+                        <span>Shinigami Eyes template (user)</span>
                         <textarea id="kw-deathnote-prompt-eyes-template" class="text_pole" rows="10"></textarea>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Character Shinigami Eyes template</span>
+                        <textarea id="kw-deathnote-prompt-character-eyes-template" class="text_pole" rows="8"></textarea>
                     </label>
                     <div class="killer-within-settings__field">
                         <span>Hidden thought prompts</span>
@@ -2922,12 +2959,26 @@ function renderShinigamiEyesPanelHtml() {
     const linked = getLinkedShinigamiForEyesDeal();
     const canDeal = Boolean(linked?.active);
     const isActive = Boolean(eyes.active);
-    const remaining = Math.max(0, Math.floor(Number(eyes.remainingLifespanYears) || 0));
+    const remaining = Number(eyes.remainingLifespanYears);
+    const remainingLabel = Number.isFinite(remaining) ? String(remaining) : '0';
     const canTrade = canDeal && (!isActive || remaining >= 1);
     const dealLabel = isActive ? 'Trade Half Again' : 'Accept Shinigami Eyes';
     const warning = isActive
         ? 'Another deal will halve your remaining life again. This cannot be undone.'
         : 'You will see human true names and lifespans. Half your remaining life will be taken. This cannot be undone.';
+    const settings = getSettings();
+    const decayEnabled = settings.shinigamiEyesDecayEnabled !== false;
+    const decayYears = Number(settings.shinigamiEyesDecayYearsPerGeneration) || 0.05;
+    const characterHolders = getCharacterShinigamiEyesHolders();
+    const characterHoldersHtml = characterHolders.length
+        ? characterHolders.map((entry) => `
+            <div class="kw-deathnote-item__meta-line">
+                <b>${escapeHtml(entry.actor?.name || 'Character')}</b>
+                — ${escapeHtml(String(entry.remainingLifespanYears))} yrs left
+                (deals: ${Math.max(0, Number(entry.dealCount) || 0)}; granted by ${escapeHtml(formatActorLabel(entry.grantedBy))})
+            </div>
+        `).join('')
+        : '<small>No character Eye deals yet. Eligible holders can accept via the hidden AI Eyes deal block.</small>';
 
     return `
         <section class="kw-dn-settings-modal__section kw-shinigami-eyes-panel">
@@ -2940,11 +2991,12 @@ function renderShinigamiEyesPanelHtml() {
                     <div class="kw-shinigami-eyes-card__status">
                         <span class="kw-deathnote-item__badge ${isActive ? 'is-linked' : ''}">${isActive ? 'Eyes Active' : 'Dormant'}</span>
                         <span class="kw-deathnote-item__badge">Deals: ${Math.max(0, Number(eyes.dealCount) || 0)}</span>
+                        <span class="kw-deathnote-item__badge">${decayEnabled ? `Decay ${decayYears}/gen` : 'Decay Off'}</span>
                     </div>
                     <div class="kw-deathnote-item__meta-grid">
                         <span class="kw-deathnote-item__meta-line"><b>Granted by:</b> ${escapeHtml(isActive ? formatActorLabel(eyes.grantedBy) : (linked?.active ? formatActorLabel(linked.actor) : 'No linked Shinigami'))}</span>
                         <span class="kw-deathnote-item__meta-line"><b>Original lifespan:</b> ${escapeHtml(String(eyes.originalLifespanYears))} years</span>
-                        <span class="kw-deathnote-item__meta-line kw-shinigami-eyes-card__remaining"><b>Remaining lifespan:</b> ${escapeHtml(String(remaining))} years</span>
+                        <span class="kw-deathnote-item__meta-line kw-shinigami-eyes-card__remaining"><b>Remaining lifespan:</b> ${escapeHtml(remainingLabel)} years</span>
                         <span class="kw-deathnote-item__meta-line"><b>Cost:</b> Half of remaining life per deal (irreversible)</span>
                     </div>
                     <p class="kw-shinigami-eyes-card__warning">${escapeHtml(warning)}</p>
@@ -2959,6 +3011,10 @@ function renderShinigamiEyesPanelHtml() {
                     </div>
                     ${canDeal ? '' : '<small>Link a Shinigami to a Death Note before making the Eye deal.</small>'}
                     ${canDeal && !canTrade ? '<small>No remaining lifespan left to trade.</small>' : ''}
+                    <div class="kw-shinigami-eyes-card__characters">
+                        <div class="kw-dn-settings-modal__eyebrow">Character Eyes</div>
+                        ${characterHoldersHtml}
+                    </div>
                 </div>
             </div>
         </section>

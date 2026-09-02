@@ -2,6 +2,7 @@ import {
     autoLearnCharacterNameFromMessage,
     processAssistantNotebookWriteMessage,
     processAssistantNotebookReturnMessage,
+    processAssistantShinigamiEyesDealMessage,
     autoLearnQuotedCharacterNamesFromMessage,
     autoTrackDeathNoteMemoryMessage,
     consumePendingIdentityTheftExposureForMessage,
@@ -33,6 +34,9 @@ export function setupDeathNoteExtension() {
                 const notebookReturnApplied = details?.kind === 'received'
                     ? processAssistantNotebookReturnMessage(messageIndex)
                     : false;
+                const eyesDealApplied = details?.kind === 'received'
+                    ? processAssistantShinigamiEyesDealMessage(messageIndex)
+                    : false;
                 const memoryTracked = autoTrackDeathNoteMemoryMessage(messageIndex, {
                     resolvedEntries: assistantResult && Array.isArray(assistantResult.resolvedEntries)
                         ? assistantResult.resolvedEntries
@@ -46,10 +50,18 @@ export function setupDeathNoteExtension() {
                 if (memoryTracked) {
                     await syncLinkedShinigamiVisibility();
                 }
-                return aiNotebookWriteApplied || notebookReturnApplied || memoryTracked || nameLearned || confessionLearned || identityExposureConsumed;
+                return aiNotebookWriteApplied
+                    || notebookReturnApplied
+                    || eyesDealApplied
+                    || memoryTracked
+                    || nameLearned
+                    || confessionLearned
+                    || identityExposureConsumed;
             },
             onAssistantMessageFinalized: async (messageIndex) => {
-                return processAssistantNotebookWriteMessage(messageIndex) || processAssistantNotebookReturnMessage(messageIndex);
+                return processAssistantNotebookWriteMessage(messageIndex)
+                    || processAssistantNotebookReturnMessage(messageIndex)
+                    || processAssistantShinigamiEyesDealMessage(messageIndex);
             },
             onUiRefresh: refreshDeathNoteUi,
         });
