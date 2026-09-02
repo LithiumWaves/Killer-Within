@@ -24,6 +24,7 @@ import {
 } from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
 import { getInvestigatorCasePromptInjectionMessage } from '../investigator/prompts.js';
+import { tickWarrantsForGeneration } from '../investigator/core.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
 
@@ -246,6 +247,11 @@ export function installInterceptor() {
 
         const deathNoteTick = tickDeathNoteCountdownForGeneration(chat.length);
         if (deathNoteTick?.ticked) {
+            await persistDeathNoteChatChanges();
+        }
+
+        const warrantTick = tickWarrantsForGeneration(chat.length);
+        if (warrantTick?.ticked && warrantTick.resolved?.length) {
             await persistDeathNoteChatChanges();
         }
 

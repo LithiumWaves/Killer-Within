@@ -1,14 +1,21 @@
 import {
     CASE_ACTIONS,
     CASE_ACTION_BLOCK_TAG,
+    CONFRONT_MIN_STRENGTH,
+    CONFRONT_PRIME_STRENGTH,
     DEFAULT_CASE_PROMPT_TEMPLATE,
     DEFAULT_INVESTIGATOR_SETTINGS,
+    DEFAULT_WARRANT_GENERATIONS,
     EVIDENCE_TYPES,
     INVESTIGATOR_CHAT_METADATA_KEY,
     INVESTIGATOR_MESSAGE_EXTRA_KEY,
     INVESTIGATOR_MODULE_NAME,
+    OFFICER_CLEARANCE,
+    OFFICER_CLEARANCE_ACTIONS,
     PLAY_ROLES,
     SUSPECT_STATUSES,
+    WARRANT_RESULTS,
+    WARRANT_STATUS,
 } from './config.js';
 import {
     NOTEBOOK_ACTOR_TYPES,
@@ -33,16 +40,19 @@ import {
 
 function createDefaultInvestigatorState() {
     return {
-        version: 2,
+        version: 3,
         caseId: `TF-${String(Date.now()).slice(-6)}`,
         caseTitle: 'Kira Case File',
         suspects: [],
         evidence: [],
         restrained: [],
         officers: [],
+        warrants: [],
+        seizeRightsKeys: [],
         seizedNotebookIds: [],
         seizedScrapIds: [],
         log: [],
+        warrantTickSignature: null,
     };
 }
 
@@ -133,16 +143,57 @@ function normalizeRestrained(value, index = 0) {
     };
 }
 
+function normalizeOfficerClearance(value, rank = '') {
+    const raw = String(value || '').trim().toLowerCase();
+    if (Object.values(OFFICER_CLEARANCE).includes(raw)) {
+        return raw;
+    }
+    const rankText = String(rank || '').trim().toLowerCase();
+    if (/\b(lead|chief|captain|commander)\b/.test(rankText)) {
+        return OFFICER_CLEARANCE.LEAD;
+    }
+    if (/\b(detective|inspector|lieutenant)\b/.test(rankText)) {
+        return OFFICER_CLEARANCE.DETECTIVE;
+    }
+    return OFFICER_CLEARANCE.FIELD;
+}
+
 function normalizeOfficer(value, index = 0) {
     const entry = value && typeof value === 'object' ? value : {};
     const actor = normalizeActorRef(entry.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
     const key = String(entry.key || getActorKey(actor) || `officer-${index + 1}`).trim();
+    const rank = String(entry.rank || 'Officer').trim() || 'Officer';
     return {
         key,
         actor,
-        rank: String(entry.rank || 'Officer').trim() || 'Officer',
+        rank,
+        clearance: normalizeOfficerClearance(entry.clearance, rank),
         notes: String(entry.notes || '').trim(),
         assignedAt: Number.isFinite(Number(entry.assignedAt)) ? Number(entry.assignedAt) : Date.now(),
+    };
+}
+
+function normalizeWarrant(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const target = normalizeActorRef(entry.target, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const filedBy = normalizeActorRef(entry.filedBy, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const statusRaw = String(entry.status || WARRANT_STATUS.PENDING).trim().toLowerCase();
+    const status = Object.values(WARRANT_STATUS).includes(statusRaw) ? statusRaw : WARRANT_STATUS.PENDING;
+    const resultRaw = String(entry.result || '').trim().toLowerCase();
+    const result = Object.values(WARRANT_RESULTS).includes(resultRaw) ? resultRaw : '';
+    const generationsLeft = Math.max(0, Math.round(Number(entry.generationsLeft) || 0));
+    return {
+        id: String(entry.id || `warrant-${index + 1}-${Date.now()}`).trim(),
+        target,
+        targetKey: String(entry.targetKey || getActorKey(target) || '').trim(),
+        filedBy,
+        note: String(entry.note || '').trim(),
+        status,
+        result,
+        evidenceId: String(entry.evidenceId || '').trim(),
+        generationsLeft,
+        filedAt: Number.isFinite(Number(entry.filedAt)) ? Number(entry.filedAt) : Date.now(),
+        resolvedAt: Number.isFinite(Number(entry.resolvedAt)) ? Number(entry.resolvedAt) : null,
     };
 }
 
@@ -150,13 +201,17 @@ function normalizeInvestigatorState(value) {
     const defaults = createDefaultInvestigatorState();
     const state = value && typeof value === 'object' ? value : {};
     return {
-        version: 2,
+        version: 3,
         caseId: String(state.caseId || defaults.caseId).trim() || defaults.caseId,
         caseTitle: String(state.caseTitle || defaults.caseTitle).trim() || defaults.caseTitle,
         suspects: (Array.isArray(state.suspects) ? state.suspects : []).map(normalizeSuspect),
         evidence: (Array.isArray(state.evidence) ? state.evidence : []).map(normalizeEvidence),
         restrained: (Array.isArray(state.restrained) ? state.restrained : []).map(normalizeRestrained),
         officers: (Array.isArray(state.officers) ? state.officers : []).map(normalizeOfficer),
+        warrants: (Array.isArray(state.warrants) ? state.warrants : []).map(normalizeWarrant).slice(-40),
+        seizeRightsKeys: (Array.isArray(state.seizeRightsKeys) ? state.seizeRightsKeys : [])
+            .map((key) => String(key || '').trim())
+            .filter(Boolean),
         seizedNotebookIds: (Array.isArray(state.seizedNotebookIds) ? state.seizedNotebookIds : [])
             .map((id) => String(id || '').trim())
             .filter(Boolean),
@@ -168,6 +223,7 @@ function normalizeInvestigatorState(value) {
             at: Number.isFinite(Number(entry?.at)) ? Number(entry.at) : Date.now(),
             text: String(entry?.text || '').trim(),
         })),
+        warrantTickSignature: state.warrantTickSignature == null ? null : state.warrantTickSignature,
     };
 }
 
@@ -604,7 +660,10 @@ export async function commitInvestigatorMutation(mutate, successMessage = '') {
             return false;
         }
         await persistChatChanges();
-        if (successMessage && globalThis.toastr?.success) {
+        const applied = typeof result === 'object' && Object.hasOwn(result, 'applied')
+            ? Boolean(result.applied)
+            : true;
+        if (applied && successMessage && globalThis.toastr?.success) {
             globalThis.toastr.success(successMessage);
         }
         return result;
@@ -623,26 +682,37 @@ export function assignOfficer(actor, options = {}) {
         return { applied: false, reason: 'invalid_actor' };
     }
 
+    const nextRank = Object.hasOwn(options, 'rank')
+        ? String(options.rank || 'Officer').trim() || 'Officer'
+        : null;
+    const nextClearance = Object.hasOwn(options, 'clearance')
+        ? normalizeOfficerClearance(options.clearance, nextRank || '')
+        : null;
+
     const existingIndex = state.officers.findIndex((entry) => entry.key === key);
     if (existingIndex >= 0) {
+        const current = state.officers[existingIndex];
         state.officers[existingIndex] = normalizeOfficer({
-            ...state.officers[existingIndex],
-            rank: Object.hasOwn(options, 'rank') ? options.rank : state.officers[existingIndex].rank,
-            notes: Object.hasOwn(options, 'notes') ? options.notes : state.officers[existingIndex].notes,
+            ...current,
+            rank: nextRank ?? current.rank,
+            clearance: nextClearance ?? current.clearance,
+            notes: Object.hasOwn(options, 'notes') ? options.notes : current.notes,
         }, existingIndex);
         pushCaseLog(state, `Updated Task Force officer: ${normalized.name}.`);
         return { applied: true, reason: 'updated', officer: state.officers[existingIndex] };
     }
 
+    const rank = nextRank || String(options.rank || 'Officer').trim() || 'Officer';
     const officer = normalizeOfficer({
         key,
         actor: normalized,
-        rank: String(options.rank || 'Officer').trim() || 'Officer',
+        rank,
+        clearance: nextClearance || normalizeOfficerClearance(options.clearance, rank),
         notes: String(options.notes || '').trim(),
         assignedAt: Date.now(),
     });
     state.officers.push(officer);
-    pushCaseLog(state, `Assigned Task Force officer: ${normalized.name}.`);
+    pushCaseLog(state, `Assigned Task Force officer: ${normalized.name} [${officer.clearance}].`);
     return { applied: true, reason: 'created', officer };
 }
 
@@ -666,6 +736,286 @@ export function isTaskForceOfficer(actor) {
         return false;
     }
     return getInvestigatorState().officers.some((entry) => entry.key === key);
+}
+
+export function getOfficerRecord(actor) {
+    const key = getActorKey(actor);
+    if (!key) {
+        return null;
+    }
+    return getInvestigatorState().officers.find((entry) => entry.key === key) || null;
+}
+
+export function officerMayPerformAction(actor, action) {
+    const officer = getOfficerRecord(actor);
+    if (!officer) {
+        return false;
+    }
+    const allowed = OFFICER_CLEARANCE_ACTIONS[officer.clearance] || OFFICER_CLEARANCE_ACTIONS[OFFICER_CLEARANCE.FIELD];
+    return allowed.includes(String(action || '').trim().toLowerCase());
+}
+
+export function hasSeizeRightsForActor(actor) {
+    const key = getActorKey(actor);
+    if (!key) {
+        return false;
+    }
+    if (isActorRestrained(actor)) {
+        return true;
+    }
+    return getInvestigatorState().seizeRightsKeys.includes(key);
+}
+
+export function getCaseStrength(actorOrKey) {
+    const state = getInvestigatorState();
+    const key = typeof actorOrKey === 'string'
+        ? String(actorOrKey || '').trim()
+        : getActorKey(actorOrKey);
+    const suspect = state.suspects.find((entry) => entry.key === key);
+    if (!suspect) {
+        return { strength: 0, linked: 0, statusBonus: 0, suspect: null };
+    }
+    const linked = Array.isArray(suspect.linkedEvidenceIds) ? suspect.linkedEvidenceIds.length : 0;
+    let statusBonus = 0;
+    if (suspect.status === SUSPECT_STATUSES.PRIME) {
+        statusBonus = 2;
+    } else if (suspect.status === SUSPECT_STATUSES.PERSON_OF_INTEREST) {
+        statusBonus = 1;
+    } else if (suspect.status === SUSPECT_STATUSES.CLEARED) {
+        statusBonus = -2;
+    }
+    return {
+        strength: Math.max(0, linked + statusBonus),
+        linked,
+        statusBonus,
+        suspect,
+    };
+}
+
+function pickWarrantResult(strength) {
+    if (strength >= 4) {
+        return WARRANT_RESULTS.ID_HIT;
+    }
+    if (strength >= 3) {
+        return WARRANT_RESULTS.STATEMENT;
+    }
+    if (strength >= 2) {
+        return WARRANT_RESULTS.SCRAP_TRACE;
+    }
+    if (strength >= 1) {
+        return WARRANT_RESULTS.FALSE_LEAD;
+    }
+    return WARRANT_RESULTS.EMPTY;
+}
+
+function describeWarrantResult(result, targetName) {
+    switch (result) {
+        case WARRANT_RESULTS.ID_HIT:
+            return `Search of ${targetName} recovered identifying personal effects tied to prior case activity.`;
+        case WARRANT_RESULTS.STATEMENT:
+            return `Search of ${targetName} produced a usable statement / contemporaneous note fragment.`;
+        case WARRANT_RESULTS.SCRAP_TRACE:
+            return `Search of ${targetName} found a scrap-paper trace with incomplete writing residue.`;
+        case WARRANT_RESULTS.FALSE_LEAD:
+            return `Search of ${targetName} turned up a misleading lead that does not hold under review.`;
+        case WARRANT_RESULTS.EMPTY:
+        default:
+            return `Search of ${targetName} returned empty / nothing actionable.`;
+    }
+}
+
+export function fileWarrant(actor, options = {}) {
+    const state = getInvestigatorState();
+    const target = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKey(target);
+    if (!key || !target.name) {
+        return { applied: false, reason: 'invalid_actor' };
+    }
+
+    const pending = state.warrants.find((entry) => (
+        entry.status === WARRANT_STATUS.PENDING && entry.targetKey === key
+    ));
+    if (pending) {
+        return { applied: false, reason: 'already_pending', warrant: pending };
+    }
+
+    const generations = Math.max(
+        1,
+        Math.min(8, Math.round(Number(options.generations) || DEFAULT_WARRANT_GENERATIONS)),
+    );
+    const filedBy = options.filedBy
+        ? normalizeActorRef(options.filedBy, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+        : normalizeActorRef({ type: NOTEBOOK_ACTOR_TYPES.USER, name: 'Task Force' }, NOTEBOOK_ACTOR_TYPES.USER, 'Task Force');
+
+    const warrant = normalizeWarrant({
+        id: `warrant-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+        target,
+        targetKey: key,
+        filedBy,
+        note: String(options.note || options.reason || options.detail || '').trim(),
+        status: WARRANT_STATUS.PENDING,
+        generationsLeft: generations,
+        filedAt: Date.now(),
+    });
+    state.warrants.push(warrant);
+    pushCaseLog(state, `Warrant filed on ${target.name} (resolve in ${generations} gen).`);
+    return { applied: true, warrant };
+}
+
+export function resolveWarrant(warrantId, options = {}) {
+    const state = getInvestigatorState();
+    const warrant = state.warrants.find((entry) => entry.id === String(warrantId || '').trim());
+    if (!warrant) {
+        return { applied: false, reason: 'missing_warrant' };
+    }
+    if (warrant.status === WARRANT_STATUS.RESOLVED && !options.force) {
+        return { applied: false, reason: 'already_resolved', warrant };
+    }
+
+    const strengthInfo = getCaseStrength(warrant.targetKey);
+    const result = options.result || pickWarrantResult(strengthInfo.strength);
+    const targetName = warrant.target?.name || 'subject';
+    const detail = describeWarrantResult(result, targetName)
+        + (warrant.note ? ` Filed note: ${warrant.note}` : '');
+    const warrantKey = warrant.id;
+    const targetKey = warrant.targetKey;
+    const note = warrant.note;
+
+    const evidence = logEvidence({
+        type: EVIDENCE_TYPES.WARRANT_RESULT,
+        title: `Warrant result: ${targetName}`,
+        detail,
+        source: `warrant:${warrantKey}`,
+        linkedSuspectKeys: [targetKey].filter(Boolean),
+    }).evidence;
+
+    if (targetKey) {
+        linkEvidenceToSuspect(evidence.id, targetKey);
+    }
+
+    const liveState = getInvestigatorState();
+    const live = liveState.warrants.find((entry) => entry.id === warrantKey);
+    if (!live) {
+        return { applied: false, reason: 'missing_warrant' };
+    }
+    live.status = WARRANT_STATUS.RESOLVED;
+    live.result = result;
+    live.evidenceId = evidence.id;
+    live.generationsLeft = 0;
+    live.resolvedAt = Date.now();
+    live.note = note;
+    pushCaseLog(liveState, `Warrant resolved on ${targetName}: ${result}.`);
+    return { applied: true, warrant: live, evidence, result };
+}
+
+export function tickWarrantsForGeneration(signature) {
+    const state = getInvestigatorState();
+    const nextSignature = signature == null ? Date.now() : signature;
+    if (state.warrantTickSignature === nextSignature) {
+        return { ticked: false, resolved: [] };
+    }
+    state.warrantTickSignature = nextSignature;
+
+    const pendingIds = state.warrants
+        .filter((entry) => entry.status === WARRANT_STATUS.PENDING)
+        .map((entry) => entry.id);
+    if (!pendingIds.length) {
+        return { ticked: true, resolved: [] };
+    }
+
+    const resolved = [];
+    for (const warrantId of pendingIds) {
+        const liveState = getInvestigatorState();
+        const warrant = liveState.warrants.find((entry) => entry.id === warrantId);
+        if (!warrant || warrant.status !== WARRANT_STATUS.PENDING) {
+            continue;
+        }
+        warrant.generationsLeft = Math.max(0, Number(warrant.generationsLeft || 0) - 1);
+        if (warrant.generationsLeft > 0) {
+            continue;
+        }
+        const result = resolveWarrant(warrant.id);
+        if (result.applied) {
+            resolved.push(result);
+        }
+    }
+    return { ticked: true, resolved };
+}
+
+export function confrontSuspect(actor, options = {}) {
+    const state = getInvestigatorState();
+    const target = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKey(target);
+    if (!key || !target.name) {
+        return { applied: false, reason: 'invalid_actor' };
+    }
+
+    let suspect = state.suspects.find((entry) => entry.key === key);
+    if (!suspect) {
+        pinSuspect(target, {
+            status: SUSPECT_STATUSES.PERSON_OF_INTEREST,
+            notes: String(options.detail || options.reason || 'Confronted without prior pin.').trim(),
+        });
+        suspect = state.suspects.find((entry) => entry.key === key);
+    }
+
+    const strengthInfo = getCaseStrength(key);
+    if (strengthInfo.strength < CONFRONT_MIN_STRENGTH) {
+        pushCaseLog(state, `Confront blocked on ${target.name}: insufficient case strength (${strengthInfo.strength}/${CONFRONT_MIN_STRENGTH}).`);
+        return {
+            applied: false,
+            reason: 'insufficient_strength',
+            strength: strengthInfo.strength,
+            required: CONFRONT_MIN_STRENGTH,
+        };
+    }
+
+    const isPrime = suspect?.status === SUSPECT_STATUSES.PRIME;
+    const strongEnough = strengthInfo.strength >= CONFRONT_PRIME_STRENGTH;
+    const restrained = isActorRestrained(target);
+    let outcome = 'pressure';
+    let seizeUnlocked = false;
+
+    if (isPrime && strongEnough) {
+        outcome = 'probable_cause';
+        if (!state.seizeRightsKeys.includes(key)) {
+            state.seizeRightsKeys.push(key);
+        }
+        seizeUnlocked = true;
+    } else if (!isPrime && strengthInfo.strength >= CONFRONT_PRIME_STRENGTH) {
+        outcome = 'overreach';
+        pushCaseLog(state, `Confront overreach on ${target.name}: case noise / trust strain logged.`);
+    }
+
+    const detailParts = [
+        String(options.detail || options.reason || options.note || '').trim(),
+        `Case strength ${strengthInfo.strength} (linked ${strengthInfo.linked}, status ${suspect?.status || 'none'}).`,
+        `Outcome: ${outcome}.`,
+        seizeUnlocked
+            ? (restrained
+                ? 'Seize rights confirmed while subject is restrained.'
+                : 'Probable cause recorded — restrain the subject before seizure.')
+            : 'No seize unlock.',
+    ].filter(Boolean);
+
+    const evidence = logEvidence({
+        type: EVIDENCE_TYPES.CONFRONTATION,
+        title: `Confrontation: ${target.name}`,
+        detail: detailParts.join(' '),
+        source: 'confront',
+        linkedSuspectKeys: [key],
+    }).evidence;
+    linkEvidenceToSuspect(evidence.id, key);
+
+    pushCaseLog(state, `Confronted ${target.name} → ${outcome}.`);
+    return {
+        applied: true,
+        outcome,
+        seizeUnlocked,
+        strength: strengthInfo.strength,
+        evidence,
+        suspect,
+    };
 }
 
 function escapeRegExp(value) {
@@ -719,6 +1069,8 @@ function parseCaseActionBlock(blockBody) {
         detail: '',
         reason: '',
         type: '',
+        generations: '',
+        note: '',
     };
     for (const line of String(blockBody ?? '').split(/\r?\n/)) {
         const match = line.match(/^\s*([a-z_]+)\s*:\s*(.+?)\s*$/i);
@@ -766,12 +1118,15 @@ export function applyCaseAction(parsed, speaker) {
     if (normalizeKnowledgeKey(parsed.officer) !== normalizeKnowledgeKey(speaker.name)) {
         return { applied: false, reason: 'officer_mismatch' };
     }
+    if (!officerMayPerformAction(speaker, action)) {
+        return { applied: false, reason: 'insufficient_clearance' };
+    }
 
     if (action === CASE_ACTIONS.LOG) {
         const evidence = logEvidence({
             type: Object.values(EVIDENCE_TYPES).includes(parsed.type) ? parsed.type : EVIDENCE_TYPES.STATEMENT,
             title: parsed.title || `Officer report: ${speaker.name}`,
-            detail: parsed.detail || parsed.reason || '',
+            detail: parsed.detail || parsed.reason || parsed.note || '',
             source: `officer:${speaker.name}`,
         }).evidence;
         return { applied: true, reason: 'logged', evidence };
@@ -784,7 +1139,7 @@ export function applyCaseAction(parsed, speaker) {
         }
         const result = pinSuspect(target, {
             status: parsed.status || SUSPECT_STATUSES.PERSON_OF_INTEREST,
-            notes: parsed.detail || parsed.reason || `Pinned by officer ${speaker.name}.`,
+            notes: parsed.detail || parsed.reason || parsed.note || `Pinned by officer ${speaker.name}.`,
         });
         return { applied: Boolean(result.applied), reason: result.reason || 'pinned', suspect: result.suspect };
     }
@@ -813,7 +1168,7 @@ export function applyCaseAction(parsed, speaker) {
             return { applied: false, reason: 'missing_target' };
         }
         const result = restrainActor(target, {
-            reason: parsed.reason || parsed.detail || `Restrained by officer ${speaker.name}.`,
+            reason: parsed.reason || parsed.detail || parsed.note || `Restrained by officer ${speaker.name}.`,
         });
         return { applied: Boolean(result.applied), reason: result.reason || 'restrained', entry: result.entry };
     }
@@ -825,6 +1180,41 @@ export function applyCaseAction(parsed, speaker) {
         }
         const result = releaseRestrainedActor(target);
         return { applied: Boolean(result.applied), reason: result.reason || 'released' };
+    }
+
+    if (action === CASE_ACTIONS.WARRANT) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const result = fileWarrant(target, {
+            note: parsed.note || parsed.detail || parsed.reason || '',
+            generations: parsed.generations,
+            filedBy: speaker,
+        });
+        return {
+            applied: Boolean(result.applied),
+            reason: result.reason || 'warrant_filed',
+            warrant: result.warrant,
+        };
+    }
+
+    if (action === CASE_ACTIONS.CONFRONT) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const result = confrontSuspect(target, {
+            note: parsed.note || parsed.detail || parsed.reason || '',
+            detail: parsed.detail || parsed.reason || parsed.note || '',
+        });
+        return {
+            applied: Boolean(result.applied),
+            reason: result.reason || result.outcome || 'confronted',
+            outcome: result.outcome,
+            seizeUnlocked: result.seizeUnlocked,
+            strength: result.strength,
+        };
     }
 
     return { applied: false, reason: 'unhandled_action' };
@@ -930,6 +1320,7 @@ export function buildCasePromptReplacements() {
     const suspects = state.suspects || [];
     const evidence = (state.evidence || []).slice(0, 12);
     const restrained = state.restrained || [];
+    const warrants = (state.warrants || []).filter((entry) => entry.status === WARRANT_STATUS.PENDING);
 
     return {
         play_role: getPlayRole(),
@@ -938,10 +1329,15 @@ export function buildCasePromptReplacements() {
         case_action_tag: CASE_ACTION_BLOCK_TAG,
         example_officer: officers[0]?.actor?.name || 'Officer Name',
         officers_block: officers.length
-            ? officers.map((entry) => `- ${entry.actor?.name || 'Officer'} (${entry.rank || 'Officer'})`).join('\n')
+            ? officers.map((entry) => (
+                `- ${entry.actor?.name || 'Officer'} (${entry.rank || 'Officer'} / clearance:${entry.clearance || OFFICER_CLEARANCE.FIELD})`
+            )).join('\n')
             : 'No Task Force officers assigned yet.',
         suspects_block: suspects.length
-            ? suspects.map((entry) => `- ${entry.actor?.name || 'Unknown'} [${entry.status}]${entry.notes ? `: ${entry.notes}` : ''}`).join('\n')
+            ? suspects.map((entry) => {
+                const strength = getCaseStrength(entry.key).strength;
+                return `- ${entry.actor?.name || 'Unknown'} [${entry.status}] strength:${strength}${entry.notes ? `: ${entry.notes}` : ''}`;
+            }).join('\n')
             : 'No suspects pinned.',
         evidence_block: evidence.length
             ? evidence.map((entry) => `- ${entry.title}: ${entry.detail || '(no detail)'}`).join('\n')
@@ -949,6 +1345,11 @@ export function buildCasePromptReplacements() {
         restrained_block: restrained.length
             ? restrained.map((entry) => `- ${entry.actor?.name || 'Unknown'}${entry.reason ? `: ${entry.reason}` : ''}`).join('\n')
             : 'Nobody currently marked restrained.',
+        warrants_block: warrants.length
+            ? warrants.map((entry) => (
+                `- ${entry.target?.name || 'Unknown'} (${entry.generationsLeft} gen left)${entry.note ? `: ${entry.note}` : ''}`
+            )).join('\n')
+            : 'No pending warrants.',
     };
 }
 
@@ -959,5 +1360,8 @@ export {
     CASE_ACTIONS,
     CASE_ACTION_BLOCK_TAG,
     DEFAULT_CASE_PROMPT_TEMPLATE,
+    OFFICER_CLEARANCE,
+    WARRANT_STATUS,
+    WARRANT_RESULTS,
     getActorKey,
 };
