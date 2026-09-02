@@ -1,6 +1,7 @@
 export const INVESTIGATOR_MODULE_NAME = 'killer_within_investigator';
 export const INVESTIGATOR_CHAT_METADATA_KEY = 'killerWithinInvestigator';
 export const INVESTIGATOR_HUB_ID = 'kw-investigator-hub';
+export const INVESTIGATOR_WORKSTATION_ID = 'kw-investigator-workstation';
 
 export const PLAY_ROLES = Object.freeze({
     KIRA: 'kira',

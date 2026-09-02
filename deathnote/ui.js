@@ -65,7 +65,7 @@ import {
     syncThoughtSettingsUi,
 } from '../thoughts/ui.js';
 import { isInvestigatorRole, setPlayRole } from '../investigator/core.js';
-import { refreshInvestigatorUi } from '../investigator/ui.js';
+import { closeHub, openHub, refreshInvestigatorUi } from '../investigator/ui.js';
 
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
@@ -2326,7 +2326,13 @@ function syncSettingsUi() {
 function bindSettingsUi() {
     $('#kw-deathnote-play-role').off('change').on('change', (event) => {
         const value = String($(event.currentTarget).val() || PLAY_ROLES.KIRA).trim().toLowerCase();
-        setPlayRole(value === PLAY_ROLES.INVESTIGATOR ? PLAY_ROLES.INVESTIGATOR : PLAY_ROLES.KIRA);
+        const next = value === PLAY_ROLES.INVESTIGATOR ? PLAY_ROLES.INVESTIGATOR : PLAY_ROLES.KIRA;
+        setPlayRole(next);
+        if (next === PLAY_ROLES.INVESTIGATOR) {
+            openHub();
+        } else {
+            closeHub();
+        }
         refreshDeathNoteUi();
         refreshInvestigatorUi();
     });
@@ -2800,7 +2806,7 @@ function renderInventorySettingsContentHtml() {
                             <option value="${PLAY_ROLES.KIRA}" ${playRole === PLAY_ROLES.KIRA ? 'selected' : ''}>Kira — Death Note / Eyes / inventory</option>
                             <option value="${PLAY_ROLES.INVESTIGATOR}" ${playRole === PLAY_ROLES.INVESTIGATOR ? 'selected' : ''}>Investigator — Task Force terminal</option>
                         </select>
-                        <small>V1: one role at a time. Investigator hides gothic Death Note tools and opens a clinical hub.</small>
+                        <small>One role at a time. Investigator opens the Task Force terminal; Kira keeps Death Note tools.</small>
                     </label>
                 </div>
             </section>
