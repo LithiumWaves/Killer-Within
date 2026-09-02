@@ -162,6 +162,18 @@
     gap: 0.45rem;
 }
 
+.kw-deathnote-item__link-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.kw-deathnote-item__link-row .text_pole {
+    flex: 1 1 12rem;
+    min-width: 10rem;
+}
+
 .kw-dn-manage-action {
     min-height: 2.2rem;
     padding: 0.42rem 0.82rem;

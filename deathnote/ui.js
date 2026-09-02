@@ -547,7 +547,7 @@ function getTogglePosition(left, top, isOpening) {
     };
 }
 
-function setNotebookOpenState(nextOpen, { notebookId = '' } = {}) {
+function setNotebookOpenState(nextOpen, { notebookId = '', debugPeek = false } = {}) {
     const settings = getSettings();
     const root = document.getElementById(FLOATING_ID);
     const resolvedNotebookId = nextOpen
@@ -598,16 +598,15 @@ function setNotebookOpenState(nextOpen, { notebookId = '' } = {}) {
     }
     scheduleSettingsSave();
     if (nextOpen) {
-        playNotebookOpenSound();
-        if (shouldTriggerNotebookPresenceReveal()) {
-            markNotebookPresenceRevealPending(null, resolvedNotebookId);
+        if (!debugPeek) {
+            playNotebookOpenSound();
+            if (shouldTriggerNotebookPresenceReveal()) {
+                markNotebookPresenceRevealPending(null, resolvedNotebookId);
+            }
         }
     } else {
         stopWritingSound();
     }
-    // #region debug-point A:open-close-refresh
-    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"A",location:"deathnote/ui.js:setNotebookOpenState",msg:"[DEBUG] notebook open state changed before refresh",data:{nextOpen:Boolean(nextOpen),settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:resolvedNotebookId,currentSpreadIndex:Number(settings.currentSpreadIndex??settings.currentPageIndex??0),anchorX,anchorY},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     refreshDeathNoteUi();
 }
 
@@ -2298,22 +2297,26 @@ function bindSettingsUi() {
 
     $('#kw-deathnote-debug-retrieve-notebook').off('click').on('click', async (event) => {
         event.preventDefault();
-        const inventory = getDeathNoteInventory();
-        if (inventory.notebook.destroyed) {
-            notify('warning', 'The Death Note is destroyed or missing.');
+        const settings = getSettings();
+        const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+        const ownership = getNotebookOwnership(notebookId);
+        const notebook = getNotebookSummaryById(getDeathNoteInventory(), notebookId);
+        if (!notebook || notebook.destroyed) {
+            notify('warning', 'The selected Death Note is destroyed or missing.');
             return;
         }
 
-        const settings = getSettings();
-        const ownership = getNotebookOwnership();
         const retrieved = await commitInventoryMutation(() => transferNotebookTo(getUserActor(), {
+            notebookItemId: notebookId,
             owner: ownership.owner,
             userAccess: NOTEBOOK_USER_ACCESS.FULL,
             exists: true,
             reason: 'Notebook forcibly retrieved via debug settings.',
         }), 'Death Note retrieved.');
         if (retrieved) {
-            settings.inventorySelectedItemKey = 'notebook';
+            settings.selectedNotebookId = notebookId;
+            settings.inventorySelectedItemKey = `notebook:${notebookId}`;
+            setSelectedNotebookId(notebookId);
             scheduleSettingsSave();
         }
     });
@@ -2745,7 +2748,11 @@ function renderInventorySettingsContentHtml() {
                             <small>When disabled, the module strips parsed AI write blocks from chat after applying them to the notebook.</small>
                         </div>
                         <div class="killer-within-settings__field">
-                            <button type="button" id="kw-deathnote-debug-retrieve-notebook" class="menu_button">Retrieve Death Note</button>
+                            <button type="button" id="kw-deathnote-debug-retrieve-notebook" class="menu_button">Retrieve Selected Death Note</button>
+                            <small>Force-transfers the currently selected Death Note back to the user without changing its written pages.</small>
+                        </div>
+                        <div class="killer-within-settings__field">
+                            <small>To peek into another character's Death Note without taking it, open Manage Death Notes and use <b>Peek Death Note</b>. Written pages stay on that notebook when lent or returned.</small>
                         </div>
                     </div>
                 </details>
@@ -2810,6 +2817,11 @@ function renderInventoryManageContentHtml() {
         return !entry?.destroyed && ownership.holder?.type !== NOTEBOOK_ACTOR_TYPES.USER;
     }).length;
     const canCreate = activeCount < 7;
+    const shinigamiChoices = getActorChoices({
+        includeUser: false,
+        includeCharacters: true,
+        includeWorld: false,
+    });
     const rows = notebooks.map((notebook) => {
         const ownership = getNotebookOwnership(notebook.itemId);
         const linked = getLinkedShinigami(notebook.itemId);
@@ -2818,13 +2830,18 @@ function renderInventoryManageContentHtml() {
         const isUserReadable = ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL && !notebook.destroyed;
         const isHeldByUser = ownership.holder?.type === NOTEBOOK_ACTOR_TYPES.USER;
         const isOwnedByUser = ownership.owner?.type === NOTEBOOK_ACTOR_TYPES.USER;
-        const canDebugOpen = !notebook.destroyed && !isHeldByUser;
+        const canDebugPeek = !notebook.destroyed && !isHeldByUser;
         const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
         const requestMatchesHolder = Boolean(
             request.active
             && holder
             && String(request.actor?.name || '').trim().toLowerCase() === String(holder.name || '').trim().toLowerCase(),
         );
+        const selectedLinkActor = linked.active ? {
+            type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: linked.avatar || linked.actor.id,
+            name: linked.actor.name,
+        } : null;
         const statusLabel = notebook.destroyed ? 'Destroyed / missing' : `Held by ${formatActorLabel(ownership.holder)}`;
         return `
             <div class="kw-deathnote-item ${isSelected ? 'is-selected' : ''}">
@@ -2847,6 +2864,27 @@ function renderInventoryManageContentHtml() {
                     <span class="kw-deathnote-item__meta-line"><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
                     <span class="kw-deathnote-item__meta-line"><b>Linked Shinigami:</b> ${escapeHtml(linked.active ? formatActorLabel(linked.actor) : 'None')}</span>
                 </div>
+                <div class="kw-deathnote-item__link-row">
+                    <select
+                        class="text_pole kw-dn-manage-shinigami-select"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${notebook.destroyed ? 'disabled' : ''}
+                    >
+                        ${renderActorOptions(shinigamiChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
+                    </select>
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__context-action kw-dn-manage-link-shinigami"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${notebook.destroyed ? 'disabled' : ''}
+                    >Link Shinigami</button>
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__context-action kw-dn-manage-unlink-shinigami"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${linked.active && !notebook.destroyed ? '' : 'disabled'}
+                    >Clear Link</button>
+                </div>
                 <div class="kw-deathnote-item__actions">
                     <button
                         type="button"
@@ -2854,12 +2892,13 @@ function renderInventoryManageContentHtml() {
                         data-notebook-id="${escapeHtml(notebook.itemId)}"
                         ${isSelected ? 'disabled' : ''}
                     >${isSelected ? 'Selected' : 'Select Note'}</button>
-                    ${canDebugOpen ? `
+                    ${canDebugPeek ? `
                         <button
                             type="button"
                             class="menu_button kw-dn-inventory__context-action kw-dn-manage-open-note"
                             data-notebook-id="${escapeHtml(notebook.itemId)}"
-                        >Open For Debug</button>
+                            title="Peek into this Death Note without taking possession"
+                        >Peek Death Note</button>
                     ` : ''}
                     ${isOwnedByUser && holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
                         <button
@@ -3061,9 +3100,6 @@ function buildWidgetHtml() {
     const currentSpreadIndex = getClampedSpreadIndex(pages);
     const visible = getVisiblePageIndices(currentSpreadIndex);
     const expandedPages = ensurePageCapacity(pages, visible.rightPageIndex);
-    // #region debug-point E:widget-render
-    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"E",location:"deathnote/ui.js:buildWidgetHtml",msg:"[DEBUG] widget rendered visible pages",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,currentSpreadIndex,pageCount:pages.length,leftPageIndex:visible.leftPageIndex,rightPageIndex:visible.rightPageIndex,leftPreview:String(visible.leftPageIndex===null?'[inside-cover]':expandedPages[visible.leftPageIndex]||'').slice(0,80),rightPreview:String(expandedPages[visible.rightPageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     const leftPageHtml = visible.leftPageIndex !== null
         ? renderEditablePage({
             notebookId,
@@ -3264,9 +3300,6 @@ function commitNotebookTextareaValue(textarea, state, {
     const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
     const nextPages = setUiNotebookPages(notebookId, sanitizeNotebookPagesForRules(update.pages));
     const changed = setNotebookPages(nextPages, notebookId);
-    // #region debug-point C:textarea-input
-    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/ui.js:entry-textarea-input",msg:"[DEBUG] textarea input attempted notebook write",data:{settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,pageIndex,currentSpreadIndex,inputLength:value.length,changed,overflowed:Boolean(update.overflowed),beforeLeft:String(beforeVisible.left||'').slice(0,80),beforeRight:String(beforeVisible.right||'').slice(0,80),afterPagePreview:String(nextPages[pageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
 
     if (!changed) {
         if (value !== inputValue) {
@@ -3596,16 +3629,10 @@ function bindWidgetUi() {
             const pages = getUiNotebookPages(notebookId);
             const settings = getSettings();
             const currentSpreadIndex = getClampedSpreadIndex(pages);
-            // #region debug-point A:page-turn-click
-            fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"A",location:"deathnote/ui.js:page-turn-click",msg:"[DEBUG] page turn requested",data:{direction,settingsNotebookId:String(settings.selectedNotebookId||''),resolvedNotebookId:notebookId,currentSpreadIndex,pageCount:pages.length,currentLeft:String(getVisibleTexts(pages,currentSpreadIndex).left||'').slice(0,80),currentRight:String(getVisibleTexts(pages,currentSpreadIndex).right||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
-            // #endregion
 
             if (direction === 'prev' && currentSpreadIndex > 0) {
                 runPageTurn('prev', () => {
                     settings.currentSpreadIndex = Math.max(0, currentSpreadIndex - 1);
-                    // #region debug-point E:page-turn-prev-callback
-                    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"E",location:"deathnote/ui.js:page-turn-prev-callback",msg:"[DEBUG] previous page turn callback applied",data:{resolvedNotebookId:notebookId,nextSpreadIndex:Number(settings.currentSpreadIndex||0)},ts:Date.now()})}).catch(()=>{});
-                    // #endregion
                     queueFocusRestore(getVisiblePageIndices(settings.currentSpreadIndex).rightPageIndex, 'right', 'end');
                     scheduleSettingsSave();
                 });
@@ -3620,9 +3647,6 @@ function bindWidgetUi() {
                 runPageTurn('next', () => {
                     setNotebookPages(expanded, notebookId);
                     settings.currentSpreadIndex = nextSpreadIndex;
-                    // #region debug-point E:page-turn-next-callback
-                    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"E",location:"deathnote/ui.js:page-turn-next-callback",msg:"[DEBUG] next page turn callback applied",data:{resolvedNotebookId:notebookId,nextSpreadIndex,pageCount:expanded.length,leftPreview:String(nextVisible.leftPageIndex===null?'[inside-cover]':expanded[nextVisible.leftPageIndex]||'').slice(0,80),rightPreview:String(expanded[nextVisible.rightPageIndex]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
-                    // #endregion
                     queueFocusRestore(
                         nextVisible.leftPageIndex === null ? nextVisible.rightPageIndex : nextVisible.leftPageIndex,
                         nextVisible.leftPageIndex === null ? 'right' : 'left',
@@ -3892,7 +3916,8 @@ function bindInventoryUi() {
             inventoryManageOpen = false;
             setSelectedNotebookId(notebookId);
             scheduleSettingsSave();
-            setNotebookOpenState(true, { notebookId });
+            setNotebookOpenState(true, { notebookId, debugPeek: true });
+            notify('info', 'Peeking into another Death Note without taking it.');
         })
         .off('click', '.kw-dn-manage-destroy-note')
         .on('click', '.kw-dn-manage-destroy-note', async (event) => {
@@ -3910,6 +3935,39 @@ function bindInventoryUi() {
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
+        .off('click', '.kw-dn-manage-link-shinigami')
+        .on('click', '.kw-dn-manage-link-shinigami', async (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const select = $(`.kw-dn-manage-shinigami-select[data-notebook-id="${notebookId}"]`).first();
+            const actor = decodeActorValue(select.val(), null);
+            if (!actor) {
+                notify('warning', 'Select a character to link as this notebook\'s Shinigami.');
+                return;
+            }
+
+            await commitInventoryMutation(() => linkNotebookShinigami({
+                type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
+                id: actor.id,
+                name: actor.name,
+            }, {
+                notebookItemId: notebookId,
+                avatar: actor.id,
+                name: actor.name,
+                reason: `${actor.name || 'Selected character'} linked via manager.`,
+            }), 'Linked Shinigami updated.');
+        })
+        .off('click', '.kw-dn-manage-unlink-shinigami')
+        .on('click', '.kw-dn-manage-unlink-shinigami', async (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            await commitInventoryMutation(() => unlinkNotebookShinigami({
+                notebookItemId: notebookId,
+                reason: 'Linked Shinigami cleared via manager.',
+            }), 'Linked Shinigami cleared.');
+        })
+        .off('click', '#kw-dn-manage-link-shinigami')
+        .off('click', '#kw-dn-manage-unlink-shinigami')
         .off('click', '#kw-dn-inventory-give-notebook')
         .on('click', '#kw-dn-inventory-give-notebook', async (event) => {
             event.preventDefault();
@@ -3929,7 +3987,7 @@ function bindInventoryUi() {
 
             const transferred = await commitInventoryMutation(() => transferNotebookTo(actor, {
                 owner: ownership.owner,
-                userAccess: ownership.userAccess,
+                userAccess: NOTEBOOK_USER_ACCESS.NONE,
                 exists: !notebook.destroyed,
                 notebookItemId: notebookId,
                 reason: `Notebook handed to ${actor.name || actor.type} from inventory.`,
@@ -4041,32 +4099,6 @@ function bindInventoryUi() {
                 scheduleSettingsSave();
                 refreshDeathNoteUi();
             }
-        })
-        .off('click', '#kw-dn-manage-link-shinigami')
-        .on('click', '#kw-dn-manage-link-shinigami', async (event) => {
-            event.preventDefault();
-            const actor = decodeActorValue($('#kw-dn-manage-shinigami-select').val(), null);
-            if (!actor) {
-                notify('warning', 'Select a character to link as the notebook Shinigami.');
-                return;
-            }
-
-            await commitInventoryMutation(() => linkNotebookShinigami({
-                type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
-                id: actor.id,
-                name: actor.name,
-            }, {
-                avatar: actor.id,
-                name: actor.name,
-                reason: `${actor.name || 'Selected character'} linked via manager.`,
-            }), 'Linked Shinigami updated.');
-        })
-        .off('click', '#kw-dn-manage-unlink-shinigami')
-        .on('click', '#kw-dn-manage-unlink-shinigami', async (event) => {
-            event.preventDefault();
-            await commitInventoryMutation(() => unlinkNotebookShinigami({
-                reason: 'Linked Shinigami cleared via manager.',
-            }), 'Linked Shinigami cleared.');
         })
         .off('click', '.kw-dn-inventory__scrap-give')
         .on('click', '.kw-dn-inventory__scrap-give', async (event) => {

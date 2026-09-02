@@ -208,7 +208,7 @@ function normalizeNotebookState(value, index = 0) {
     const destroyed = Boolean(notebook.destroyed);
     const existsRaw = Object.hasOwn(notebook, 'exists') ? Boolean(notebook.exists) : defaults.exists;
     const exists = existsRaw && !destroyed;
-    return {
+    const next = {
         itemId: String(notebook.itemId || defaults.itemId).trim() || defaults.itemId,
         kind: 'notebook',
         label: String(notebook.label || defaults.label).trim() || defaults.label,
@@ -233,6 +233,21 @@ function normalizeNotebookState(value, index = 0) {
         createdAt: normalizeTransferredAt(notebook.createdAt),
         updatedAt: normalizeTransferredAt(notebook.updatedAt),
     };
+
+    // Keep the same object identity so mid-mutation callers (writes/transfers)
+    // do not lose references when getChatState() re-normalizes.
+    if (value && typeof value === 'object') {
+        Object.assign(value, next);
+        value.pages = next.pages;
+        value.owner = next.owner;
+        value.holder = next.holder;
+        value.linkedShinigami = next.linkedShinigami;
+        value.returnRequest = next.returnRequest;
+        value.presenceReveal = next.presenceReveal;
+        return value;
+    }
+
+    return next;
 }
 
 function buildLegacyNotebookState(state) {
@@ -279,7 +294,16 @@ function normalizeNotebookCollection(rawNotebooks, state = {}) {
         collection.push(migrated);
     }
 
-    return collection.slice(0, MAX_SIMULTANEOUS_DEATH_NOTES);
+    const limited = collection.slice(0, MAX_SIMULTANEOUS_DEATH_NOTES);
+    if (
+        Array.isArray(rawNotebooks)
+        && limited.length === rawNotebooks.length
+        && limited.every((notebook, index) => notebook === rawNotebooks[index])
+    ) {
+        return rawNotebooks;
+    }
+
+    return limited;
 }
 
 function getNotebookIndexById(state, notebookId) {
@@ -316,11 +340,6 @@ function getNotebookById(state, notebookId = '') {
     const targetId = requestedId && getNotebookIndexById(state, requestedId) >= 0
         ? requestedId
         : fallbackId;
-    if (requestedId && requestedId !== targetId) {
-        // #region debug-point B:notebook-id-fallback
-        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"B",location:"deathnote/core.js:getNotebookById",msg:"[DEBUG] notebook id fell back during lookup",data:{requestedId,fallbackId,targetId,selectedNotebookId:String(state?.selectedNotebookId||''),notebookIds:Array.isArray(state?.notebooks)?state.notebooks.map((entry)=>String(entry?.itemId||'')):[]},ts:Date.now()})}).catch(()=>{});
-        // #endregion
-    }
     const index = getNotebookIndexById(state, targetId);
     if (index < 0) {
         return null;
@@ -1627,18 +1646,6 @@ export function getChatState() {
 
     if (!Object.hasOwn(state, 'hasNotebook')) {
         state.hasNotebook = true;
-    }
-
-    const rawSelectedNotebookId = String(state?.selectedNotebookId || '').trim();
-    const rawSelectedNotebook = Array.isArray(state?.notebooks)
-        ? state.notebooks.find((entry) => String(entry?.itemId || '').trim() === rawSelectedNotebookId)
-        : null;
-    const rawSelectedPreview = String(rawSelectedNotebook?.pages?.[0] ?? rawSelectedNotebook?.text ?? '').slice(0, 80);
-    const legacyPreview = String(state?.notebookPages?.[0] ?? state?.notebookText ?? '').slice(0, 80);
-    if (legacyPreview || rawSelectedPreview) {
-        // #region debug-point D:chat-state-before-normalize
-        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:getChatState:before-normalize",msg:"[DEBUG] chat state before notebook normalization",data:{rawSelectedNotebookId,rawNotebookCount:Array.isArray(state?.notebooks)?state.notebooks.length:0,rawSelectedPreview,legacyPreview},ts:Date.now()})}).catch(()=>{});
-        // #endregion
     }
 
     state.notebooks = normalizeNotebookCollection(state.notebooks, state);
@@ -3188,8 +3195,9 @@ export function addDeathEntry({
     sourceType = 'notebook',
     sourceId = '',
     sourceLineIndex = null,
+    state: providedState = null,
 } = {}) {
-    const state = getChatState();
+    const state = providedState || getChatState();
 
     const entry = {
         id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -3395,7 +3403,12 @@ function getPermanentResolvedEntriesForSource(sourceType, sourceId) {
         return [];
     }
 
-    const state = getChatState();
+    // Prefer the live cached state so permanent-line enforcement during writes
+    // does not re-enter full chat-state normalization mid-mutation.
+    const context = getContext();
+    const cacheKey = getActiveChatCacheKey(context);
+    const cached = cacheKey ? liveChatStateCache.get(cacheKey) : null;
+    const state = cached || getChatState();
     const normalizedType = normalizeDeathEntrySourceType(sourceType);
     const normalizedId = normalizeDeathEntrySourceId(sourceId);
     return state.entries.filter((entry) => {
@@ -3472,10 +3485,12 @@ function enforcePermanentLinesForSource(text, sourceType, sourceId, maxLines = n
 
 export function enforcePermanentNotebookPages(pages, notebookId = '') {
     const normalized = normalizeNotebookPages(pages, '');
-    const state = getChatState();
-    const notebook = getNotebookById(state, notebookId);
-    const targetId = String(notebook?.itemId || getSelectedNotebookId(state)).trim();
-    return normalized.map((page, pageIndex) => enforcePermanentLinesForSource(page, 'notebook', `notebook:${targetId}:page:${pageIndex}`));
+    const targetId = String(notebookId || '').trim();
+    return normalized.map((page, pageIndex) => enforcePermanentLinesForSource(
+        page,
+        'notebook',
+        `notebook:${targetId}:page:${pageIndex}`,
+    ));
 }
 
 export function enforcePermanentScrapText(scrapId, text, maxLines = 2) {
@@ -3523,13 +3538,6 @@ export function getNotebookPages(notebookId = '') {
     if (!notebook) {
         return [''];
     }
-    const legacyPreview = String(state?.notebookPages?.[0] ?? state?.notebookText ?? '').slice(0, 80);
-    const notebookPreview = String(notebook?.pages?.[0] ?? notebook?.text ?? '').slice(0, 80);
-    if (legacyPreview || notebookPreview) {
-        // #region debug-point D:get-notebook-pages
-        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:getNotebookPages",msg:"[DEBUG] getNotebookPages resolved notebook content",data:{requestedNotebookId:String(notebookId||''),resolvedNotebookId:String(notebook?.itemId||''),selectedNotebookId:String(state?.selectedNotebookId||''),notebookPreview,legacyPreview,pageCount:Array.isArray(notebook?.pages)?notebook.pages.length:0},ts:Date.now()})}).catch(()=>{});
-        // #endregion
-    }
     notebook.pages = normalizeNotebookPages(notebook.pages, notebook.text ?? '');
     notebook.text = notebook.pages.join('');
     if (!notebookId || notebook.itemId === state.selectedNotebookId) {
@@ -3542,9 +3550,6 @@ export function setNotebookPages(pages, notebookId = '') {
     const state = getChatState();
     const notebook = getNotebookById(state, notebookId);
     if (!notebook) {
-        // #region debug-point D:set-pages-missing-notebook
-        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages could not resolve notebook",data:{requestedNotebookId:String(notebookId||''),selectedNotebookId:String(state?.selectedNotebookId||''),notebookIds:Array.isArray(state?.notebooks)?state.notebooks.map((entry)=>String(entry?.itemId||'')):[],incomingPageCount:Array.isArray(pages)?pages.length:null},ts:Date.now()})}).catch(()=>{});
-        // #endregion
         return false;
     }
     const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, notebook.text ?? ''), notebook.itemId);
@@ -3553,20 +3558,13 @@ export function setNotebookPages(pages, notebookId = '') {
     const samePages = sameLength && normalized.every((page, index) => notebook.pages[index] === page);
 
     if (samePages && notebook.text === nextText) {
-        // #region debug-point C:set-pages-no-change
-        fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"C",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages detected no state change",data:{notebookId:notebook.itemId,pageCount:normalized.length,textLength:nextText.length,selectedNotebookId:String(state?.selectedNotebookId||'')},ts:Date.now()})}).catch(()=>{});
-        // #endregion
         return false;
     }
 
-    const previousPages = Array.isArray(notebook.pages) ? [...notebook.pages] : [];
     notebook.pages = normalized;
     notebook.text = nextText;
     notebook.updatedAt = Date.now();
     syncLegacyNotebookState(state);
-    // #region debug-point D:set-pages-applied
-    fetch("http://192.168.0.12:7777/event",{method:"POST",body:JSON.stringify({sessionId:"notebook-page-loss",runId:"pre-fix",hypothesisId:"D",location:"deathnote/core.js:setNotebookPages",msg:"[DEBUG] setNotebookPages applied update",data:{notebookId:notebook.itemId,selectedNotebookId:String(state?.selectedNotebookId||''),previousPageCount:previousPages.length,nextPageCount:normalized.length,previousFirstPage:String(previousPages[0]||'').slice(0,80),nextFirstPage:String(normalized[0]||'').slice(0,80),previousLastPage:String(previousPages[previousPages.length-1]||'').slice(0,80),nextLastPage:String(normalized[normalized.length-1]||'').slice(0,80)},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     reconcileEntriesFromNotebookText(state);
     return true;
 }
@@ -3649,6 +3647,7 @@ function reconcileEntriesFromState(state) {
             sourceType: lineEntry.sourceType,
             sourceId: lineEntry.sourceId,
             sourceLineIndex: lineEntry.sourceLineIndex,
+            state,
         });
         if (entry) {
             retained.push(entry);
