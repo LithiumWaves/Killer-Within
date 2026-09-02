@@ -2,6 +2,7 @@ import {
     AI_NOTEBOOK_WRITE_BLOCK_TAG,
     CHAT_METADATA_KEY,
     DEFAULT_SETTINGS,
+    MAX_SIMULTANEOUS_DEATH_NOTES,
     MESSAGE_EXTRA_KEY,
     MODULE_NAME,
     NOTEBOOK_ACTOR_TYPES,
@@ -11,9 +12,51 @@ import {
 
 const INVENTORY_HISTORY_LIMIT = 40;
 const ID_THEFT_COOLDOWN_MS = 5 * 60 * 1000;
+const liveChatStateCache = new Map();
 
 export function getContext() {
     return globalThis.SillyTavern?.getContext?.() ?? null;
+}
+
+function getActiveChatCacheKey(context) {
+    if (!context) {
+        return 'global';
+    }
+
+    const chatId = String(context?.chatId ?? '').trim();
+    if (chatId) {
+        return `chat:${chatId}`;
+    }
+
+    const groupId = String(context?.groupId ?? '').trim();
+    if (groupId) {
+        return `group:${groupId}`;
+    }
+
+    if (Number.isFinite(Number(context?.characterId))) {
+        return `character:${Number(context.characterId)}`;
+    }
+
+    return 'global';
+}
+
+function bindCachedChatState(context) {
+    if (!context) {
+        return createDefaultChatState();
+    }
+
+    const cacheKey = getActiveChatCacheKey(context);
+    const cachedState = cacheKey ? liveChatStateCache.get(cacheKey) : null;
+    context.chatMetadata ??= {};
+    if (cachedState && context.chatMetadata[CHAT_METADATA_KEY] !== cachedState) {
+        context.chatMetadata[CHAT_METADATA_KEY] = cachedState;
+    }
+    context.chatMetadata[CHAT_METADATA_KEY] ??= createDefaultChatState();
+    const state = context.chatMetadata[CHAT_METADATA_KEY];
+    if (cacheKey) {
+        liveChatStateCache.set(cacheKey, state);
+    }
+    return state;
 }
 
 export function getSettings() {
@@ -45,6 +88,7 @@ export function scheduleSettingsSave() {
 
 export async function persistChatChanges() {
     const context = getContext();
+    bindCachedChatState(context);
 
     try {
         if (typeof context?.saveChat === 'function') {
@@ -80,21 +124,21 @@ export function notify(type, message) {
 }
 
 function createDefaultChatState() {
+    const defaultNotebook = createDefaultNotebookState();
     return {
-        version: 4,
+        version: 5,
+        selectedNotebookId: defaultNotebook.itemId,
+        notebooks: [defaultNotebook],
         hasNotebook: true,
-        ownership: createDefaultOwnershipState(),
-        shinigamiLink: createDefaultShinigamiLinkState(),
+        ownership: cloneActorOwnershipState(defaultNotebook),
+        shinigamiLink: normalizeShinigamiLinkState(defaultNotebook.linkedShinigami),
         nameKnowledge: createDefaultNameKnowledgeState(),
         identityTheft: createDefaultIdentityTheftState(),
-        notebookReturnRequest: createDefaultNotebookReturnRequestState(),
-        notebookPresenceReveal: {
-            pending: false,
-            openedAt: null,
-        },
+        notebookReturnRequest: normalizeNotebookReturnRequestState(defaultNotebook.returnRequest),
+        notebookPresenceReveal: normalizeNotebookPresenceRevealState(defaultNotebook.presenceReveal),
         inventory: createDefaultInventoryState(),
-        notebookText: '',
-        notebookPages: [''],
+        notebookText: defaultNotebook.text,
+        notebookPages: [...defaultNotebook.pages],
         entries: [],
         lastAssistantMessageCountedAt: null,
         lastGenerationCountedAt: null,
@@ -118,6 +162,16 @@ function createDefaultOwnershipState() {
     };
 }
 
+function cloneActorOwnershipState(notebook) {
+    const source = notebook && typeof notebook === 'object' ? notebook : createDefaultNotebookState();
+    return normalizeOwnershipState({
+        owner: source.owner,
+        holder: source.holder,
+        userAccess: source.userAccess,
+        lastTransferredAt: source.lastTransferredAt,
+    });
+}
+
 function createDefaultShinigamiLinkState() {
     return {
         active: false,
@@ -125,6 +179,192 @@ function createDefaultShinigamiLinkState() {
         avatar: '',
         notebookItemId: 'death-note-main',
         linkedAt: null,
+    };
+}
+
+function createDefaultNotebookPresenceRevealState() {
+    return {
+        pending: false,
+        openedAt: null,
+    };
+}
+
+function normalizeNotebookPresenceRevealState(value) {
+    const reveal = value && typeof value === 'object' ? value : {};
+    return {
+        pending: Boolean(reveal.pending),
+        openedAt: normalizeTransferredAt(reveal.openedAt),
+    };
+}
+
+function normalizeNotebookState(value, index = 0) {
+    const defaults = createDefaultNotebookState(index);
+    const notebook = value && typeof value === 'object' ? value : {};
+    const owner = normalizeActorRef(notebook.owner, defaults.owner.type, defaults.owner.name);
+    const holder = normalizeActorRef(notebook.holder, defaults.holder.type, defaults.holder.name);
+    const fallbackText = Object.hasOwn(notebook, 'text') ? String(notebook.text ?? '') : defaults.text;
+    const pages = normalizeNotebookPages(notebook.pages, fallbackText);
+    const text = pages.join('');
+    const destroyed = Boolean(notebook.destroyed);
+    const existsRaw = Object.hasOwn(notebook, 'exists') ? Boolean(notebook.exists) : defaults.exists;
+    const exists = existsRaw && !destroyed;
+    const next = {
+        itemId: String(notebook.itemId || defaults.itemId).trim() || defaults.itemId,
+        kind: 'notebook',
+        label: String(notebook.label || defaults.label).trim() || defaults.label,
+        exists,
+        destroyed,
+        owner,
+        holder,
+        userAccess: normalizeUserAccess(notebook.userAccess, isUserActor(holder) ? NOTEBOOK_USER_ACCESS.FULL : NOTEBOOK_USER_ACCESS.NONE),
+        lastTransferredAt: normalizeTransferredAt(notebook.lastTransferredAt),
+        linkedShinigami: normalizeShinigamiLinkState({
+            ...notebook.linkedShinigami,
+            notebookItemId: String(
+                notebook?.linkedShinigami?.notebookItemId
+                || notebook.itemId
+                || defaults.itemId,
+            ).trim() || defaults.itemId,
+        }),
+        returnRequest: normalizeNotebookReturnRequestState(notebook.returnRequest),
+        presenceReveal: normalizeNotebookPresenceRevealState(notebook.presenceReveal),
+        text,
+        pages,
+        createdAt: normalizeTransferredAt(notebook.createdAt),
+        updatedAt: normalizeTransferredAt(notebook.updatedAt),
+    };
+
+    // Keep the same object identity so mid-mutation callers (writes/transfers)
+    // do not lose references when getChatState() re-normalizes.
+    if (value && typeof value === 'object') {
+        Object.assign(value, next);
+        value.pages = next.pages;
+        value.owner = next.owner;
+        value.holder = next.holder;
+        value.linkedShinigami = next.linkedShinigami;
+        value.returnRequest = next.returnRequest;
+        value.presenceReveal = next.presenceReveal;
+        return value;
+    }
+
+    return next;
+}
+
+function buildLegacyNotebookState(state) {
+    const notebook = createDefaultNotebookState();
+    if (Object.hasOwn(state, 'hasNotebook')) {
+        notebook.exists = Boolean(state.hasNotebook) && !Boolean(state?.inventory?.notebook?.destroyed);
+    }
+    if (state?.inventory?.notebook?.destroyed) {
+        notebook.destroyed = true;
+        notebook.exists = false;
+    }
+    notebook.owner = normalizeActorRef(state?.ownership?.owner, notebook.owner.type, notebook.owner.name);
+    notebook.holder = normalizeActorRef(state?.ownership?.holder, notebook.holder.type, notebook.holder.name);
+    notebook.userAccess = normalizeUserAccess(state?.ownership?.userAccess, notebook.userAccess);
+    notebook.lastTransferredAt = normalizeTransferredAt(state?.ownership?.lastTransferredAt);
+    notebook.linkedShinigami = normalizeShinigamiLinkState(state?.shinigamiLink);
+    notebook.returnRequest = normalizeNotebookReturnRequestState(state?.notebookReturnRequest);
+    notebook.presenceReveal = normalizeNotebookPresenceRevealState(state?.notebookPresenceReveal);
+    notebook.pages = normalizeNotebookPages(state?.notebookPages, state?.notebookText ?? '');
+    notebook.text = notebook.pages.join('');
+    notebook.updatedAt = normalizeTransferredAt(state?.inventory?.notebook?.updatedAt);
+    notebook.createdAt = notebook.updatedAt;
+    notebook.label = String(state?.inventory?.notebook?.label || notebook.label).trim() || notebook.label;
+    notebook.itemId = String(state?.inventory?.notebook?.itemId || notebook.itemId).trim() || notebook.itemId;
+    return notebook;
+}
+
+function normalizeNotebookCollection(rawNotebooks, state = {}) {
+    const source = Array.isArray(rawNotebooks) ? rawNotebooks : [];
+    const collection = [];
+    const seen = new Set();
+
+    for (let index = 0; index < source.length; index += 1) {
+        const notebook = normalizeNotebookState(source[index], index);
+        if (!notebook.itemId || seen.has(notebook.itemId)) {
+            continue;
+        }
+        seen.add(notebook.itemId);
+        collection.push(notebook);
+    }
+
+    if (!collection.length && !Array.isArray(rawNotebooks)) {
+        const migrated = normalizeNotebookState(buildLegacyNotebookState(state), 0);
+        collection.push(migrated);
+    }
+
+    const limited = collection.slice(0, MAX_SIMULTANEOUS_DEATH_NOTES);
+    if (
+        Array.isArray(rawNotebooks)
+        && limited.length === rawNotebooks.length
+        && limited.every((notebook, index) => notebook === rawNotebooks[index])
+    ) {
+        return rawNotebooks;
+    }
+
+    return limited;
+}
+
+function getNotebookIndexById(state, notebookId) {
+    const collection = Array.isArray(state?.notebooks) ? state.notebooks : [];
+    const targetId = String(notebookId || '').trim();
+    if (!targetId) {
+        return -1;
+    }
+    return collection.findIndex((entry) => entry?.itemId === targetId);
+}
+
+function getActiveNotebookCount(state) {
+    return Array.isArray(state?.notebooks)
+        ? state.notebooks.filter((entry) => entry && !entry.destroyed).length
+        : 0;
+}
+
+function getSelectedNotebookId(state) {
+    const requested = String(state?.selectedNotebookId || '').trim();
+    if (requested && getNotebookIndexById(state, requested) >= 0) {
+        return requested;
+    }
+    const notebooks = Array.isArray(state?.notebooks) ? state.notebooks : [];
+    if (!notebooks.length) {
+        return '';
+    }
+    const firstExisting = notebooks.find((entry) => entry && !entry.destroyed);
+    return String(firstExisting?.itemId || notebooks[0]?.itemId || '').trim();
+}
+
+function getNotebookById(state, notebookId = '') {
+    const requestedId = String(notebookId || '').trim();
+    const fallbackId = getSelectedNotebookId(state);
+    const targetId = requestedId && getNotebookIndexById(state, requestedId) >= 0
+        ? requestedId
+        : fallbackId;
+    const index = getNotebookIndexById(state, targetId);
+    if (index < 0) {
+        return null;
+    }
+    return state.notebooks[index];
+}
+
+function ensureSelectedNotebook(state) {
+    const selectedId = getSelectedNotebookId(state);
+    state.selectedNotebookId = selectedId;
+    return getNotebookById(state, selectedId);
+}
+
+function createInventoryNotebookSummary(notebook) {
+    const source = notebook && typeof notebook === 'object' ? notebook : createDefaultNotebookState();
+    return {
+        itemId: String(source.itemId || '').trim() || createDefaultNotebookState().itemId,
+        kind: 'notebook',
+        label: String(source.label || 'Death Note').trim() || 'Death Note',
+        exists: Boolean(source.exists) && !Boolean(source.destroyed),
+        destroyed: Boolean(source.destroyed),
+        owner: cloneActorRef(source.owner, NOTEBOOK_ACTOR_TYPES.USER, 'User'),
+        holder: cloneActorRef(source.holder, NOTEBOOK_ACTOR_TYPES.USER, 'User'),
+        userAccess: normalizeUserAccess(source.userAccess, NOTEBOOK_USER_ACCESS.NONE),
+        updatedAt: normalizeTransferredAt(source.updatedAt),
     };
 }
 
@@ -154,6 +394,31 @@ function createDefaultNotebookReturnRequestState() {
     };
 }
 
+function createDefaultNotebookState(index = 0) {
+    const itemId = index <= 0 ? 'death-note-main' : `death-note-${index + 1}`;
+    const label = index <= 0 ? 'Death Note' : `Death Note ${index + 1}`;
+    const owner = createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User');
+    const holder = createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User');
+    return {
+        itemId,
+        kind: 'notebook',
+        label,
+        exists: true,
+        destroyed: false,
+        owner,
+        holder,
+        userAccess: NOTEBOOK_USER_ACCESS.FULL,
+        lastTransferredAt: null,
+        linkedShinigami: createDefaultShinigamiLinkState(),
+        returnRequest: createDefaultNotebookReturnRequestState(),
+        presenceReveal: createDefaultNotebookPresenceRevealState(),
+        text: '',
+        pages: [''],
+        createdAt: null,
+        updatedAt: null,
+    };
+}
+
 function createDefaultInventoryState() {
     return {
         notebook: {
@@ -164,8 +429,10 @@ function createDefaultInventoryState() {
             destroyed: false,
             owner: createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User'),
             holder: createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User'),
+            userAccess: NOTEBOOK_USER_ACCESS.FULL,
             updatedAt: null,
         },
+        notebooks: [],
         ids: [],
         scraps: [],
         touchers: [],
@@ -424,6 +691,22 @@ function getCurrentChatActorByName(name) {
     return roster.find((actor) => normalizeKnowledgeKey(actor.name) === search) || null;
 }
 
+function getKnownActorByName(name) {
+    const search = normalizeKnowledgeKey(name);
+    if (!search) {
+        return null;
+    }
+
+    const knowledge = getNameKnowledgeState();
+    const known = Array.isArray(knowledge?.known) ? knowledge.known : [];
+    const match = known.find((entry) => normalizeKnowledgeKey(entry?.actor?.name) === search);
+    return match?.actor ? normalizeActorRef(match.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, match.actor.name) : null;
+}
+
+function getResolvableActorByName(name) {
+    return getCurrentChatActorByName(name) || getKnownActorByName(name);
+}
+
 function getMessageForceAvatarFile(message) {
     const raw = String(message && message.force_avatar ? message.force_avatar : '').trim();
     if (!raw) {
@@ -585,6 +868,7 @@ function normalizeInventoryScrap(value, index, fallbackOwner, fallbackHolder) {
     const defaults = {
         id: `death-note-scrap-${index + 1}`,
         label: `Scrap ${index + 1}`,
+        notebookItemId: createDefaultNotebookState().itemId,
     };
     const scrap = value && typeof value === 'object' ? value : {};
     const holder = normalizeActorRef(scrap.holder, fallbackHolder.type, fallbackHolder.name);
@@ -596,6 +880,7 @@ function normalizeInventoryScrap(value, index, fallbackOwner, fallbackHolder) {
         id: String(scrap.id || defaults.id).trim() || defaults.id,
         kind: 'scrap',
         label: String(scrap.label || defaults.label).trim() || defaults.label,
+        notebookItemId: String(scrap.notebookItemId || defaults.notebookItemId).trim() || defaults.notebookItemId,
         noteText: String(scrap.noteText || '').trim(),
         owner: normalizeActorRef(scrap.owner, fallbackOwner.type, fallbackOwner.name),
         holder,
@@ -725,7 +1010,7 @@ function resolveDeathEntryTargetType(targetName) {
         return '';
     }
 
-    return getCurrentChatActorByName(name) ? NOTEBOOK_ACTOR_TYPES.CHARACTER : NOTEBOOK_ACTOR_TYPES.NPC;
+    return getResolvableActorByName(name) ? NOTEBOOK_ACTOR_TYPES.CHARACTER : NOTEBOOK_ACTOR_TYPES.NPC;
 }
 
 function getDeathEntrySourceKey(sourceType, sourceId, noteText) {
@@ -788,6 +1073,16 @@ function normalizeInventoryState(value, ownership, hasNotebook) {
     const fallbackOwner = ownership?.owner || defaults.notebook.owner;
     const fallbackHolder = ownership?.holder || defaults.notebook.holder;
     const exists = Object.hasOwn(notebook, 'exists') ? Boolean(notebook.exists) : Boolean(hasNotebook);
+    const notebookSummaries = Array.isArray(inventory.notebooks)
+        ? inventory.notebooks
+            .filter((entry) => entry && typeof entry === 'object')
+            .map((entry) => ({
+                ...createInventoryNotebookSummary(entry),
+                owner: normalizeActorRef(entry.owner, fallbackOwner.type, fallbackOwner.name),
+                holder: normalizeActorRef(entry.holder, fallbackHolder.type, fallbackHolder.name),
+                userAccess: normalizeUserAccess(entry.userAccess, NOTEBOOK_USER_ACCESS.NONE),
+            }))
+        : [];
 
     return {
         notebook: {
@@ -798,8 +1093,10 @@ function normalizeInventoryState(value, ownership, hasNotebook) {
             destroyed: Boolean(notebook.destroyed),
             owner: normalizeActorRef(notebook.owner, fallbackOwner.type, fallbackOwner.name),
             holder: normalizeActorRef(notebook.holder, fallbackHolder.type, fallbackHolder.name),
+            userAccess: normalizeUserAccess(notebook.userAccess, NOTEBOOK_USER_ACCESS.NONE),
             updatedAt: normalizeTransferredAt(notebook.updatedAt),
         },
+        notebooks: notebookSummaries,
         ids: Array.isArray(inventory.ids)
             ? inventory.ids.map((entry, index) => normalizeInventoryIdCard(entry, index))
             : [],
@@ -847,34 +1144,71 @@ function getHigherUserAccess(left, right) {
     return getUserAccessRank(left) >= getUserAccessRank(right) ? left : right;
 }
 
-function syncInventoryWithOwnership(state) {
-    state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
-    state.inventory.notebook.exists = Boolean(state.hasNotebook) && !state.inventory.notebook.destroyed;
-    state.inventory.notebook.owner = cloneActorRef(state.ownership.owner, state.ownership.owner.type, state.ownership.owner.name);
-    state.inventory.notebook.holder = cloneActorRef(state.ownership.holder, state.ownership.holder.type, state.ownership.holder.name);
-}
+function deriveUserNotebookAccessForNotebook(state, notebook, preferredAccess = NOTEBOOK_USER_ACCESS.NONE) {
+    const currentNotebook = notebook && typeof notebook === 'object' ? notebook : null;
+    if (!currentNotebook || currentNotebook.destroyed || !currentNotebook.exists) {
+        return NOTEBOOK_USER_ACCESS.NONE;
+    }
 
-function deriveUserNotebookAccess(state, preferredAccess = NOTEBOOK_USER_ACCESS.NONE) {
     const preserved = normalizeUserAccess(preferredAccess, NOTEBOOK_USER_ACCESS.NONE);
     let access = preserved === NOTEBOOK_USER_ACCESS.FULL ? NOTEBOOK_USER_ACCESS.NONE : preserved;
 
-    if (state.hasNotebook && isUserActor(state.ownership.holder)) {
+    if (isUserActor(currentNotebook.holder)) {
         return NOTEBOOK_USER_ACCESS.FULL;
     }
 
-    for (const scrap of state.inventory.scraps) {
-        if (!scrap?.active || !isUserActor(scrap.holder)) {
+    const notebookItemId = String(currentNotebook.itemId || '').trim();
+    for (const scrap of Array.isArray(state?.inventory?.scraps) ? state.inventory.scraps : []) {
+        if (!scrap?.active || String(scrap.notebookItemId || '').trim() !== notebookItemId || !isUserActor(scrap.holder)) {
             continue;
         }
 
         access = getHigherUserAccess(access, normalizeUserAccess(scrap.userAccess, NOTEBOOK_USER_ACCESS.SCRAP));
     }
 
+    for (const toucher of Array.isArray(state?.inventory?.touchers) ? state.inventory.touchers : []) {
+        if (!toucher?.active || String(toucher.itemId || '').trim() !== notebookItemId || !isUserActor(toucher.actor)) {
+            continue;
+        }
+
+        access = getHigherUserAccess(access, NOTEBOOK_USER_ACCESS.TOUCH);
+    }
+
     return access;
 }
 
+function syncLegacyNotebookState(state) {
+    const selectedNotebook = ensureSelectedNotebook(state) || createDefaultNotebookState();
+    state.hasNotebook = getActiveNotebookCount(state) > 0;
+    state.ownership = cloneActorOwnershipState(selectedNotebook);
+    state.shinigamiLink = normalizeShinigamiLinkState(selectedNotebook.linkedShinigami);
+    state.notebookReturnRequest = normalizeNotebookReturnRequestState(selectedNotebook.returnRequest);
+    state.notebookPresenceReveal = normalizeNotebookPresenceRevealState(selectedNotebook.presenceReveal);
+    state.notebookPages = normalizeNotebookPages(selectedNotebook.pages, selectedNotebook.text ?? '');
+    state.notebookText = state.notebookPages.join('');
+}
+
+function syncInventoryWithOwnership(state) {
+    const selectedNotebook = ensureSelectedNotebook(state) || createDefaultNotebookState();
+    state.inventory = normalizeInventoryState(state.inventory, cloneActorOwnershipState(selectedNotebook), getActiveNotebookCount(state) > 0);
+    state.inventory.notebooks = state.notebooks.map((entry) => createInventoryNotebookSummary(entry));
+    state.inventory.notebook = createInventoryNotebookSummary(selectedNotebook);
+    syncLegacyNotebookState(state);
+}
+
+function deriveUserNotebookAccess(state, preferredAccess = NOTEBOOK_USER_ACCESS.NONE) {
+    const selectedNotebook = ensureSelectedNotebook(state);
+    return deriveUserNotebookAccessForNotebook(state, selectedNotebook, preferredAccess);
+}
+
 function refreshUserNotebookAccess(state, preferredAccess = NOTEBOOK_USER_ACCESS.NONE) {
-    state.ownership.userAccess = deriveUserNotebookAccess(state, preferredAccess);
+    for (const notebook of Array.isArray(state?.notebooks) ? state.notebooks : []) {
+        const preferred = notebook.itemId === state.selectedNotebookId
+            ? preferredAccess
+            : notebook.userAccess;
+        notebook.userAccess = deriveUserNotebookAccessForNotebook(state, notebook, preferred);
+    }
+    syncLegacyNotebookState(state);
 }
 
 function pushInventoryHistory(state, {
@@ -989,14 +1323,7 @@ function parseAiNotebookWriteBlock(blockBody) {
     const body = String(blockBody ?? '');
     let writer = '';
     let entry = '';
-
-    const inlineMatch = body.match(/writer\s*:\s*(.+?)\s+entry\s*:\s*(.+?)\s*$/is);
-    if (inlineMatch) {
-        return {
-            writer: String(inlineMatch[1] || '').trim(),
-            entry: String(inlineMatch[2] || '').trim(),
-        };
-    }
+    let notebook = '';
 
     const lines = body.split(/\r?\n/);
 
@@ -1015,11 +1342,27 @@ function parseAiNotebookWriteBlock(blockBody) {
                 entry = String(entryMatch[1] || '').trim();
             }
         }
+
+        if (!notebook) {
+            const notebookMatch = line.match(/^\s*notebook\s*:\s*(.+?)\s*$/i);
+            if (notebookMatch) {
+                notebook = String(notebookMatch[1] || '').trim();
+            }
+        }
+    }
+
+    if (!writer || !entry) {
+        const inlineMatch = body.match(/writer\s*:\s*(.+?)\s+entry\s*:\s*(.+?)\s*$/is);
+        if (inlineMatch) {
+            writer ||= String(inlineMatch[1] || '').trim();
+            entry ||= String(inlineMatch[2] || '').trim();
+        }
     }
 
     return {
         writer,
         entry,
+        notebook,
     };
 }
 
@@ -1034,6 +1377,43 @@ function canAiHolderWriteNotebook(actor) {
     );
 }
 
+function resolveNotebookForActorWriter(state, actor, notebookItemId = '') {
+    const writer = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    const explicitNotebookKey = normalizeKnowledgeKey(notebookItemId);
+    if (explicitNotebookKey) {
+        const explicit = Array.isArray(state?.notebooks)
+            ? state.notebooks.find((entry) => {
+                return entry
+                    && !entry.destroyed
+                    && entry.exists
+                    && actorRefsMatch(normalizeActorRef(entry.holder, writer.type, writer.name), writer)
+                    && (
+                        normalizeKnowledgeKey(entry.itemId) === explicitNotebookKey
+                        || normalizeKnowledgeKey(entry.label) === explicitNotebookKey
+                    );
+            })
+            : null;
+        if (explicit) {
+            return explicit;
+        }
+    }
+
+    const matches = Array.isArray(state.notebooks)
+        ? state.notebooks.filter((entry) => {
+            return entry
+                && !entry.destroyed
+                && entry.exists
+                && actorRefsMatch(normalizeActorRef(entry.holder, writer.type, writer.name), writer);
+        })
+        : [];
+    if (!matches.length) {
+        return null;
+    }
+    return matches
+        .slice()
+        .sort((left, right) => (normalizeTransferredAt(right.updatedAt) ?? 0) - (normalizeTransferredAt(left.updatedAt) ?? 0))[0];
+}
+
 function appendAiNotebookLine(entryLine, actor, options = {}) {
     const state = getChatState();
     syncInventoryWithOwnership(state);
@@ -1042,20 +1422,21 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
         return { applied: false, reason: 'empty_entry' };
     }
 
-    if (!state.hasNotebook || state.inventory?.notebook?.destroyed) {
-        return { applied: false, reason: 'notebook_unavailable' };
-    }
-
     const writer = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.NONE, '');
     if (!canAiHolderWriteNotebook(writer)) {
         return { applied: false, reason: 'invalid_holder' };
+    }
+
+    const notebook = resolveNotebookForActorWriter(state, writer, options.notebookItemId);
+    if (!notebook) {
+        return { applied: false, reason: 'notebook_unavailable' };
     }
 
     if (/[\r\n]/.test(line)) {
         return { applied: false, reason: 'invalid_entry' };
     }
 
-    const pages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
+    const pages = normalizeNotebookPages(notebook.pages, notebook.text ?? '');
     const nextPages = pages.slice();
     while (nextPages.length > 1 && !String(nextPages[nextPages.length - 1] || '').trim()) {
         nextPages.pop();
@@ -1069,7 +1450,7 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
     nextPages[lastIndex] = `${nextPages[lastIndex]}${separator}${line}`;
 
     const parsedEntry = parseNotebookLine(line);
-    const changed = setNotebookPages(nextPages);
+    const changed = setNotebookPages(nextPages, notebook.itemId);
     if (!changed) {
         return { applied: false, reason: 'no_change' };
     }
@@ -1077,10 +1458,10 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
     pushInventoryHistory(state, {
         action: 'write_notebook',
-        itemId: state.inventory.notebook.itemId,
+        itemId: notebook.itemId,
         detail: String(options.reason || '').trim() || `${writer.name || writer.type} wrote in the Death Note.`,
         actor: writer,
-        target: state.ownership.owner,
+        target: notebook.owner,
         timestamp,
     });
 
@@ -1156,29 +1537,32 @@ function buildDeathNotePresenceParticipants(state) {
     const participants = new Map();
     syncInventoryWithOwnership(state);
 
-    if (state.hasNotebook) {
+    for (const notebook of Array.isArray(state.notebooks) ? state.notebooks : []) {
+        if (!notebook || notebook.destroyed || !notebook.exists) {
+            continue;
+        }
         pushPresenceParticipant(
             participants,
-            state.ownership.holder,
+            notebook.holder,
             'notebook_holder',
-            state.inventory.notebook.itemId,
+            notebook.itemId,
         );
-    }
 
-    if (
-        state.ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL
-        || state.ownership.userAccess === NOTEBOOK_USER_ACCESS.TOUCH
-    ) {
-        pushPresenceParticipant(
-            participants,
-            {
-                type: NOTEBOOK_ACTOR_TYPES.USER,
-                id: '',
-                name: 'User',
-            },
-            state.ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL ? 'user_full_access' : 'user_touch_access',
-            state.inventory.notebook.itemId,
-        );
+        if (
+            notebook.userAccess === NOTEBOOK_USER_ACCESS.FULL
+            || notebook.userAccess === NOTEBOOK_USER_ACCESS.TOUCH
+        ) {
+            pushPresenceParticipant(
+                participants,
+                {
+                    type: NOTEBOOK_ACTOR_TYPES.USER,
+                    id: '',
+                    name: 'User',
+                },
+                notebook.userAccess === NOTEBOOK_USER_ACCESS.FULL ? 'user_full_access' : 'user_touch_access',
+                notebook.itemId,
+            );
+        }
     }
 
     for (const scrap of state.inventory.scraps) {
@@ -1186,7 +1570,7 @@ function buildDeathNotePresenceParticipants(state) {
             continue;
         }
 
-        pushPresenceParticipant(participants, scrap.holder, 'scrap_holder', scrap.id);
+        pushPresenceParticipant(participants, scrap.holder, 'scrap_holder', String(scrap.notebookItemId || scrap.id));
     }
 
     for (const toucher of state.inventory.touchers) {
@@ -1245,9 +1629,7 @@ export function getChatState() {
         return createDefaultChatState();
     }
 
-    context.chatMetadata ??= {};
-    context.chatMetadata[CHAT_METADATA_KEY] ??= createDefaultChatState();
-    const state = context.chatMetadata[CHAT_METADATA_KEY];
+    const state = bindCachedChatState(context);
 
     if (!Array.isArray(state.entries)) {
         state.entries = [];
@@ -1266,66 +1648,72 @@ export function getChatState() {
         state.hasNotebook = true;
     }
 
-    state.ownership = normalizeOwnershipState(state.ownership);
-    state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
+    state.notebooks = normalizeNotebookCollection(state.notebooks, state);
+    state.selectedNotebookId = getSelectedNotebookId(state);
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
     state.identityTheft = normalizeIdentityTheftState(state.identityTheft);
-    state.notebookReturnRequest = normalizeNotebookReturnRequestState(state.notebookReturnRequest);
-    state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
-    if (!state.notebookPresenceReveal || typeof state.notebookPresenceReveal !== 'object') {
-        state.notebookPresenceReveal = {
-            pending: false,
-            openedAt: null,
-        };
-    } else {
-        state.notebookPresenceReveal.pending = Boolean(state.notebookPresenceReveal.pending);
-        state.notebookPresenceReveal.openedAt = normalizeTransferredAt(state.notebookPresenceReveal.openedAt);
-    }
-
-    if (state.inventory.notebook.destroyed) {
-        state.hasNotebook = false;
-    }
-
-    if (!state.hasNotebook && state.ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL) {
-        state.ownership.userAccess = NOTEBOOK_USER_ACCESS.NONE;
-    }
-
+    const selectedNotebook = ensureSelectedNotebook(state) || createDefaultNotebookState();
+    state.ownership = cloneActorOwnershipState(selectedNotebook);
+    state.shinigamiLink = normalizeShinigamiLinkState(selectedNotebook.linkedShinigami);
+    state.notebookReturnRequest = normalizeNotebookReturnRequestState(selectedNotebook.returnRequest);
+    state.notebookPresenceReveal = normalizeNotebookPresenceRevealState(selectedNotebook.presenceReveal);
+    state.inventory = normalizeInventoryState(state.inventory, state.ownership, getActiveNotebookCount(state) > 0);
     syncInventoryWithOwnership(state);
     refreshUserNotebookAccess(state, state.ownership.userAccess);
-
-    if (!Object.hasOwn(state, 'notebookText')) {
-        state.notebookText = '';
-    }
-
-    state.notebookPages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
-    syncNotebookTextFromPages(state);
-
     return state;
 }
 
-export function markNotebookPresenceRevealPending(timestamp = null) {
+export function markNotebookPresenceRevealPending(timestamp = null, notebookId = '') {
     const state = getChatState();
-    state.notebookPresenceReveal ??= { pending: false, openedAt: null };
-    state.notebookPresenceReveal.pending = true;
-    state.notebookPresenceReveal.openedAt = normalizeTransferredAt(timestamp) ?? Date.now();
+    const notebook = getNotebookById(state, notebookId);
+    if (!notebook) {
+        return false;
+    }
+    notebook.presenceReveal = normalizeNotebookPresenceRevealState(notebook.presenceReveal);
+    notebook.presenceReveal.pending = true;
+    notebook.presenceReveal.openedAt = normalizeTransferredAt(timestamp) ?? Date.now();
+    syncLegacyNotebookState(state);
     return true;
 }
 
-export function consumeNotebookPresenceRevealPending() {
+export function consumeNotebookPresenceRevealPending(notebookId = '') {
     const state = getChatState();
-    const pending = Boolean(state?.notebookPresenceReveal?.pending);
+    const notebook = getNotebookById(state, notebookId);
+    const pending = Boolean(notebook?.presenceReveal?.pending);
     if (!pending) {
         return false;
     }
 
-    state.notebookPresenceReveal.pending = false;
+    notebook.presenceReveal.pending = false;
+    syncLegacyNotebookState(state);
     return true;
 }
 
-export function getNotebookOwnership() {
+export function getSelectedNotebookIdState() {
     const state = getChatState();
-    state.ownership = normalizeOwnershipState(state.ownership);
-    return state.ownership;
+    return getSelectedNotebookId(state);
+}
+
+export function setSelectedNotebookId(notebookId) {
+    const state = getChatState();
+    const nextId = String(notebookId || '').trim();
+    if (!nextId || getNotebookIndexById(state, nextId) < 0) {
+        return false;
+    }
+    state.selectedNotebookId = nextId;
+    syncInventoryWithOwnership(state);
+    return true;
+}
+
+export function getDeathNotes() {
+    const state = getChatState();
+    return Array.isArray(state.notebooks) ? state.notebooks : [];
+}
+
+export function getNotebookOwnership(notebookId = '') {
+    const state = getChatState();
+    const notebook = getNotebookById(state, notebookId);
+    return cloneActorOwnershipState(notebook);
 }
 
 export function getNameKnowledgeState() {
@@ -1334,58 +1722,115 @@ export function getNameKnowledgeState() {
     return state.nameKnowledge;
 }
 
-export function getLinkedShinigami() {
+export function getLinkedShinigami(notebookId = '') {
     const state = getChatState();
-    state.shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
-    return state.shinigamiLink;
+    const notebook = getNotebookById(state, notebookId);
+    return normalizeShinigamiLinkState(notebook?.linkedShinigami);
 }
 
-export function getNotebookReturnRequest() {
+export function getNotebookReturnRequest(notebookId = '') {
     const state = getChatState();
-    state.notebookReturnRequest = normalizeNotebookReturnRequestState(state.notebookReturnRequest);
-    return state.notebookReturnRequest;
+    const notebook = getNotebookById(state, notebookId);
+    return normalizeNotebookReturnRequestState(notebook?.returnRequest);
+}
+
+export function createDeathNote(options = {}) {
+    const state = getChatState();
+    const activeCount = getActiveNotebookCount(state);
+    if (activeCount >= MAX_SIMULTANEOUS_DEATH_NOTES) {
+        return null;
+    }
+
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    const notebook = normalizeNotebookState({
+        itemId: String(options.itemId || '').trim() || (crypto.randomUUID?.() ?? `death-note-${timestamp}-${Math.random().toString(16).slice(2)}`),
+        label: String(options.label || `Death Note ${activeCount + 1}`).trim() || `Death Note ${activeCount + 1}`,
+        owner: options.owner,
+        holder: options.holder,
+        userAccess: options.userAccess,
+        exists: options.exists !== false,
+        destroyed: false,
+        lastTransferredAt: timestamp,
+        linkedShinigami: options.linkedShinigami,
+        returnRequest: createDefaultNotebookReturnRequestState(),
+        presenceReveal: createDefaultNotebookPresenceRevealState(),
+        pages: [''],
+        text: '',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+    }, state.notebooks.length);
+    if (getNotebookIndexById(state, notebook.itemId) >= 0) {
+        return null;
+    }
+
+    state.notebooks.push(notebook);
+    state.selectedNotebookId = notebook.itemId;
+    syncInventoryWithOwnership(state);
+    refreshUserNotebookAccess(state, notebook.userAccess);
+    pushInventoryHistory(state, {
+        action: 'create_notebook',
+        itemId: notebook.itemId,
+        detail: String(options.reason || '').trim() || `${notebook.label} entered play.`,
+        actor: notebook.owner,
+        target: notebook.holder,
+        timestamp,
+    });
+    return notebook;
 }
 
 export function requestNotebookReturn(actor, options = {}) {
     const state = getChatState();
     syncInventoryWithOwnership(state);
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook || notebook.destroyed) {
+        return false;
+    }
+    if (!isUserActor(notebook.owner)) {
+        return false;
+    }
     const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
     if (normalized.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER || (!normalized.name && !normalized.id)) {
         return false;
     }
 
-    state.notebookReturnRequest = normalizeNotebookReturnRequestState({
+    notebook.returnRequest = normalizeNotebookReturnRequestState({
         active: true,
         actor: normalized,
         requestedAt: Date.now(),
         resolvedAt: null,
     });
+    syncLegacyNotebookState(state);
 
     pushInventoryHistory(state, {
         action: 'request_notebook_return',
-        itemId: state.inventory.notebook.itemId,
+        itemId: notebook.itemId,
         detail: String(options.reason || '').trim() || `${normalized.name || 'A character'} was asked to return the Death Note.`,
-        actor: state.ownership.owner,
+        actor: notebook.owner,
         target: normalized,
-        timestamp: state.notebookReturnRequest.requestedAt ?? Date.now(),
+        timestamp: notebook.returnRequest.requestedAt ?? Date.now(),
     });
     return true;
 }
 
 export function clearNotebookReturnRequest(options = {}) {
     const state = getChatState();
-    const existing = normalizeNotebookReturnRequestState(state.notebookReturnRequest);
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook) {
+        return false;
+    }
+    const existing = normalizeNotebookReturnRequestState(notebook.returnRequest);
     if (!existing.active) {
-        state.notebookReturnRequest = existing;
+        notebook.returnRequest = existing;
         return false;
     }
 
-    state.notebookReturnRequest = createDefaultNotebookReturnRequestState();
+    notebook.returnRequest = createDefaultNotebookReturnRequestState();
+    syncLegacyNotebookState(state);
     pushInventoryHistory(state, {
         action: 'clear_notebook_return_request',
-        itemId: state.inventory.notebook.itemId,
+        itemId: notebook.itemId,
         detail: String(options.reason || '').trim() || 'Pending Death Note return request cleared.',
-        actor: state.ownership.owner,
+        actor: notebook.owner,
         target: existing.actor,
         timestamp: Date.now(),
     });
@@ -1783,13 +2228,16 @@ export function consumePendingIdentityTheftExposureForMessage(messageIndex) {
 
 export function getDeathNoteInventory() {
     const state = getChatState();
-    state.inventory = normalizeInventoryState(state.inventory, state.ownership, state.hasNotebook);
     syncInventoryWithOwnership(state);
     return state.inventory;
 }
 
 export function linkNotebookShinigami(actor, options = {}) {
     const state = getChatState();
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook) {
+        return false;
+    }
     const normalizedActor = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.SHINIGAMI, '');
     const avatar = String(options.avatar || normalizedActor.id || '').trim();
     const name = String(options.name || normalizedActor.name || '').trim();
@@ -1797,7 +2245,7 @@ export function linkNotebookShinigami(actor, options = {}) {
         return false;
     }
 
-    state.shinigamiLink = normalizeShinigamiLinkState({
+    notebook.linkedShinigami = normalizeShinigamiLinkState({
         active: true,
         actor: {
             ...normalizedActor,
@@ -1806,46 +2254,53 @@ export function linkNotebookShinigami(actor, options = {}) {
             name,
         },
         avatar,
-        notebookItemId: String(options.notebookItemId || state.inventory.notebook.itemId || 'death-note-main').trim(),
+        notebookItemId: notebook.itemId,
         linkedAt: (() => {
             const value = normalizeTransferredAt(options.linkedAt);
             return value === null ? Date.now() : value;
         })(),
     });
+    syncLegacyNotebookState(state);
 
-    if (isUserActor(state.ownership.owner)) {
-        learnCharacterName(state.shinigamiLink.actor, {
+    if (isUserActor(notebook.owner)) {
+        learnCharacterName(notebook.linkedShinigami.actor, {
             source: 'linked_shinigami',
-            timestamp: state.shinigamiLink.linkedAt,
-            reason: `${state.shinigamiLink.actor.name || 'The linked Shinigami'} became known when linked to the user's Death Note.`,
+            timestamp: notebook.linkedShinigami.linkedAt,
+            reason: `${notebook.linkedShinigami.actor.name || 'The linked Shinigami'} became known when linked to the user's Death Note.`,
         });
     }
 
     pushInventoryHistory(state, {
         action: 'link_shinigami',
-        itemId: state.shinigamiLink.notebookItemId,
-        detail: String(options.reason || '').trim() || `${state.shinigamiLink.actor.name || 'Shinigami'} linked to the notebook.`,
-        actor: state.shinigamiLink.actor,
-        target: state.ownership.holder,
-        timestamp: state.shinigamiLink.linkedAt || Date.now(),
+        itemId: notebook.linkedShinigami.notebookItemId,
+        detail: String(options.reason || '').trim() || `${notebook.linkedShinigami.actor.name || 'Shinigami'} linked to the notebook.`,
+        actor: notebook.linkedShinigami.actor,
+        target: notebook.holder,
+        timestamp: notebook.linkedShinigami.linkedAt || Date.now(),
     });
     return true;
 }
 
 export function unlinkNotebookShinigami(options = {}) {
     const state = getChatState();
-    const current = normalizeShinigamiLinkState(state.shinigamiLink);
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook) {
+        return false;
+    }
+    const current = normalizeShinigamiLinkState(notebook.linkedShinigami);
     if (!current.active && !current.actor.name && !current.avatar) {
         return false;
     }
 
-    state.shinigamiLink = createDefaultShinigamiLinkState();
+    notebook.linkedShinigami = createDefaultShinigamiLinkState();
+    notebook.linkedShinigami.notebookItemId = notebook.itemId;
+    syncLegacyNotebookState(state);
     pushInventoryHistory(state, {
         action: 'unlink_shinigami',
         itemId: current.notebookItemId,
         detail: String(options.reason || '').trim() || `${current.actor.name || 'Linked Shinigami'} unlinked from the notebook.`,
         actor: current.actor,
-        target: state.ownership.holder,
+        target: notebook.holder,
         timestamp: (() => {
             const value = normalizeTransferredAt(options.timestamp);
             return value === null ? Date.now() : value;
@@ -1859,19 +2314,38 @@ export function getNotebookTouchers() {
     return buildDeathNotePresenceParticipants(state);
 }
 
-export function getLinkedShinigamiPresenceBinding() {
+export function getLinkedShinigamiPresenceBindings() {
     const state = getChatState();
-    const shinigamiLink = normalizeShinigamiLinkState(state.shinigamiLink);
     const touchers = buildDeathNotePresenceParticipants(state);
-    const visibleActors = touchers
-        .map((entry) => entry?.actor)
-        .filter((actor) => actor && (actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER || actor.type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI));
+    const byItemId = new Map(
+        touchers.flatMap((entry) => {
+            const sources = Array.isArray(entry?.sources) ? entry.sources : [];
+            return sources.map((source) => [String(source?.itemId || '').trim(), entry.actor]);
+        }).filter(([itemId]) => itemId),
+    );
+    return state.notebooks
+        .map((notebook) => {
+            const shinigami = normalizeShinigamiLinkState(notebook.linkedShinigami);
+            const visibleActors = touchers
+                .filter((entry) => Array.isArray(entry?.sources) && entry.sources.some((source) => String(source?.itemId || '').trim() === notebook.itemId))
+                .map((entry) => entry?.actor)
+                .filter((actor) => actor && (actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER || actor.type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI));
+            return {
+                linked: Boolean(shinigami.active && (shinigami.avatar || shinigami.actor.name)),
+                shinigami,
+                visibleActors,
+                touchers: touchers.filter((entry) => Array.isArray(entry?.sources) && entry.sources.some((source) => String(source?.itemId || '').trim() === notebook.itemId)),
+            };
+        })
+        .filter((entry) => entry.linked);
+}
 
-    return {
-        linked: Boolean(shinigamiLink.active && (shinigamiLink.avatar || shinigamiLink.actor.name)),
-        shinigami: shinigamiLink,
-        visibleActors,
-        touchers,
+export function getLinkedShinigamiPresenceBinding() {
+    return getLinkedShinigamiPresenceBindings()[0] || {
+        linked: false,
+        shinigami: createDefaultShinigamiLinkState(),
+        visibleActors: [],
+        touchers: [],
     };
 }
 
@@ -1947,13 +2421,12 @@ export function getAutoTrackDeathNoteMemoryReason(messageIndex, options = {}) {
         return '';
     }
 
-    const state = getChatState();
     const resolvedEntries = Array.isArray(options.resolvedEntries) ? options.resolvedEntries : [];
     if (resolvedEntries.length > 0) {
         return 'resolved_entry';
     }
 
-    if (isMessageAuthoredByLinkedShinigami(message, state.shinigamiLink)) {
+    if (getLinkedShinigamiPresenceBindings().some((binding) => isMessageAuthoredByLinkedShinigami(message, binding.shinigami))) {
         return 'linked_shinigami';
     }
 
@@ -2023,21 +2496,23 @@ function extractNotebookReturnDecisionBlock(text) {
 function parseNotebookReturnDecision(body) {
     const source = String(body ?? '');
     const lines = source.split(/\r?\n/).map((line) => String(line ?? '').trim()).filter(Boolean);
+    let accepted = false;
+    let notebook = '';
     for (const line of lines) {
         const match = line.match(/^(?:return|accept|concede)\s*:\s*(yes|no)\s*$/i);
         if (match) {
-            return String(match[1] || '').trim().toLowerCase() === 'yes';
+            accepted = String(match[1] || '').trim().toLowerCase() === 'yes';
+            continue;
+        }
+        const notebookMatch = line.match(/^\s*notebook\s*:\s*(.+?)\s*$/i);
+        if (notebookMatch) {
+            notebook = String(notebookMatch[1] || '').trim();
         }
     }
-    return false;
+    return { accepted, notebook };
 }
 
 export function processAssistantNotebookReturnMessage(messageIndex) {
-    const request = getNotebookReturnRequest();
-    if (!request.active) {
-        return false;
-    }
-
     const context = getContext();
     const chat = context && Array.isArray(context.chat) ? context.chat : [];
     const index = Number(messageIndex);
@@ -2051,7 +2526,7 @@ export function processAssistantNotebookReturnMessage(messageIndex) {
     }
 
     const speaker = getCharacterActorForMessage(message);
-    if (!speaker || !actorRefsMatch(speaker, request.actor)) {
+    if (!speaker) {
         return false;
     }
 
@@ -2061,41 +2536,59 @@ export function processAssistantNotebookReturnMessage(messageIndex) {
     }
 
     const extracted = extractNotebookReturnDecisionBlock(message.mes ?? '');
-    const accepted = extracted.found ? parseNotebookReturnDecision(extracted.body) : false;
+    const decision = extracted.found ? parseNotebookReturnDecision(extracted.body) : { accepted: false, notebook: '' };
     if (extracted.found) {
         message.mes = extracted.strippedText;
     }
 
     const state = getChatState();
     syncInventoryWithOwnership(state);
+    const targetNotebook = Array.isArray(state.notebooks)
+        ? state.notebooks.find((entry) => {
+            const request = normalizeNotebookReturnRequestState(entry?.returnRequest);
+            if (!request.active || !actorRefsMatch(speaker, request.actor)) {
+                return false;
+            }
+            if (!decision.notebook) {
+                return true;
+            }
+            return normalizeKnowledgeKey(entry.itemId) === normalizeKnowledgeKey(decision.notebook)
+                || normalizeKnowledgeKey(entry.label) === normalizeKnowledgeKey(decision.notebook);
+        })
+        : null;
+    if (!targetNotebook) {
+        return false;
+    }
+    const request = normalizeNotebookReturnRequestState(targetNotebook.returnRequest);
     const timestamp = Date.now();
-    const resolvedRequest = normalizeNotebookReturnRequestState({
+    targetNotebook.returnRequest = normalizeNotebookReturnRequestState({
         ...request,
         active: false,
         resolvedAt: timestamp,
     });
-    state.notebookReturnRequest = resolvedRequest;
+    syncLegacyNotebookState(state);
 
     extra.notebookReturn = {
         processed: true,
         requestedAt: request.requestedAt,
         resolvedAt: timestamp,
-        accepted,
+        accepted: decision.accepted,
         found: extracted.found,
+        notebookItemId: targetNotebook.itemId,
     };
 
     pushInventoryHistory(state, {
         action: 'notebook_return_response',
-        itemId: state.inventory.notebook.itemId,
-        detail: accepted
+        itemId: targetNotebook.itemId,
+        detail: decision.accepted
             ? `${speaker.name || 'A character'} agreed to return the Death Note.`
             : `${speaker.name || 'A character'} did not return the Death Note.`,
         actor: speaker,
-        target: state.ownership.owner,
+        target: targetNotebook.owner,
         timestamp,
     });
 
-    if (!accepted || !state.hasNotebook || state.inventory?.notebook?.destroyed) {
+    if (!decision.accepted || targetNotebook.destroyed) {
         return true;
     }
 
@@ -2110,6 +2603,7 @@ export function processAssistantNotebookReturnMessage(messageIndex) {
         userAccess: NOTEBOOK_USER_ACCESS.FULL,
         exists: true,
         reason: `${speaker.name || speaker.type} returned the Death Note to the user.`,
+        notebookItemId: targetNotebook.itemId,
     });
 }
 
@@ -2150,21 +2644,22 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
         blockCount: extracted.blocks.length,
         writer: '',
         entry: '',
+        notebook: '',
         applied: false,
         reason: '',
         stripped: !settings.showAiWriteDebugBlocks,
         updatedAt: timestamp,
     };
 
-    const holder = normalizeActorRef(state.ownership?.holder, NOTEBOOK_ACTOR_TYPES.NONE, '');
-    if (!state.hasNotebook || state.inventory?.notebook?.destroyed) {
-        metadata.reason = 'notebook_unavailable';
-    } else if (!canAiHolderWriteNotebook(holder)) {
+    const holder = getCharacterActorForMessage(message)
+        || normalizeActorRef(state.ownership?.holder, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    if (!canAiHolderWriteNotebook(holder)) {
         metadata.reason = 'invalid_holder';
     } else {
         const parsed = parseAiNotebookWriteBlock(extracted.blocks[0].body);
         metadata.writer = parsed.writer;
         metadata.entry = parsed.entry;
+        metadata.notebook = parsed.notebook;
 
         if (!parsed.writer || !parsed.entry) {
             metadata.reason = 'missing_fields';
@@ -2174,6 +2669,7 @@ export function processAssistantNotebookWriteMessage(messageIndex) {
             const appended = appendAiNotebookLine(parsed.entry, holder, {
                 timestamp,
                 reason: `${holder.name || holder.type} wrote "${parsed.entry}" during an assistant reply.`,
+                notebookItemId: parsed.notebook,
             });
             metadata.applied = appended.applied;
             metadata.reason = appended.reason;
@@ -2258,9 +2754,13 @@ export function getRecentChatMemoryCandidates(limit = 12) {
     return max ? entries.slice(-max).reverse() : entries.reverse();
 }
 
-export function setNotebookOwnership(nextOwnership = {}) {
+export function setNotebookOwnership(nextOwnership = {}, notebookId = '') {
     const state = getChatState();
-    const current = normalizeOwnershipState(state.ownership);
+    const notebook = getNotebookById(state, notebookId);
+    if (!notebook) {
+        return false;
+    }
+    const current = cloneActorOwnershipState(notebook);
     const { next, transferred } = buildNextOwnership(current, nextOwnership);
 
     const changed = transferred
@@ -2271,7 +2771,12 @@ export function setNotebookOwnership(nextOwnership = {}) {
         return false;
     }
 
-    state.ownership = next;
+    notebook.owner = next.owner;
+    notebook.holder = next.holder;
+    notebook.userAccess = next.userAccess;
+    notebook.lastTransferredAt = next.lastTransferredAt;
+    notebook.exists = nextOwnership.exists !== false ? notebook.exists : false;
+    notebook.updatedAt = next.lastTransferredAt;
     syncInventoryWithOwnership(state);
     refreshUserNotebookAccess(state, next.userAccess);
     return true;
@@ -2283,12 +2788,16 @@ export function userHasFullNotebookAccess() {
 
 export function setUserNotebookAccess(access, options = {}) {
     const state = getChatState();
-    const nextAccess = normalizeUserAccess(access, state.ownership.userAccess);
-    const previousAccess = state.ownership.userAccess;
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook) {
+        return false;
+    }
+    const nextAccess = normalizeUserAccess(access, notebook.userAccess);
+    const previousAccess = notebook.userAccess;
     const changed = setNotebookOwnership({
         userAccess: nextAccess,
-        lastTransferredAt: state.ownership.lastTransferredAt,
-    });
+        lastTransferredAt: notebook.lastTransferredAt,
+    }, notebook.itemId);
 
     if (!changed) {
         return false;
@@ -2296,17 +2805,21 @@ export function setUserNotebookAccess(access, options = {}) {
 
     pushInventoryHistory(state, {
         action: 'set_user_access',
-        itemId: state.inventory.notebook.itemId,
-        detail: String(options.reason || '').trim() || `User access changed from ${previousAccess} to ${state.ownership.userAccess}.`,
-        actor: state.ownership.holder,
-        target: state.ownership.owner,
+        itemId: notebook.itemId,
+        detail: String(options.reason || '').trim() || `User access changed from ${previousAccess} to ${notebook.userAccess}.`,
+        actor: notebook.holder,
+        target: notebook.owner,
     });
     return true;
 }
 
 export function transferNotebookTo(holder, options = {}) {
     const state = getChatState();
-    const current = normalizeOwnershipState(state.ownership);
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook) {
+        return false;
+    }
+    const current = cloneActorOwnershipState(notebook);
     const nextHolder = normalizeActorRef(holder, current.holder.type, current.holder.name);
     const nextOwner = Object.hasOwn(options, 'owner')
         ? normalizeActorRef(options.owner, current.owner.type, current.owner.name)
@@ -2329,16 +2842,18 @@ export function transferNotebookTo(holder, options = {}) {
         return false;
     }
 
-    state.hasNotebook = options.exists !== false;
-    state.ownership = next;
+    notebook.exists = options.exists !== false;
+    notebook.destroyed = false;
+    notebook.owner = next.owner;
+    notebook.holder = next.holder;
+    notebook.userAccess = next.userAccess;
+    notebook.lastTransferredAt = next.lastTransferredAt;
+    notebook.updatedAt = timestamp;
     syncInventoryWithOwnership(state);
-    state.inventory.notebook.destroyed = false;
-    state.inventory.notebook.exists = Boolean(state.hasNotebook);
-    state.inventory.notebook.updatedAt = timestamp;
     refreshUserNotebookAccess(state, preferredAccess);
     pushInventoryHistory(state, {
         action: 'transfer_notebook',
-        itemId: state.inventory.notebook.itemId,
+        itemId: notebook.itemId,
         detail: String(options.reason || '').trim() || `Notebook transferred to ${nextHolder.name || nextHolder.type}.`,
         actor: current.holder,
         target: nextHolder,
@@ -2349,29 +2864,33 @@ export function transferNotebookTo(holder, options = {}) {
 
 export function destroyNotebook(options = {}) {
     const state = getChatState();
+    const notebookIndex = getNotebookIndexById(state, options.notebookItemId);
+    if (notebookIndex < 0) {
+        return false;
+    }
+    const notebook = state.notebooks[notebookIndex];
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
-    const wasAvailable = Boolean(state.hasNotebook) || !state.inventory?.notebook?.destroyed;
+    const wasAvailable = Boolean(notebook.exists) || !notebook.destroyed;
     if (!wasAvailable) {
         return false;
     }
 
-    state.hasNotebook = false;
-    state.ownership = normalizeOwnershipState({
-        ...state.ownership,
-        userAccess: NOTEBOOK_USER_ACCESS.NONE,
-        lastTransferredAt: timestamp,
-    });
+    const removedNotebook = {
+        ...notebook,
+        owner: cloneActorRef(notebook.owner, notebook.owner?.type, notebook.owner?.name),
+        holder: cloneActorRef(notebook.holder, notebook.holder?.type, notebook.holder?.name),
+    };
+    state.notebooks.splice(notebookIndex, 1);
+    state.selectedNotebookId = getSelectedNotebookId(state);
+    state.hasNotebook = state.notebooks.length > 0;
     syncInventoryWithOwnership(state);
-    state.inventory.notebook.exists = false;
-    state.inventory.notebook.destroyed = true;
-    state.inventory.notebook.updatedAt = timestamp;
     refreshUserNotebookAccess(state, NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'destroy_notebook',
-        itemId: state.inventory.notebook.itemId,
+        itemId: removedNotebook.itemId,
         detail: String(options.reason || '').trim() || 'Notebook destroyed or removed from play.',
-        actor: state.ownership.holder,
-        target: state.ownership.owner,
+        actor: removedNotebook.holder,
+        target: removedNotebook.owner,
         timestamp,
     });
     return true;
@@ -2381,7 +2900,11 @@ export function createNotebookScrap(options = {}) {
     const state = getChatState();
     syncInventoryWithOwnership(state);
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
-    const current = normalizeOwnershipState(state.ownership);
+    const notebook = getNotebookById(state, options.notebookItemId);
+    if (!notebook) {
+        return null;
+    }
+    const current = cloneActorOwnershipState(notebook);
     const holder = normalizeActorRef(
         options.holder,
         current.holder.type,
@@ -2397,6 +2920,7 @@ export function createNotebookScrap(options = {}) {
     const scrap = normalizeInventoryScrap({
         id: scrapId,
         label: options.label,
+        notebookItemId: notebook.itemId,
         noteText: options.noteText,
         owner,
         holder,
@@ -2407,7 +2931,7 @@ export function createNotebookScrap(options = {}) {
     }, state.inventory.scraps.length, owner, holder);
 
     state.inventory.scraps.push(scrap);
-    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    refreshUserNotebookAccess(state, notebook.userAccess);
     pushInventoryHistory(state, {
         action: 'create_scrap',
         itemId: scrap.id,
@@ -2448,7 +2972,8 @@ export function transferNotebookScrap(scrapId, holder, options = {}) {
     scrap.active = options.active === undefined ? scrap.active : options.active !== false;
     scrap.updatedAt = timestamp;
 
-    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    const notebook = getNotebookById(state, scrap.notebookItemId);
+    refreshUserNotebookAccess(state, notebook?.userAccess ?? NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'transfer_scrap',
         itemId: scrap.id,
@@ -2474,7 +2999,8 @@ export function removeNotebookScrap(scrapId, options = {}) {
     }
 
     const [removed] = state.inventory.scraps.splice(index, 1);
-    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    const removedNotebook = getNotebookById(state, removed?.notebookItemId);
+    refreshUserNotebookAccess(state, removedNotebook?.userAccess ?? NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'remove_scrap',
         itemId: removed.id,
@@ -2499,7 +3025,7 @@ export function addNotebookToucher(actor, options = {}) {
     }
 
     const source = String(options.source || 'manual_touch').trim().toLowerCase() || 'manual_touch';
-    const itemId = String(options.itemId || '').trim();
+    const itemId = String(options.itemId || getSelectedNotebookId(state)).trim();
     const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
     const existing = state.inventory.touchers.find((entry) => {
         return entry
@@ -2525,13 +3051,14 @@ export function addNotebookToucher(actor, options = {}) {
     }, state.inventory.touchers.length);
 
     state.inventory.touchers.push(toucher);
-    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    const notebook = getNotebookById(state, itemId);
+    refreshUserNotebookAccess(state, notebook?.userAccess ?? NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'add_toucher',
         itemId,
         detail: String(options.reason || '').trim() || `${normalizedActor.name || normalizedActor.type} touched the Death Note.`,
         actor: normalizedActor,
-        target: state.ownership.holder,
+        target: notebook?.holder || state.ownership.holder,
         timestamp,
     });
     return toucher;
@@ -2574,13 +3101,14 @@ export function removeNotebookToucher(actor, options = {}) {
         return false;
     }
 
-    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    const notebook = getNotebookById(state, itemIdFilter);
+    refreshUserNotebookAccess(state, notebook?.userAccess ?? NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'remove_toucher',
         itemId: itemIdFilter,
         detail: String(options.reason || '').trim() || `${normalizedActor.name || normalizedActor.type} no longer touches the Death Note.`,
         actor: normalizedActor,
-        target: state.ownership.holder,
+        target: notebook?.holder || state.ownership.holder,
         timestamp: normalizeTransferredAt(options.timestamp) ?? Date.now(),
     });
     return true;
@@ -2615,13 +3143,14 @@ export function clearNotebookTouchers(options = {}) {
         return false;
     }
 
-    refreshUserNotebookAccess(state, state.ownership.userAccess);
+    const notebook = getNotebookById(state, itemIdFilter);
+    refreshUserNotebookAccess(state, notebook?.userAccess ?? NOTEBOOK_USER_ACCESS.NONE);
     pushInventoryHistory(state, {
         action: 'clear_touchers',
         itemId: itemIdFilter,
         detail: String(options.reason || '').trim() || 'Cleared active Death Note touchers.',
-        actor: state.ownership.holder,
-        target: state.ownership.owner,
+        actor: notebook?.holder || state.ownership.holder,
+        target: notebook?.owner || state.ownership.owner,
         timestamp: normalizeTransferredAt(options.timestamp) ?? Date.now(),
     });
     return true;
@@ -2634,8 +3163,9 @@ export function getDeathNotePresenceState() {
     const userToucher = touchers.find((entry) => isUserActor(entry.actor));
 
     return {
-        notebookPresent: Boolean(state.hasNotebook),
-        notebookDestroyed: Boolean(inventory.notebook.destroyed),
+        notebookPresent: inventory.notebooks.some((entry) => entry && !entry.destroyed && entry.exists),
+        notebookDestroyed: inventory.notebooks.length > 0 && inventory.notebooks.every((entry) => entry && entry.destroyed),
+        notebooks: inventory.notebooks,
         touchers,
         userCanSeeShinigami: Boolean(userToucher),
         userTouchSources: userToucher ? userToucher.sources : [],
@@ -2665,8 +3195,9 @@ export function addDeathEntry({
     sourceType = 'notebook',
     sourceId = '',
     sourceLineIndex = null,
+    state: providedState = null,
 } = {}) {
-    const state = getChatState();
+    const state = providedState || getChatState();
 
     const entry = {
         id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -2705,32 +3236,26 @@ function looksLikeNameOnly(text) {
     }
 
     const lowered = value.toLowerCase();
-    const explicitTerms = [
-        ' will ',
-        ' die',
-        ' dies',
-        ' died',
-        ' killed',
-        ' kill',
-        ' heart attack',
-        ' poison',
-        ' poisoned',
-        ' stabbed',
-        ' shot',
-        ' burned',
-        ' drowned',
-        ' strangle',
-        ' suicide',
-        ' accident',
-        ' truck',
-        ' car',
-        ' next message',
-        ' minute',
-        ' hour',
-        ' day',
+    const explicitCausePatterns = [
+        /\b(?:die|dies|died)\b/i,
+        /\b(?:kill|killed)\b/i,
+        /\bheart attack\b/i,
+        /\b(?:poison|poisoned)\b/i,
+        /\bstabbed\b/i,
+        /\bshot\b/i,
+        /\bburned\b/i,
+        /\bdrowned\b/i,
+        /\bstrangle(?:d|s|ing)?\b/i,
+        /\bsuicide\b/i,
+        /\baccident\b/i,
+        /\btruck\b/i,
+        /\bcar\b/i,
+        /\bnext assistant message\b/i,
+        /\bnext message\b/i,
+        /\bwill\s+(?:die|be killed|suffer|have)\b/i,
     ];
 
-    if (explicitTerms.some((term) => lowered.includes(term.trim()) || lowered.includes(term))) {
+    if (explicitCausePatterns.some((pattern) => pattern.test(lowered))) {
         return false;
     }
 
@@ -2761,7 +3286,7 @@ function parseNotebookLine(line) {
     if (targetName) {
         const settings = getSettings();
         if (settings.requireKnownNamesForKills) {
-            const actor = getCurrentChatActorByName(targetName);
+            const actor = getResolvableActorByName(targetName);
             if (actor && !isActorNameKnown(actor)) {
                 return null;
             }
@@ -2823,16 +3348,20 @@ export function sanitizeScrapNoteText(text, maxNames = 2) {
 }
 
 function collectActiveDeathNoteSourceLines(state) {
-    const notebookLines = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '')
-        .flatMap((page, pageIndex) => String(page || '')
-            .split('\n')
-            .map((line, lineIndex) => ({
-                line: String(line || '').trim(),
-                sourceType: 'notebook',
-                sourceId: `page:${pageIndex}`,
-                sourceLineIndex: lineIndex,
-            }))
-            .filter((entry) => entry.line));
+    const notebookLines = Array.isArray(state.notebooks)
+        ? state.notebooks
+            .filter((notebook) => notebook && !notebook.destroyed && notebook.exists)
+            .flatMap((notebook) => normalizeNotebookPages(notebook.pages, notebook.text ?? '')
+                .flatMap((page, pageIndex) => String(page || '')
+                    .split('\n')
+                    .map((line, lineIndex) => ({
+                        line: String(line || '').trim(),
+                        sourceType: 'notebook',
+                        sourceId: `notebook:${notebook.itemId}:page:${pageIndex}`,
+                        sourceLineIndex: lineIndex,
+                    }))
+                    .filter((entry) => entry.line)))
+        : [];
     const scrapLines = Array.isArray(state.inventory?.scraps)
         ? state.inventory.scraps
             .filter((scrap) => scrap?.active)
@@ -2874,7 +3403,12 @@ function getPermanentResolvedEntriesForSource(sourceType, sourceId) {
         return [];
     }
 
-    const state = getChatState();
+    // Prefer the live cached state so permanent-line enforcement during writes
+    // does not re-enter full chat-state normalization mid-mutation.
+    const context = getContext();
+    const cacheKey = getActiveChatCacheKey(context);
+    const cached = cacheKey ? liveChatStateCache.get(cacheKey) : null;
+    const state = cached || getChatState();
     const normalizedType = normalizeDeathEntrySourceType(sourceType);
     const normalizedId = normalizeDeathEntrySourceId(sourceId);
     return state.entries.filter((entry) => {
@@ -2949,9 +3483,14 @@ function enforcePermanentLinesForSource(text, sourceType, sourceId, maxLines = n
     return nextLines.join('\n').trimEnd();
 }
 
-export function enforcePermanentNotebookPages(pages) {
+export function enforcePermanentNotebookPages(pages, notebookId = '') {
     const normalized = normalizeNotebookPages(pages, '');
-    return normalized.map((page, pageIndex) => enforcePermanentLinesForSource(page, 'notebook', `page:${pageIndex}`));
+    const targetId = String(notebookId || '').trim();
+    return normalized.map((page, pageIndex) => enforcePermanentLinesForSource(
+        page,
+        'notebook',
+        `notebook:${targetId}:page:${pageIndex}`,
+    ));
 }
 
 export function enforcePermanentScrapText(scrapId, text, maxLines = 2) {
@@ -2973,40 +3512,60 @@ export function getPermanentResolvedLineCounts(sourceType, sourceId) {
     return counts;
 }
 
-export function setNotebookText(text) {
+export function setNotebookText(text, notebookId = '') {
     const state = getChatState();
+    const notebook = getNotebookById(state, notebookId);
+    if (!notebook) {
+        return false;
+    }
     const value = String(text ?? '');
 
-    if (state.notebookText === value && Array.isArray(state.notebookPages) && state.notebookPages.length === 1 && state.notebookPages[0] === value) {
+    if (notebook.text === value && Array.isArray(notebook.pages) && notebook.pages.length === 1 && notebook.pages[0] === value) {
         return false;
     }
 
-    state.notebookText = value;
-    state.notebookPages = [value];
-    reconcileEntriesFromNotebookPages();
+    notebook.text = value;
+    notebook.pages = [value];
+    notebook.updatedAt = Date.now();
+    syncLegacyNotebookState(state);
+    reconcileEntriesFromNotebookPages(state);
     return true;
 }
 
-export function getNotebookPages() {
+export function getNotebookPages(notebookId = '') {
     const state = getChatState();
-    state.notebookPages = normalizeNotebookPages(state.notebookPages, state.notebookText ?? '');
-    return state.notebookPages;
+    const notebook = getNotebookById(state, notebookId);
+    if (!notebook) {
+        return [''];
+    }
+    notebook.pages = normalizeNotebookPages(notebook.pages, notebook.text ?? '');
+    notebook.text = notebook.pages.join('');
+    if (!notebookId || notebook.itemId === state.selectedNotebookId) {
+        syncLegacyNotebookState(state);
+    }
+    return notebook.pages;
 }
 
-export function setNotebookPages(pages) {
+export function setNotebookPages(pages, notebookId = '') {
     const state = getChatState();
-    const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, state.notebookText ?? ''));
+    const notebook = getNotebookById(state, notebookId);
+    if (!notebook) {
+        return false;
+    }
+    const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, notebook.text ?? ''), notebook.itemId);
     const nextText = normalized.join('');
-    const sameLength = Array.isArray(state.notebookPages) && state.notebookPages.length === normalized.length;
-    const samePages = sameLength && normalized.every((page, index) => state.notebookPages[index] === page);
+    const sameLength = Array.isArray(notebook.pages) && notebook.pages.length === normalized.length;
+    const samePages = sameLength && normalized.every((page, index) => notebook.pages[index] === page);
 
-    if (samePages && state.notebookText === nextText) {
+    if (samePages && notebook.text === nextText) {
         return false;
     }
 
-    state.notebookPages = normalized;
-    state.notebookText = nextText;
-    reconcileEntriesFromNotebookText();
+    notebook.pages = normalized;
+    notebook.text = nextText;
+    notebook.updatedAt = Date.now();
+    syncLegacyNotebookState(state);
+    reconcileEntriesFromNotebookText(state);
     return true;
 }
 
@@ -3039,12 +3598,11 @@ export function updateNotebookScrapText(scrapId, noteText, options = {}) {
         target: scrap.owner,
         timestamp,
     });
-    reconcileEntriesFromNotebookText();
+    reconcileEntriesFromNotebookText(state);
     return true;
 }
 
-export function reconcileEntriesFromNotebookPages() {
-    const state = getChatState();
+function reconcileEntriesFromState(state) {
     syncNotebookTextFromPages(state);
     const lines = collectActiveDeathNoteSourceLines(state);
     const counts = buildLineCounts(lines);
@@ -3089,6 +3647,7 @@ export function reconcileEntriesFromNotebookPages() {
             sourceType: lineEntry.sourceType,
             sourceId: lineEntry.sourceId,
             sourceLineIndex: lineEntry.sourceLineIndex,
+            state,
         });
         if (entry) {
             retained.push(entry);
@@ -3099,8 +3658,12 @@ export function reconcileEntriesFromNotebookPages() {
     state.entries = retained;
 }
 
-export function reconcileEntriesFromNotebookText() {
-    reconcileEntriesFromNotebookPages();
+export function reconcileEntriesFromNotebookPages(state = null) {
+    reconcileEntriesFromState(state || getChatState());
+}
+
+export function reconcileEntriesFromNotebookText(state = null) {
+    reconcileEntriesFromState(state || getChatState());
 }
 
 export function removeDeathEntry(entryId) {

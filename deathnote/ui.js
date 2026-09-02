@@ -3,6 +3,7 @@ import {
     addNotebookToucher,
     attemptStealCharacterId,
     clearNotebookTouchers,
+    createDeathNote,
     createNotebookScrap,
     destroyNotebook,
     forgetCharacterName,
@@ -13,6 +14,7 @@ import {
     getCharacterNameDirectory,
     getContext,
     getCurrentChatCharacterActors,
+    getDeathNotes,
     getDeathNoteInventory,
     getIdentityStealAttemptState,
     getIdentityStealSuccessChance,
@@ -22,6 +24,7 @@ import {
     getNotebookReturnRequest,
     getPermanentResolvedLineCounts,
     getRecentChatMemoryCandidates,
+    getSelectedNotebookIdState,
     getSettings,
     learnCharacterName,
     linkNotebookShinigami,
@@ -34,6 +37,7 @@ import {
     sanitizeNotebookPageText,
     sanitizeScrapNoteText,
     scheduleSettingsSave,
+    setSelectedNotebookId,
     setDeathNoteMemoryTracked,
     setNotebookOwnership,
     setNotebookPages,
@@ -69,6 +73,8 @@ let chatNameMaskObserver = null;
 let chatNameMaskQueued = false;
 let inventorySettingsOpen = false;
 let inventoryManageOpen = false;
+let notebookPageSessionCache = new Map();
+let notebookPageSessionKey = '';
 let inventoryDragState = {
     dragging: false,
     startX: 0,
@@ -89,6 +95,85 @@ let deathNoteAudioState = {
     writingStopTimer: null,
 };
 let deathNoteNoticeTimer = null;
+
+function getNotebookPageSessionKey() {
+    const context = getContext();
+    if (!context) {
+        return 'global';
+    }
+
+    const chatId = String(context.chatId ?? '').trim();
+    const groupId = String(context.groupId ?? '').trim();
+    const characterId = Number.isFinite(Number(context.characterId))
+        ? `character:${Number(context.characterId)}`
+        : '';
+    return [chatId && `chat:${chatId}`, groupId && `group:${groupId}`, characterId].filter(Boolean).join('|') || 'global';
+}
+
+function syncNotebookPageSessionCache() {
+    const nextKey = getNotebookPageSessionKey();
+    if (nextKey === notebookPageSessionKey) {
+        return;
+    }
+
+    notebookPageSessionKey = nextKey;
+    notebookPageSessionCache = new Map();
+}
+
+function cloneNotebookPagesForUi(pages) {
+    if (!Array.isArray(pages) || !pages.length) {
+        return [''];
+    }
+
+    return pages.map((page) => String(page ?? ''));
+}
+
+function notebookPagesMatch(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((page, index) => String(page ?? '') === String(right[index] ?? ''));
+}
+
+function getNotebookPagesScore(pages) {
+    const normalized = cloneNotebookPagesForUi(pages);
+    return normalized.join('').length + (normalized.length * 1000);
+}
+
+function getUiNotebookPages(notebookId) {
+    syncNotebookPageSessionCache();
+    const key = String(notebookId || '').trim();
+    const corePages = cloneNotebookPagesForUi(getNotebookPages(notebookId));
+    if (!key) {
+        return corePages;
+    }
+
+    const cachedPages = notebookPageSessionCache.get(key);
+    if (!cachedPages) {
+        notebookPageSessionCache.set(key, corePages);
+        return cloneNotebookPagesForUi(corePages);
+    }
+
+    const coreScore = getNotebookPagesScore(corePages);
+    const cachedScore = getNotebookPagesScore(cachedPages);
+    if (!notebookPagesMatch(corePages, cachedPages) && coreScore >= cachedScore) {
+        notebookPageSessionCache.set(key, corePages);
+        return cloneNotebookPagesForUi(corePages);
+    }
+
+    return cloneNotebookPagesForUi(cachedPages);
+}
+
+function setUiNotebookPages(notebookId, pages) {
+    syncNotebookPageSessionCache();
+    const key = String(notebookId || '').trim();
+    const normalized = cloneNotebookPagesForUi(pages);
+    if (key) {
+        notebookPageSessionCache.set(key, normalized);
+    }
+    return cloneNotebookPagesForUi(normalized);
+}
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -462,9 +547,13 @@ function getTogglePosition(left, top, isOpening) {
     };
 }
 
-function setNotebookOpenState(nextOpen) {
+function setNotebookOpenState(nextOpen, { notebookId = '', debugPeek = false } = {}) {
     const settings = getSettings();
     const root = document.getElementById(FLOATING_ID);
+    const resolvedNotebookId = nextOpen
+        ? resolveUiNotebookId(notebookId || settings.selectedNotebookId)
+        : getActiveWidgetNotebookId(notebookId || settings.openNotebookItemId || settings.selectedNotebookId);
+    const ownership = resolvedNotebookId ? getNotebookOwnership(resolvedNotebookId) : null;
     let anchorX = null;
     let anchorY = null;
 
@@ -495,11 +584,25 @@ function setNotebookOpenState(nextOpen) {
     }
 
     settings.isOpen = Boolean(nextOpen);
+    if (nextOpen) {
+        settings.openNotebookItemId = resolvedNotebookId;
+        if (resolvedNotebookId) {
+            settings.selectedNotebookId = resolvedNotebookId;
+            setSelectedNotebookId(resolvedNotebookId);
+        }
+    } else {
+        settings.openNotebookItemId = '';
+    }
+    if (!nextOpen && ownership?.holder?.type !== NOTEBOOK_ACTOR_TYPES.USER) {
+        selectPreferredUserNotebook();
+    }
     scheduleSettingsSave();
     if (nextOpen) {
-        playNotebookOpenSound();
-        if (shouldTriggerNotebookPresenceReveal()) {
-            markNotebookPresenceRevealPending();
+        if (!debugPeek) {
+            playNotebookOpenSound();
+            if (shouldTriggerNotebookPresenceReveal()) {
+                markNotebookPresenceRevealPending(null, resolvedNotebookId);
+            }
         }
     } else {
         stopWritingSound();
@@ -566,18 +669,30 @@ function renderNotebookPage(text, extraClass = '') {
     `;
 }
 
-function renderEditablePage({ pageIndex, side, text, extraClass = '' }) {
-    const classes = ['kw-deathnote__paper', 'kw-deathnote__paper--editable', extraClass].filter(Boolean).join(' ');
-    const sourceId = `page:${pageIndex}`;
+function isNotebookWritableByUser(ownership) {
+    return ownership?.userAccess === NOTEBOOK_USER_ACCESS.FULL
+        && ownership?.holder?.type === NOTEBOOK_ACTOR_TYPES.USER;
+}
+
+function renderEditablePage({ notebookId, pageIndex, side, text, extraClass = '', readOnly = false }) {
+    const classes = [
+        'kw-deathnote__paper',
+        'kw-deathnote__paper--editable',
+        readOnly ? 'kw-deathnote__paper--readonly' : '',
+        extraClass,
+    ].filter(Boolean).join(' ');
+    const sourceId = `notebook:${notebookId}:page:${pageIndex}`;
     return `
         <div class="${classes}">
             <textarea
                 class="kw-deathnote__entry-textarea"
                 name="entryText"
+                data-notebook-id="${escapeHtml(String(notebookId || ''))}"
                 data-page-index="${pageIndex}"
                 data-page-side="${side}"
                 autocomplete="off"
                 spellcheck="false"
+                ${readOnly ? 'readonly aria-readonly="true"' : ''}
             >${escapeHtml(String(text || ''))}</textarea>
             ${renderPermanentLineOverlay('notebook', sourceId, text, 'kw-deathnote__locked-overlay')}
         </div>
@@ -1330,22 +1445,104 @@ function renderUserAccessOptions(selectedAccess) {
     }).join('');
 }
 
-function shouldShowNotebookInInventory(inventory, ownership) {
-    return Boolean(
-        inventory?.notebook
-        && !inventory.notebook.destroyed
-        && ownership?.holder
-        && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.USER
-    );
+function getUserHeldNotebookItems(inventory) {
+    const notebooks = Array.isArray(inventory?.notebooks) ? inventory.notebooks : [];
+    return notebooks.filter((entry) => entry && !entry.destroyed && entry.userAccess === NOTEBOOK_USER_ACCESS.FULL);
+}
+
+function getNotebookSummaryById(inventory, notebookId) {
+    const targetId = String(notebookId || '').trim();
+    return (Array.isArray(inventory?.notebooks) ? inventory.notebooks : []).find((entry) => entry && entry.itemId === targetId) || null;
+}
+
+function getNotebookOrderRank(notebook) {
+    const itemId = String(notebook?.itemId || '').trim().toLowerCase();
+    if (itemId === 'death-note-main') {
+        return 1;
+    }
+
+    const label = String(notebook?.label || '').trim();
+    const labelMatch = /^Death Note(?:\s+(\d+))?$/i.exec(label);
+    if (labelMatch) {
+        return Number(labelMatch[1] || 1);
+    }
+
+    const numericMatch = label.match(/(\d+)/);
+    if (numericMatch) {
+        return Number(numericMatch[1]);
+    }
+
+    return Number.MAX_SAFE_INTEGER;
+}
+
+function selectPreferredUserNotebook({ closeIfMissing = false } = {}) {
+    const settings = getSettings();
+    const inventory = getDeathNoteInventory();
+    const candidates = getUserHeldNotebookItems(inventory).slice().sort((left, right) => {
+        const rankDiff = getNotebookOrderRank(left) - getNotebookOrderRank(right);
+        if (rankDiff !== 0) {
+            return rankDiff;
+        }
+        return String(left?.label || '').localeCompare(String(right?.label || ''));
+    });
+    const preferred = candidates[0] || null;
+    if (!preferred?.itemId) {
+        settings.selectedNotebookId = '';
+        if (String(settings.inventorySelectedItemKey || '').startsWith('notebook')) {
+            settings.inventorySelectedItemKey = 'notebook';
+        }
+        if (closeIfMissing) {
+            settings.isOpen = false;
+            settings.openNotebookItemId = '';
+        }
+        return '';
+    }
+
+    settings.selectedNotebookId = preferred.itemId;
+    settings.inventorySelectedItemKey = `notebook:${preferred.itemId}`;
+    setSelectedNotebookId(preferred.itemId);
+    return preferred.itemId;
+}
+
+function resolveUiNotebookId(preferredId = '') {
+    const candidate = String(preferredId || '').trim();
+    const notebooks = getDeathNotes();
+    if (candidate && notebooks.some((entry) => entry && entry.itemId === candidate)) {
+        return candidate;
+    }
+    return String(getSelectedNotebookIdState() || '').trim();
+}
+
+function getPinnedOpenNotebookId(preferredId = '') {
+    const settings = getSettings();
+    const candidate = String(settings.openNotebookItemId || preferredId || settings.selectedNotebookId).trim();
+    return resolveUiNotebookId(candidate);
+}
+
+function getActiveWidgetNotebookId(preferredId = '') {
+    const settings = getSettings();
+    if (settings.isOpen) {
+        return getPinnedOpenNotebookId(preferredId);
+    }
+    return resolveUiNotebookId(preferredId || settings.selectedNotebookId);
 }
 
 function getSelectedInventoryItemKey(settings, inventory, ownership = getNotebookOwnership()) {
     const scraps = inventory.scraps.filter((scrap) => scrap && scrap.active);
     const ids = Array.isArray(inventory.ids) ? inventory.ids : [];
-    const showNotebook = shouldShowNotebookInInventory(inventory, ownership);
+    const userHeldNotebooks = getUserHeldNotebookItems(inventory);
+    const selectedNotebookId = resolveUiNotebookId(settings.selectedNotebookId);
     const selected = String(settings.inventorySelectedItemKey || 'notebook').trim();
-    if ((!selected || selected === 'notebook') && showNotebook) {
-        return 'notebook';
+    if (selected.startsWith('notebook:')) {
+        const notebookId = selected.slice('notebook:'.length);
+        if (userHeldNotebooks.some((entry) => entry.itemId === notebookId)) {
+            return selected;
+        }
+    }
+
+    if ((!selected || selected === 'notebook') && userHeldNotebooks.length) {
+        const preferred = userHeldNotebooks.find((entry) => entry.itemId === selectedNotebookId) || userHeldNotebooks[0];
+        return preferred ? `notebook:${preferred.itemId}` : '';
     }
 
     if (selected.startsWith('scrap:')) {
@@ -1370,18 +1567,19 @@ function getSelectedInventoryItemKey(settings, inventory, ownership = getNoteboo
         return `id:${ids[0].id}`;
     }
 
-    return showNotebook ? 'notebook' : '';
+    return userHeldNotebooks.length ? `notebook:${userHeldNotebooks[0].itemId}` : '';
 }
 
 function renderInventoryGridSlots(inventory, ownership, selectedKey, coverUrl) {
     const slots = [];
-    if (shouldShowNotebookInInventory(inventory, ownership)) {
+    for (const notebook of getUserHeldNotebookItems(inventory)) {
+        const itemKey = `notebook:${notebook.itemId}`;
         slots.push(`
             <button
                 type="button"
-                class="kw-dn-inventory__slot ${selectedKey === 'notebook' ? 'is-selected' : ''} ${inventory.notebook.destroyed ? 'is-disabled' : ''}"
-                data-item-key="notebook"
-                aria-pressed="${selectedKey === 'notebook' ? 'true' : 'false'}"
+                class="kw-dn-inventory__slot ${selectedKey === itemKey ? 'is-selected' : ''} ${notebook.destroyed ? 'is-disabled' : ''}"
+                data-item-key="${escapeHtml(itemKey)}"
+                aria-pressed="${selectedKey === itemKey ? 'true' : 'false'}"
             >
                 <img
                     class="kw-dn-inventory__slot-art"
@@ -1389,7 +1587,7 @@ function renderInventoryGridSlots(inventory, ownership, selectedKey, coverUrl) {
                     alt="Death Note cover"
                     draggable="false"
                 />
-                <span class="kw-dn-inventory__slot-label">Death Note</span>
+                <span class="kw-dn-inventory__slot-label">${escapeHtml(notebook.label || 'Death Note')}</span>
             </button>
         `);
     }
@@ -1426,7 +1624,7 @@ function renderInventoryGridSlots(inventory, ownership, selectedKey, coverUrl) {
         `);
     }
 
-    if (!scraps.length && !ids.length) {
+    if (!getUserHeldNotebookItems(inventory).length && !scraps.length && !ids.length) {
         slots.push(`
             <div class="kw-dn-inventory__slot kw-dn-inventory__slot--empty" aria-hidden="true">
                 <span class="kw-dn-inventory__slot-label">Empty</span>
@@ -1437,8 +1635,8 @@ function renderInventoryGridSlots(inventory, ownership, selectedKey, coverUrl) {
     return slots.join('');
 }
 
-function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }) {
-    const notebookAvailable = !inventory.notebook.destroyed;
+function renderNotebookSelectionPanel({ settings, notebook, ownership, linked }) {
+    const notebookAvailable = Boolean(notebook && !notebook.destroyed);
     const canOpenNotebook = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
     const canTransferNotebook = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
     const linkedLabel = linked.active ? formatActorInventoryLabel(linked.actor) : 'No link';
@@ -1469,7 +1667,7 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
         <div class="kw-dn-inventory__context-card kw-dn-inventory__context-card--notebook">
             <div class="kw-dn-inventory__context-head">
                 <div>
-                    <div class="kw-dn-inventory__item-eyebrow">Death Note</div>
+                    <div class="kw-dn-inventory__item-eyebrow">${escapeHtml(notebook?.label || 'Death Note')}</div>
                     <div class="kw-dn-inventory__context-title">${settings.isOpen ? 'Opened' : 'Stored'}</div>
                 </div>
                 <div class="kw-dn-inventory__context-meta">Linked: ${escapeHtml(linkedLabel)}</div>
@@ -1499,6 +1697,7 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                     <select
                         id="kw-dn-inventory-give-select"
                         class="text_pole kw-dn-inventory__context-select"
+                        data-notebook-id="${escapeHtml(notebook?.itemId || '')}"
                         ${canTransferNotebook ? '' : 'disabled'}
                     >
                         ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
@@ -1507,6 +1706,7 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                         type="button"
                         id="kw-dn-inventory-give-notebook"
                         class="menu_button kw-dn-inventory__context-action"
+                        data-notebook-id="${escapeHtml(notebook?.itemId || '')}"
                         ${canTransferNotebook ? '' : 'disabled'}
                     >Give</button>
                 </div>
@@ -1514,6 +1714,7 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                     <select
                         id="kw-dn-inventory-shinigami-select"
                         class="text_pole kw-dn-inventory__context-select"
+                        data-notebook-id="${escapeHtml(notebook?.itemId || '')}"
                     >
                         ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
                     </select>
@@ -1521,11 +1722,13 @@ function renderNotebookSelectionPanel({ settings, inventory, ownership, linked }
                         type="button"
                         id="kw-dn-inventory-link-shinigami"
                         class="menu_button kw-dn-inventory__context-action"
+                        data-notebook-id="${escapeHtml(notebook?.itemId || '')}"
                     >Link Shinigami</button>
                     <button
                         type="button"
                         id="kw-dn-inventory-unlink-shinigami"
                         class="menu_button kw-dn-inventory__context-action"
+                        data-notebook-id="${escapeHtml(notebook?.itemId || '')}"
                         ${linked.active ? '' : 'disabled'}
                     >Clear Link</button>
                 </div>
@@ -1609,8 +1812,10 @@ function renderIdentityCardSelectionPanel(idCard) {
 function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
     const selectedKey = getSelectedInventoryItemKey(settings, inventory, ownership);
     if (!selectedKey) {
-        const request = getNotebookReturnRequest();
-        const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
+        const notebooksElsewhere = (Array.isArray(inventory.notebooks) ? inventory.notebooks : []).filter((entry) => entry && !entry.destroyed && entry.userAccess !== NOTEBOOK_USER_ACCESS.FULL);
+        const notebook = notebooksElsewhere[0] || null;
+        const request = notebook ? getNotebookReturnRequest(notebook.itemId) : { active: false, actor: null };
+        const holder = notebook?.holder && notebook.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? notebook.holder : null;
         const requestMatchesHolder = Boolean(
             request.active
             && holder
@@ -1618,8 +1823,8 @@ function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
         );
         const canRequestReturn = Boolean(
             holder
-            && !inventory.notebook.destroyed
-            && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL,
+            && notebook
+            && notebook.userAccess !== NOTEBOOK_USER_ACCESS.FULL,
         );
         return `
             <div class="kw-dn-inventory__context-card kw-dn-inventory__context-card--id">
@@ -1628,7 +1833,7 @@ function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
                         <div class="kw-dn-inventory__item-eyebrow">Inventory</div>
                         <div class="kw-dn-inventory__context-title">No Death Note Held</div>
                     </div>
-                    <div class="kw-dn-inventory__context-meta">Notebook is currently elsewhere</div>
+                    <div class="kw-dn-inventory__context-meta">Your notebooks are currently elsewhere</div>
                 </div>
                 ${holder ? `<div class="kw-dn-inventory__context-meta">Holder: ${escapeHtml(formatActorInventoryLabel(holder))}</div>` : ''}
                 ${canRequestReturn ? `
@@ -1638,6 +1843,7 @@ function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
                             id="kw-dn-inventory-request-return"
                             class="menu_button kw-dn-inventory__context-action"
                             data-actor="${escapeHtml(encodeActorValue(holder))}"
+                            data-notebook-id="${escapeHtml(notebook.itemId)}"
                             ${requestMatchesHolder ? 'disabled' : ''}
                         >${requestMatchesHolder ? 'Return Requested' : 'Request Return'}</button>
                     </div>
@@ -1645,8 +1851,12 @@ function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
             </div>
         `;
     }
-    if (selectedKey === 'notebook') {
-        return renderNotebookSelectionPanel({ settings, inventory, ownership, linked });
+    if (selectedKey.startsWith('notebook:')) {
+        const notebookId = selectedKey.slice('notebook:'.length);
+        const notebook = getNotebookSummaryById(inventory, notebookId);
+        const notebookOwnership = getNotebookOwnership(notebookId);
+        const notebookLinked = getLinkedShinigami(notebookId);
+        return renderNotebookSelectionPanel({ settings, notebook, ownership: notebookOwnership, linked: notebookLinked });
     }
 
     if (selectedKey.startsWith('id:')) {
@@ -1658,13 +1868,29 @@ function renderInventorySelectionPanel(settings, inventory, ownership, linked) {
             return renderIdentityCardSelectionPanel(idCard);
         }
 
-        return renderNotebookSelectionPanel({ settings, inventory, ownership, linked });
+        const fallbackNotebook = getUserHeldNotebookItems(inventory)[0] || null;
+        return fallbackNotebook
+            ? renderNotebookSelectionPanel({
+                settings,
+                notebook: fallbackNotebook,
+                ownership: getNotebookOwnership(fallbackNotebook.itemId),
+                linked: getLinkedShinigami(fallbackNotebook.itemId),
+            })
+            : '';
     }
 
     const scrapId = selectedKey.slice('scrap:'.length);
     const scrap = inventory.scraps.find((entry) => entry && entry.active && entry.id === scrapId);
     if (!scrap) {
-        return renderNotebookSelectionPanel({ settings, inventory, ownership, linked });
+        const fallbackNotebook = getUserHeldNotebookItems(inventory)[0] || null;
+        return fallbackNotebook
+            ? renderNotebookSelectionPanel({
+                settings,
+                notebook: fallbackNotebook,
+                ownership: getNotebookOwnership(fallbackNotebook.itemId),
+                linked: getLinkedShinigami(fallbackNotebook.itemId),
+            })
+            : '';
     }
 
     return renderScrapSelectionPanel(scrap);
@@ -1676,7 +1902,7 @@ function renderInventoryTrayHtml() {
     const inventory = getDeathNoteInventory();
     const linked = getLinkedShinigami();
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
-    const itemCount = (shouldShowNotebookInInventory(inventory, ownership) ? 1 : 0)
+    const itemCount = getUserHeldNotebookItems(inventory).length
         + inventory.scraps.filter((scrap) => scrap && scrap.active).length
         + (Array.isArray(inventory.ids) ? inventory.ids.length : 0);
     const selectedKey = getSelectedInventoryItemKey(settings, inventory, ownership);
@@ -1991,8 +2217,9 @@ function bindSettingsUi() {
         getSettings().requireKnownNamesForKills = Boolean($(event.currentTarget).prop('checked'));
         scheduleSettingsSave();
         const inventory = getDeathNoteInventory();
-        const sanitizedPages = sanitizeNotebookPagesForRules(getNotebookPages());
-        let changed = setNotebookPages(sanitizedPages);
+        const notebookId = resolveUiNotebookId(getSettings().selectedNotebookId);
+        const sanitizedPages = sanitizeNotebookPagesForRules(getNotebookPages(notebookId));
+        let changed = setNotebookPages(sanitizedPages, notebookId);
         for (const scrap of Array.isArray(inventory.scraps) ? inventory.scraps : []) {
             if (!scrap || !scrap.active) {
                 continue;
@@ -2015,7 +2242,8 @@ function bindSettingsUi() {
     $('#kw-deathnote-permanent-notebook').off('change').on('change', async (event) => {
         getSettings().permanentResolvedNotebookEntries = Boolean($(event.currentTarget).prop('checked'));
         scheduleSettingsSave();
-        const changed = setNotebookPages([...getNotebookPages()]);
+        const notebookId = resolveUiNotebookId(getSettings().selectedNotebookId);
+        const changed = setNotebookPages([...getNotebookPages(notebookId)], notebookId);
         if (changed) {
             await persistChatChanges();
         }
@@ -2069,22 +2297,26 @@ function bindSettingsUi() {
 
     $('#kw-deathnote-debug-retrieve-notebook').off('click').on('click', async (event) => {
         event.preventDefault();
-        const inventory = getDeathNoteInventory();
-        if (inventory.notebook.destroyed) {
-            notify('warning', 'The Death Note is destroyed or missing.');
+        const settings = getSettings();
+        const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+        const ownership = getNotebookOwnership(notebookId);
+        const notebook = getNotebookSummaryById(getDeathNoteInventory(), notebookId);
+        if (!notebook || notebook.destroyed) {
+            notify('warning', 'The selected Death Note is destroyed or missing.');
             return;
         }
 
-        const settings = getSettings();
-        const ownership = getNotebookOwnership();
         const retrieved = await commitInventoryMutation(() => transferNotebookTo(getUserActor(), {
+            notebookItemId: notebookId,
             owner: ownership.owner,
             userAccess: NOTEBOOK_USER_ACCESS.FULL,
             exists: true,
             reason: 'Notebook forcibly retrieved via debug settings.',
         }), 'Death Note retrieved.');
         if (retrieved) {
-            settings.inventorySelectedItemKey = 'notebook';
+            settings.selectedNotebookId = notebookId;
+            settings.inventorySelectedItemKey = `notebook:${notebookId}`;
+            setSelectedNotebookId(notebookId);
             scheduleSettingsSave();
         }
     });
@@ -2516,7 +2748,11 @@ function renderInventorySettingsContentHtml() {
                             <small>When disabled, the module strips parsed AI write blocks from chat after applying them to the notebook.</small>
                         </div>
                         <div class="killer-within-settings__field">
-                            <button type="button" id="kw-deathnote-debug-retrieve-notebook" class="menu_button">Retrieve Death Note</button>
+                            <button type="button" id="kw-deathnote-debug-retrieve-notebook" class="menu_button">Retrieve Selected Death Note</button>
+                            <small>Force-transfers the currently selected Death Note back to the user without changing its written pages.</small>
+                        </div>
+                        <div class="killer-within-settings__field">
+                            <small>To peek into another character's Death Note without taking it, open Manage Death Notes and use <b>Peek Death Note</b>. Written pages stay on that notebook when lent or returned.</small>
                         </div>
                     </div>
                 </details>
@@ -2553,98 +2789,166 @@ function renderInventorySettingsModalHtml() {
 
 function renderInventoryManageContentHtml() {
     const settings = getSettings();
-    const ownership = getNotebookOwnership();
-    const inventory = getDeathNoteInventory();
-    const linked = getLinkedShinigami();
-    const request = getNotebookReturnRequest();
-    const notebookAvailable = !inventory.notebook.destroyed;
-    const canGive = notebookAvailable && ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL;
-    const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
-    const requestMatchesHolder = Boolean(
-        request.active
-        && holder
-        && String(request.actor?.name || '').trim().toLowerCase() === String(holder.name || '').trim().toLowerCase(),
-    );
-    const transferChoices = getActorChoices({
-        includeUser: false,
+    const selectedNotebookId = resolveUiNotebookId(settings.selectedNotebookId);
+    const notebooks = [...getDeathNotes()].sort((left, right) => {
+        const leftSelected = String(left?.itemId || '') === selectedNotebookId ? 1 : 0;
+        const rightSelected = String(right?.itemId || '') === selectedNotebookId ? 1 : 0;
+        if (leftSelected !== rightSelected) {
+            return rightSelected - leftSelected;
+        }
+
+        const leftReadable = getNotebookOwnership(left?.itemId).userAccess === NOTEBOOK_USER_ACCESS.FULL ? 1 : 0;
+        const rightReadable = getNotebookOwnership(right?.itemId).userAccess === NOTEBOOK_USER_ACCESS.FULL ? 1 : 0;
+        if (leftReadable !== rightReadable) {
+            return rightReadable - leftReadable;
+        }
+
+        return String(left?.label || '').localeCompare(String(right?.label || ''));
+    });
+    const createChoices = getActorChoices({
+        includeUser: true,
+        includeCharacters: true,
         includeWorld: false,
     });
-    const linkChoices = getActorChoices({
+    const activeCount = notebooks.filter((entry) => entry && !entry.destroyed).length;
+    const readableCount = notebooks.filter((entry) => getNotebookOwnership(entry?.itemId).userAccess === NOTEBOOK_USER_ACCESS.FULL && !entry?.destroyed).length;
+    const awayCount = notebooks.filter((entry) => {
+        const ownership = getNotebookOwnership(entry?.itemId);
+        return !entry?.destroyed && ownership.holder?.type !== NOTEBOOK_ACTOR_TYPES.USER;
+    }).length;
+    const canCreate = activeCount < 7;
+    const shinigamiChoices = getActorChoices({
         includeUser: false,
         includeCharacters: true,
-        currentActor: linked.active ? {
+        includeWorld: false,
+    });
+    const rows = notebooks.map((notebook) => {
+        const ownership = getNotebookOwnership(notebook.itemId);
+        const linked = getLinkedShinigami(notebook.itemId);
+        const request = getNotebookReturnRequest(notebook.itemId);
+        const isSelected = notebook.itemId === selectedNotebookId;
+        const isUserReadable = ownership.userAccess === NOTEBOOK_USER_ACCESS.FULL && !notebook.destroyed;
+        const isHeldByUser = ownership.holder?.type === NOTEBOOK_ACTOR_TYPES.USER;
+        const isOwnedByUser = ownership.owner?.type === NOTEBOOK_ACTOR_TYPES.USER;
+        const canDebugPeek = !notebook.destroyed && !isHeldByUser;
+        const holder = ownership.holder && ownership.holder.type === NOTEBOOK_ACTOR_TYPES.CHARACTER ? ownership.holder : null;
+        const requestMatchesHolder = Boolean(
+            request.active
+            && holder
+            && String(request.actor?.name || '').trim().toLowerCase() === String(holder.name || '').trim().toLowerCase(),
+        );
+        const selectedLinkActor = linked.active ? {
             type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
             id: linked.avatar || linked.actor.id,
             name: linked.actor.name,
-        } : null,
-    });
-    const selectedLinkActor = linked.active ? {
-        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
-        id: linked.avatar || linked.actor.id,
-        name: linked.actor.name,
-    } : null;
+        } : null;
+        const statusLabel = notebook.destroyed ? 'Destroyed / missing' : `Held by ${formatActorLabel(ownership.holder)}`;
+        return `
+            <div class="kw-deathnote-item ${isSelected ? 'is-selected' : ''}">
+                <div class="kw-deathnote-item__head">
+                    <div class="kw-deathnote-item__title-wrap">
+                        <b class="kw-deathnote-item__title">${escapeHtml(notebook.label || 'Death Note')}</b>
+                        <span class="kw-deathnote-name-state">${escapeHtml(statusLabel)}</span>
+                    </div>
+                    <div class="kw-deathnote-item__badges">
+                        ${isSelected ? '<span class="kw-deathnote-item__badge is-selected">Selected</span>' : ''}
+                        ${isUserReadable ? '<span class="kw-deathnote-item__badge is-readable">Readable</span>' : ''}
+                        ${requestMatchesHolder ? '<span class="kw-deathnote-item__badge is-pending">Return queued</span>' : ''}
+                        ${linked.active ? '<span class="kw-deathnote-item__badge is-linked">Shinigami linked</span>' : ''}
+                        ${notebook.destroyed ? '<span class="kw-deathnote-item__badge is-destroyed">Destroyed</span>' : ''}
+                    </div>
+                </div>
+                <div class="kw-deathnote-item__meta-grid">
+                    <span class="kw-deathnote-item__meta-line"><b>Owner:</b> ${escapeHtml(formatActorLabel(ownership.owner))}</span>
+                    <span class="kw-deathnote-item__meta-line"><b>Holder:</b> ${escapeHtml(formatActorLabel(ownership.holder))}</span>
+                    <span class="kw-deathnote-item__meta-line"><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
+                    <span class="kw-deathnote-item__meta-line"><b>Linked Shinigami:</b> ${escapeHtml(linked.active ? formatActorLabel(linked.actor) : 'None')}</span>
+                </div>
+                <div class="kw-deathnote-item__link-row">
+                    <select
+                        class="text_pole kw-dn-manage-shinigami-select"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${notebook.destroyed ? 'disabled' : ''}
+                    >
+                        ${renderActorOptions(shinigamiChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
+                    </select>
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__context-action kw-dn-manage-link-shinigami"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${notebook.destroyed ? 'disabled' : ''}
+                    >Link Shinigami</button>
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__context-action kw-dn-manage-unlink-shinigami"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${linked.active && !notebook.destroyed ? '' : 'disabled'}
+                    >Clear Link</button>
+                </div>
+                <div class="kw-deathnote-item__actions">
+                    <button
+                        type="button"
+                        class="menu_button kw-dn-inventory__context-action kw-dn-manage-select-note"
+                        data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        ${isSelected ? 'disabled' : ''}
+                    >${isSelected ? 'Selected' : 'Select Note'}</button>
+                    ${canDebugPeek ? `
+                        <button
+                            type="button"
+                            class="menu_button kw-dn-inventory__context-action kw-dn-manage-open-note"
+                            data-notebook-id="${escapeHtml(notebook.itemId)}"
+                            title="Peek into this Death Note without taking possession"
+                        >Peek Death Note</button>
+                    ` : ''}
+                    ${isOwnedByUser && holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
+                        <button
+                            type="button"
+                            class="menu_button kw-dn-inventory__context-action kw-dn-manage-request-return"
+                            data-actor="${escapeHtml(encodeActorValue(holder))}"
+                            data-notebook-id="${escapeHtml(notebook.itemId)}"
+                            ${requestMatchesHolder ? 'disabled' : ''}
+                        >${requestMatchesHolder ? 'Return Requested' : 'Request Return'}</button>
+                    ` : ''}
+                    ${!notebook.destroyed ? `
+                        <button
+                            type="button"
+                            class="menu_button kw-dn-inventory__context-action kw-dn-manage-destroy-note"
+                            data-notebook-id="${escapeHtml(notebook.itemId)}"
+                        >Destroy</button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }).join('') || '<div class="kw-memory-manager__empty">No Death Notes currently exist.</div>';
 
     return `
         <div class="kw-dn-settings-modal__sections">
             <section class="kw-dn-settings-modal__section">
                 <div class="kw-dn-settings-modal__section-head">
-                    <div class="kw-dn-settings-modal__eyebrow">Notebook</div>
-                    <div class="kw-dn-settings-modal__section-title">Death Note Assignment</div>
+                    <div class="kw-dn-settings-modal__eyebrow">Registry</div>
+                    <div class="kw-dn-settings-modal__section-title">Death Note Creation & Ownership</div>
                 </div>
                 <div class="kw-dn-settings-modal__section-body">
                     <div class="kw-deathnote-manager">
                         <div class="kw-deathnote-manager__summary">
-                            <span><b>Owner:</b> ${escapeHtml(formatActorLabel(ownership.owner))}</span>
-                            <span><b>Holder:</b> ${escapeHtml(formatActorLabel(ownership.holder))}</span>
-                            <span><b>User access:</b> ${escapeHtml(formatAccessLabel(ownership.userAccess))}</span>
-                            <span><b>Status:</b> ${inventory.notebook.destroyed ? 'Destroyed / missing' : 'In play'}</span>
-                            <span><b>Linked:</b> ${escapeHtml(linked.active ? formatActorLabel(linked.actor) : 'None')}</span>
+                            <span><b>Active notebooks:</b> ${activeCount} / 7</span>
+                            <span><b>User-readable:</b> ${readableCount}</span>
+                            <span><b>Away from user:</b> ${awayCount}</span>
+                            <span><b>Purpose:</b> Create distinct Death Notes and keep ownership visible per notebook.</span>
                         </div>
-                        <div class="kw-deathnote-manager__actions">
+                        <div class="kw-deathnote-manager__actions kw-dn-inventory__header-buttons">
                             <label class="killer-within-settings__field kw-deathnote-manager__grow">
-                                <span>Give Death Note to</span>
-                                <select id="kw-dn-manage-give-select" class="text_pole" ${canGive ? '' : 'disabled'}>
-                                    ${renderActorOptions(transferChoices, null, true, 'Choose recipient', formatActorInventoryLabel)}
+                                <span>Create Death Note for</span>
+                                <select id="kw-dn-manage-create-holder" class="text_pole" ${canCreate ? '' : 'disabled'}>
+                                    ${renderActorOptions(createChoices, null, true, 'Choose holder', formatActorInventoryLabel)}
                                 </select>
                             </label>
-                            <button type="button" id="kw-dn-manage-give-notebook" class="menu_button" ${canGive ? '' : 'disabled'}>Give</button>
+                            <button type="button" id="kw-dn-manage-create-notebook" class="menu_button kw-dn-inventory__header-action" ${canCreate ? '' : 'disabled'}>Create Death Note</button>
+                            <button type="button" id="kw-dn-manage-create-user-notebook" class="menu_button kw-dn-inventory__header-action" ${canCreate ? '' : 'disabled'}>Create for User</button>
                         </div>
-                        ${holder && ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL ? `
-                            <div class="kw-deathnote-manager__actions">
-                                <div class="kw-deathnote-manager__grow kw-deathnote-manager__summary">
-                                    <span><b>Request return from:</b> ${escapeHtml(formatActorInventoryLabel(holder))}</span>
-                                </div>
-                                <button
-                                    type="button"
-                                    id="kw-dn-manage-request-return"
-                                    class="menu_button"
-                                    data-actor="${escapeHtml(encodeActorValue(holder))}"
-                                    ${requestMatchesHolder ? 'disabled' : ''}
-                                >${requestMatchesHolder ? 'Return Requested' : 'Request Return'}</button>
-                            </div>
-                        ` : ''}
-                        <div class="kw-deathnote-manager__actions">
-                            <button type="button" id="kw-dn-manage-toggle-floating" class="menu_button">${settings.showFloatingButton ? 'Hide floating button' : 'Show floating button'}</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            <section class="kw-dn-settings-modal__section">
-                <div class="kw-dn-settings-modal__section-head">
-                    <div class="kw-dn-settings-modal__eyebrow">Presence</div>
-                    <div class="kw-dn-settings-modal__section-title">Linked Shinigami</div>
-                </div>
-                <div class="kw-dn-settings-modal__section-body">
-                    <div class="kw-deathnote-manager">
-                        <div class="kw-deathnote-manager__actions">
-                            <label class="killer-within-settings__field kw-deathnote-manager__grow">
-                                <span>Character card to link</span>
-                                <select id="kw-dn-manage-shinigami-select" class="text_pole">
-                                    ${renderActorOptions(linkChoices, selectedLinkActor, true, 'Select Shinigami', formatActorInventoryLabel)}
-                                </select>
-                            </label>
-                            <button type="button" id="kw-dn-manage-link-shinigami" class="menu_button">Link</button>
-                            <button type="button" id="kw-dn-manage-unlink-shinigami" class="menu_button" ${linked.active ? '' : 'disabled'}>Clear link</button>
+                        <div class="kw-deathnote-manager__list">${rows}</div>
+                        <div class="kw-deathnote-manager__actions kw-dn-inventory__header-buttons">
+                            <button type="button" id="kw-dn-manage-toggle-floating" class="menu_button kw-dn-inventory__header-action">${settings.showFloatingButton ? 'Hide floating button' : 'Show floating button'}</button>
                         </div>
                     </div>
                 </div>
@@ -2656,7 +2960,7 @@ function renderInventoryManageContentHtml() {
 function renderInventoryManageModalHtml() {
     return `
         <div class="kw-dn-settings-modal__backdrop" data-close-manage-modal="true">
-            <div class="kw-dn-settings-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
+            <div class="kw-dn-settings-modal__dialog kw-dn-settings-modal__dialog--manage" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
                 <div class="kw-dn-settings-modal__header">
                     <div>
                         <div class="kw-dn-settings-modal__eyebrow">Killer Within</div>
@@ -2789,16 +3093,21 @@ function buildWidgetHtml() {
     const coverUrl = new URL('../assets/deathnote/cover.jpg', import.meta.url).toString();
     const rulesPageUrl = new URL('../assets/deathnote/rulespage1.jpg', import.meta.url).toString();
     const settings = getSettings();
-    const pages = ensurePageCapacity(getNotebookPages(), 0);
+    const notebookId = getActiveWidgetNotebookId(settings.selectedNotebookId);
+    const ownership = getNotebookOwnership(notebookId);
+    const notebookWritable = isNotebookWritableByUser(ownership);
+    const pages = ensurePageCapacity(getUiNotebookPages(notebookId), 0);
     const currentSpreadIndex = getClampedSpreadIndex(pages);
     const visible = getVisiblePageIndices(currentSpreadIndex);
     const expandedPages = ensurePageCapacity(pages, visible.rightPageIndex);
     const leftPageHtml = visible.leftPageIndex !== null
         ? renderEditablePage({
+            notebookId,
             pageIndex: visible.leftPageIndex,
             side: 'left',
             text: expandedPages[visible.leftPageIndex] || '',
             extraClass: 'kw-deathnote__paper--left',
+            readOnly: !notebookWritable,
         })
         : `
             <div class="kw-deathnote__inside-cover-panel">
@@ -2851,9 +3160,11 @@ function buildWidgetHtml() {
                 </div>
                 <div class="kw-deathnote__page-right">
                     ${renderEditablePage({
+                        notebookId,
                         pageIndex: visible.rightPageIndex,
                         side: 'right',
                         text: expandedPages[visible.rightPageIndex] || '',
+                        readOnly: !notebookWritable,
                     })}
                     <button
                         type="button"
@@ -2953,7 +3264,135 @@ function getVisibleTexts(pages, spreadIndex) {
     };
 }
 
+function commitNotebookTextareaValue(textarea, state, {
+    sourceEvent = null,
+    allowRefresh = true,
+    allowFocusRestore = true,
+    playSound = true,
+} = {}) {
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+        return false;
+    }
+    if (textarea.readOnly) {
+        return false;
+    }
+
+    const pageIndex = Number(textarea.dataset.pageIndex);
+    const notebookId = getActiveWidgetNotebookId(textarea.dataset.notebookId || getSettings().selectedNotebookId);
+    const pageSide = String(textarea.dataset.pageSide || 'right').trim().toLowerCase();
+    if (!Number.isFinite(pageIndex) || pageIndex < 0) {
+        return false;
+    }
+
+    const pages = ensurePageCapacity(getUiNotebookPages(notebookId), pageIndex);
+    const settings = getSettings();
+    const currentSpreadIndex = getClampedSpreadIndex(pages);
+    const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
+    const rawValue = $(textarea).val();
+    const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
+    const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
+    const value = sanitizedInput.value;
+    const inputType = String(sourceEvent?.originalEvent?.inputType || sourceEvent?.inputType || '');
+    if (playSound && shouldPlayWritingSoundForInputType(inputType)) {
+        pulseWritingSound();
+    }
+    syncPermanentLineOverlay(textarea, 'notebook', `notebook:${notebookId}:page:${pageIndex}`, value);
+    const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
+    const nextPages = setUiNotebookPages(notebookId, sanitizeNotebookPagesForRules(update.pages));
+    const changed = setNotebookPages(nextPages, notebookId);
+
+    if (!changed) {
+        if (value !== inputValue) {
+            textarea.value = value;
+        }
+        return false;
+    }
+    if (sanitizedInput.blockedName) {
+        notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);
+    }
+
+    if (value !== inputValue) {
+        if (allowFocusRestore) {
+            queueFocusRestore(pageIndex, pageSide, 'end');
+        }
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+        scheduleSettingsSave();
+        scheduleChatSave(state);
+        return true;
+    }
+
+    const activePageChanged = String(nextPages[pageIndex] || '') !== value;
+    const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
+    const otherSideChanged = pageSide === 'left'
+        ? beforeVisible.right !== afterVisible.right
+        : beforeVisible.left !== afterVisible.left;
+
+    if (update.overflowed) {
+        const nextPageIndex = pageIndex + 1;
+        const nextSpreadIndex = nextPageIndex === 0 ? 0 : Math.floor((nextPageIndex + 1) / 2);
+        settings.currentSpreadIndex = nextSpreadIndex;
+        if (allowFocusRestore) {
+            queueFocusRestore(nextPageIndex, nextPageIndex % 2 === 1 ? 'left' : 'right', 'start');
+        }
+        scheduleSettingsSave();
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+        scheduleChatSave(state);
+        return true;
+    }
+
+    if (activePageChanged) {
+        if (allowFocusRestore) {
+            queueFocusRestore(pageIndex, pageSide, 'end');
+        }
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+        scheduleSettingsSave();
+        scheduleChatSave(state);
+        return true;
+    }
+
+    if (otherSideChanged) {
+        if (allowFocusRestore) {
+            queueFocusRestore(pageIndex, pageSide, 'end');
+        }
+        if (allowRefresh) {
+            refreshDeathNoteUi();
+        }
+    } else {
+        textarea.dataset.pageIndex = String(pageIndex);
+    }
+
+    scheduleSettingsSave();
+    scheduleChatSave(state);
+    return true;
+}
+
+function commitVisibleNotebookDrafts(state) {
+    const root = document.getElementById(FLOATING_ID);
+    if (!root) {
+        return false;
+    }
+
+    let changed = false;
+    const textareas = root.querySelectorAll('.kw-deathnote__entry-textarea');
+    for (const textarea of textareas) {
+        changed = commitNotebookTextareaValue(textarea, state, {
+            allowRefresh: false,
+            allowFocusRestore: false,
+            playSound: false,
+        }) || changed;
+    }
+
+    return changed;
+}
+
 function runPageTurn(direction, callback) {
+    stopWritingSound(false);
     const root = document.getElementById(FLOATING_ID);
     if (!root) {
         callback();
@@ -3091,8 +3530,12 @@ function bindWidgetUi() {
                     state.handlersInstalled = false;
 
                     if (!state.moved && state.toggleOnTap) {
+                        stopWritingSound(false);
+                        commitVisibleNotebookDrafts(state);
                         const settings = getSettings();
-                        setNotebookOpenState(!settings.isOpen);
+                        setNotebookOpenState(!settings.isOpen, {
+                            notebookId: getActiveWidgetNotebookId(settings.selectedNotebookId),
+                        });
                     }
                 };
 
@@ -3103,88 +3546,11 @@ function bindWidgetUi() {
 
             installHandlers();
         })
-        .off('input', `#${FLOATING_ID} .kw-deathnote__entry-textarea`)
-        .on('input', `#${FLOATING_ID} .kw-deathnote__entry-textarea`, (event) => {
-            const textarea = event.currentTarget;
-            if (!(textarea instanceof HTMLTextAreaElement)) {
-                return;
-            }
-
-            const pageIndex = Number(textarea.dataset.pageIndex);
-            const pageSide = String(textarea.dataset.pageSide || 'right').trim().toLowerCase();
-            if (!Number.isFinite(pageIndex) || pageIndex < 0) {
-                return;
-            }
-
-            const pages = ensurePageCapacity(getNotebookPages(), pageIndex);
-            const settings = getSettings();
-            const currentSpreadIndex = getClampedSpreadIndex(pages);
-            const beforeVisible = getVisibleTexts(pages, currentSpreadIndex);
-            const rawValue = $(textarea).val();
-            const inputValue = String(rawValue === undefined || rawValue === null ? '' : rawValue);
-            const sanitizedInput = sanitizeNotebookInputPageValue(inputValue);
-            const value = sanitizedInput.value;
-            const inputType = String(event.originalEvent && event.originalEvent.inputType ? event.originalEvent.inputType : '');
-            if (shouldPlayWritingSoundForInputType(inputType)) {
-                pulseWritingSound();
-            }
-            syncPermanentLineOverlay(textarea, 'notebook', `page:${pageIndex}`, value);
-            const update = updatePageWithOverflow(textarea, pages, pageIndex, value);
-            const nextPages = sanitizeNotebookPagesForRules(update.pages);
-            const changed = setNotebookPages(nextPages);
-
-            if (!changed) {
-                if (value !== inputValue) {
-                    textarea.value = value;
-                }
-                return;
-            }
-            if (sanitizedInput.blockedName) {
-                notify('warning', `You cannot kill ${sanitizedInput.blockedName} until you have discovered their name.`);
-            }
-
-            if (value !== inputValue) {
-                queueFocusRestore(pageIndex, pageSide, 'end');
-                refreshDeathNoteUi();
-                scheduleSettingsSave();
-                scheduleChatSave(state);
-                return;
-            }
-
-            const activePageChanged = String(nextPages[pageIndex] || '') !== value;
-            const afterVisible = getVisibleTexts(nextPages, currentSpreadIndex);
-            const otherSideChanged = pageSide === 'left'
-                ? beforeVisible.right !== afterVisible.right
-                : beforeVisible.left !== afterVisible.left;
-
-            if (update.overflowed) {
-                const nextPageIndex = pageIndex + 1;
-                const nextSpreadIndex = nextPageIndex === 0 ? 0 : Math.floor((nextPageIndex + 1) / 2);
-                settings.currentSpreadIndex = nextSpreadIndex;
-                queueFocusRestore(nextPageIndex, nextPageIndex % 2 === 1 ? 'left' : 'right', 'start');
-                scheduleSettingsSave();
-                refreshDeathNoteUi();
-                scheduleChatSave(state);
-                return;
-            }
-
-            if (activePageChanged) {
-                queueFocusRestore(pageIndex, pageSide, 'end');
-                refreshDeathNoteUi();
-                scheduleSettingsSave();
-                scheduleChatSave(state);
-                return;
-            }
-
-            if (otherSideChanged) {
-                queueFocusRestore(pageIndex, pageSide, 'end');
-                refreshDeathNoteUi();
-            } else {
-                textarea.dataset.pageIndex = String(pageIndex);
-            }
-
-            scheduleSettingsSave();
-            scheduleChatSave(state);
+        .off('input change blur', `#${FLOATING_ID} .kw-deathnote__entry-textarea`)
+        .on('input change blur', `#${FLOATING_ID} .kw-deathnote__entry-textarea`, (event) => {
+            commitNotebookTextareaValue(event.currentTarget, state, {
+                sourceEvent: event,
+            });
         })
         .off('keydown', '.kw-dn-inventory__scrap-textarea')
         .on('keydown', '.kw-dn-inventory__scrap-textarea', (event) => {
@@ -3257,8 +3623,10 @@ function bindWidgetUi() {
         .off('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`)
         .on('click', `#${FLOATING_ID} .kw-deathnote__corner-tab`, (event) => {
             event.preventDefault();
+            commitVisibleNotebookDrafts(state);
             const direction = String($(event.currentTarget).data('pageNav') || '').trim().toLowerCase();
-            const pages = getNotebookPages();
+            const notebookId = getActiveWidgetNotebookId(getSettings().selectedNotebookId);
+            const pages = getUiNotebookPages(notebookId);
             const settings = getSettings();
             const currentSpreadIndex = getClampedSpreadIndex(pages);
 
@@ -3274,10 +3642,10 @@ function bindWidgetUi() {
             if (direction === 'next') {
                 const nextSpreadIndex = currentSpreadIndex + 1;
                 const nextVisible = getVisiblePageIndices(nextSpreadIndex);
-                const expanded = ensurePageCapacity(pages, nextVisible.rightPageIndex);
+                const expanded = setUiNotebookPages(notebookId, ensurePageCapacity(pages, nextVisible.rightPageIndex));
 
                 runPageTurn('next', () => {
-                    setNotebookPages(expanded);
+                    setNotebookPages(expanded, notebookId);
                     settings.currentSpreadIndex = nextSpreadIndex;
                     queueFocusRestore(
                         nextVisible.leftPageIndex === null ? nextVisible.rightPageIndex : nextVisible.leftPageIndex,
@@ -3464,6 +3832,10 @@ function bindInventoryUi() {
             event.preventDefault();
             const settings = getSettings();
             settings.inventorySelectedItemKey = String($(event.currentTarget).data('itemKey') || 'notebook').trim() || 'notebook';
+            if (settings.inventorySelectedItemKey.startsWith('notebook:')) {
+                settings.selectedNotebookId = settings.inventorySelectedItemKey.slice('notebook:'.length);
+                setSelectedNotebookId(settings.selectedNotebookId);
+            }
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
@@ -3471,27 +3843,31 @@ function bindInventoryUi() {
         .on('click', '#kw-dn-inventory-open', (event) => {
             event.preventDefault();
             const settings = getSettings();
-            const inventory = getDeathNoteInventory();
-            const ownership = getNotebookOwnership();
-            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+            const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+            const notebook = getNotebookSummaryById(getDeathNoteInventory(), notebookId);
+            const ownership = getNotebookOwnership(notebookId);
+            if (!notebook || notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
                 notify('warning', 'You need full notebook access to open the Death Note from inventory.');
                 return;
             }
 
-            setNotebookOpenState(!settings.isOpen);
+            setNotebookOpenState(!settings.isOpen, { notebookId });
         })
         .off('click', '#kw-dn-inventory-tear')
         .on('click', '#kw-dn-inventory-tear', async (event) => {
             event.preventDefault();
-            const inventory = getDeathNoteInventory();
-            const ownership = getNotebookOwnership();
-            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+            const settings = getSettings();
+            const notebookId = resolveUiNotebookId(settings.selectedNotebookId);
+            const notebook = getNotebookSummaryById(getDeathNoteInventory(), notebookId);
+            const ownership = getNotebookOwnership(notebookId);
+            if (!notebook || notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
                 notify('warning', 'You need full notebook access to tear off a scrap.');
                 return;
             }
 
             const createdScrap = await commitInventoryMutation(() => createNotebookScrap({
                 holder: getUserActor(),
+                notebookItemId: notebookId,
                 reason: 'A notebook scrap was torn off from the inventory tray.',
             }), 'Notebook scrap created.');
             if (createdScrap && createdScrap.id) {
@@ -3515,12 +3891,90 @@ function bindInventoryUi() {
             scheduleSettingsSave();
             refreshDeathNoteUi();
         })
+        .off('click', '.kw-dn-manage-select-note')
+        .on('click', '.kw-dn-manage-select-note', (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const settings = getSettings();
+            settings.selectedNotebookId = notebookId;
+            setSelectedNotebookId(notebookId);
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '.kw-dn-manage-open-note')
+        .on('click', '.kw-dn-manage-open-note', (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const ownership = getNotebookOwnership(notebookId);
+            if (ownership.holder?.type === NOTEBOOK_ACTOR_TYPES.USER) {
+                notify('warning', 'Use the notebook itself to open a Death Note the user is already holding.');
+                return;
+            }
+            const settings = getSettings();
+            settings.selectedNotebookId = notebookId;
+            settings.inventorySelectedItemKey = `notebook:${notebookId}`;
+            inventoryManageOpen = false;
+            setSelectedNotebookId(notebookId);
+            scheduleSettingsSave();
+            setNotebookOpenState(true, { notebookId, debugPeek: true });
+            notify('info', 'Peeking into another Death Note without taking it.');
+        })
+        .off('click', '.kw-dn-manage-destroy-note')
+        .on('click', '.kw-dn-manage-destroy-note', async (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const notebook = getNotebookSummaryById(getDeathNoteInventory(), notebookId);
+            if (!notebook || notebook.destroyed) {
+                return;
+            }
+            await commitInventoryMutation(() => destroyNotebook({
+                notebookItemId: notebookId,
+                reason: 'Death Note destroyed via manager.',
+            }), 'Death Note destroyed.');
+            selectPreferredUserNotebook({ closeIfMissing: true });
+            scheduleSettingsSave();
+            refreshDeathNoteUi();
+        })
+        .off('click', '.kw-dn-manage-link-shinigami')
+        .on('click', '.kw-dn-manage-link-shinigami', async (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const select = $(`.kw-dn-manage-shinigami-select[data-notebook-id="${notebookId}"]`).first();
+            const actor = decodeActorValue(select.val(), null);
+            if (!actor) {
+                notify('warning', 'Select a character to link as this notebook\'s Shinigami.');
+                return;
+            }
+
+            await commitInventoryMutation(() => linkNotebookShinigami({
+                type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
+                id: actor.id,
+                name: actor.name,
+            }, {
+                notebookItemId: notebookId,
+                avatar: actor.id,
+                name: actor.name,
+                reason: `${actor.name || 'Selected character'} linked via manager.`,
+            }), 'Linked Shinigami updated.');
+        })
+        .off('click', '.kw-dn-manage-unlink-shinigami')
+        .on('click', '.kw-dn-manage-unlink-shinigami', async (event) => {
+            event.preventDefault();
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            await commitInventoryMutation(() => unlinkNotebookShinigami({
+                notebookItemId: notebookId,
+                reason: 'Linked Shinigami cleared via manager.',
+            }), 'Linked Shinigami cleared.');
+        })
+        .off('click', '#kw-dn-manage-link-shinigami')
+        .off('click', '#kw-dn-manage-unlink-shinigami')
         .off('click', '#kw-dn-inventory-give-notebook')
         .on('click', '#kw-dn-inventory-give-notebook', async (event) => {
             event.preventDefault();
-            const inventory = getDeathNoteInventory();
-            const ownership = getNotebookOwnership();
-            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+            const notebookId = resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId);
+            const notebook = getNotebookSummaryById(getDeathNoteInventory(), notebookId);
+            const ownership = getNotebookOwnership(notebookId);
+            if (!notebook || notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
                 notify('warning', 'You need full notebook access to hand the Death Note to someone else.');
                 return;
             }
@@ -3533,35 +3987,10 @@ function bindInventoryUi() {
 
             const transferred = await commitInventoryMutation(() => transferNotebookTo(actor, {
                 owner: ownership.owner,
-                userAccess: ownership.userAccess,
-                exists: !inventory.notebook.destroyed,
+                userAccess: NOTEBOOK_USER_ACCESS.NONE,
+                exists: !notebook.destroyed,
+                notebookItemId: notebookId,
                 reason: `Notebook handed to ${actor.name || actor.type} from inventory.`,
-            }), 'Death Note transferred.');
-            if (transferred) {
-                setNotebookOpenState(false);
-            }
-        })
-        .off('click', '#kw-dn-manage-give-notebook')
-        .on('click', '#kw-dn-manage-give-notebook', async (event) => {
-            event.preventDefault();
-            const inventory = getDeathNoteInventory();
-            const ownership = getNotebookOwnership();
-            if (inventory.notebook.destroyed || ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
-                notify('warning', 'You need full notebook access to hand the Death Note to someone else.');
-                return;
-            }
-
-            const actor = decodeActorValue($('#kw-dn-manage-give-select').val(), null);
-            if (!actor) {
-                notify('warning', 'Select an active character to receive the Death Note.');
-                return;
-            }
-
-            const transferred = await commitInventoryMutation(() => transferNotebookTo(actor, {
-                owner: ownership.owner,
-                userAccess: ownership.userAccess,
-                exists: !inventory.notebook.destroyed,
-                reason: `Notebook handed to ${actor.name || actor.type} via manager.`,
             }), 'Death Note transferred.');
             if (transferred) {
                 setNotebookOpenState(false);
@@ -3571,26 +4000,30 @@ function bindInventoryUi() {
         .on('click', '#kw-dn-inventory-request-return', async (event) => {
             event.preventDefault();
             const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            const notebookId = String($(event.currentTarget).data('notebookId') || '').trim();
             if (!actor) {
                 return;
             }
 
             const created = await commitInventoryMutation(() => requestNotebookReturn(actor, {
+                notebookItemId: notebookId,
                 reason: `${actor.name || 'A character'} was asked to return the Death Note.`,
             }), 'Return request queued.');
             if (created) {
                 refreshDeathNoteUi();
             }
         })
-        .off('click', '#kw-dn-manage-request-return')
-        .on('click', '#kw-dn-manage-request-return', async (event) => {
+        .off('click', '.kw-dn-manage-request-return')
+        .on('click', '.kw-dn-manage-request-return', async (event) => {
             event.preventDefault();
             const actor = decodeActorValue($(event.currentTarget).data('actor'), null);
+            const notebookId = String($(event.currentTarget).data('notebookId') || '').trim();
             if (!actor) {
                 return;
             }
 
             const created = await commitInventoryMutation(() => requestNotebookReturn(actor, {
+                notebookItemId: notebookId,
                 reason: `${actor.name || 'A character'} was asked to return the Death Note.`,
             }), 'Return request queued.');
             if (created) {
@@ -3613,6 +4046,7 @@ function bindInventoryUi() {
             }, {
                 avatar: actor.id,
                 name: actor.name,
+                notebookItemId: resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId),
                 reason: `${actor.name || 'Selected character'} linked via inventory.`,
             }), 'Linked Shinigami updated.');
         })
@@ -3620,34 +4054,51 @@ function bindInventoryUi() {
         .on('click', '#kw-dn-inventory-unlink-shinigami', async (event) => {
             event.preventDefault();
             await commitInventoryMutation(() => unlinkNotebookShinigami({
+                notebookItemId: resolveUiNotebookId($(event.currentTarget).data('notebookId') || getSettings().selectedNotebookId),
                 reason: 'Linked Shinigami cleared via inventory.',
             }), 'Linked Shinigami cleared.');
         })
-        .off('click', '#kw-dn-manage-link-shinigami')
-        .on('click', '#kw-dn-manage-link-shinigami', async (event) => {
+        .off('click', '#kw-dn-manage-create-notebook')
+        .on('click', '#kw-dn-manage-create-notebook', async (event) => {
             event.preventDefault();
-            const actor = decodeActorValue($('#kw-dn-manage-shinigami-select').val(), null);
+            const actor = decodeActorValue($('#kw-dn-manage-create-holder').val(), null);
             if (!actor) {
-                notify('warning', 'Select a character to link as the notebook Shinigami.');
+                notify('warning', 'Choose who should receive the new Death Note.');
                 return;
             }
-
-            await commitInventoryMutation(() => linkNotebookShinigami({
-                type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
-                id: actor.id,
-                name: actor.name,
-            }, {
-                avatar: actor.id,
-                name: actor.name,
-                reason: `${actor.name || 'Selected character'} linked via manager.`,
-            }), 'Linked Shinigami updated.');
+            const created = await commitInventoryMutation(() => createDeathNote({
+                owner: actor,
+                holder: actor,
+                userAccess: actor.type === NOTEBOOK_ACTOR_TYPES.USER ? NOTEBOOK_USER_ACCESS.FULL : NOTEBOOK_USER_ACCESS.NONE,
+                reason: `${actor.name || actor.type} received a newly created Death Note.`,
+            }), 'Death Note created.');
+            if (created?.itemId) {
+                const settings = getSettings();
+                settings.selectedNotebookId = created.itemId;
+                settings.inventorySelectedItemKey = actor.type === NOTEBOOK_ACTOR_TYPES.USER ? `notebook:${created.itemId}` : settings.inventorySelectedItemKey;
+                setSelectedNotebookId(created.itemId);
+                scheduleSettingsSave();
+                refreshDeathNoteUi();
+            }
         })
-        .off('click', '#kw-dn-manage-unlink-shinigami')
-        .on('click', '#kw-dn-manage-unlink-shinigami', async (event) => {
+        .off('click', '#kw-dn-manage-create-user-notebook')
+        .on('click', '#kw-dn-manage-create-user-notebook', async (event) => {
             event.preventDefault();
-            await commitInventoryMutation(() => unlinkNotebookShinigami({
-                reason: 'Linked Shinigami cleared via manager.',
-            }), 'Linked Shinigami cleared.');
+            const actor = getUserActor();
+            const created = await commitInventoryMutation(() => createDeathNote({
+                owner: actor,
+                holder: actor,
+                userAccess: NOTEBOOK_USER_ACCESS.FULL,
+                reason: 'The user received a newly created Death Note.',
+            }), 'Death Note created for the user.');
+            if (created?.itemId) {
+                const settings = getSettings();
+                settings.selectedNotebookId = created.itemId;
+                settings.inventorySelectedItemKey = `notebook:${created.itemId}`;
+                setSelectedNotebookId(created.itemId);
+                scheduleSettingsSave();
+                refreshDeathNoteUi();
+            }
         })
         .off('click', '.kw-dn-inventory__scrap-give')
         .on('click', '.kw-dn-inventory__scrap-give', async (event) => {
@@ -3840,4 +4291,3 @@ export function setupDeathNoteUi() {
     ensureChatNameMaskObserver();
     queueMaskedChatNameRender();
 }
-

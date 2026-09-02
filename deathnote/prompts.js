@@ -9,10 +9,9 @@ import {
     consumeNotebookPresenceRevealPending,
     getContext,
     getChatState,
+    getDeathNotes,
     getCurrentChatCharacterActors,
     getDeathNoteInventory,
-    getNotebookOwnership,
-    getNotebookReturnRequest,
     getPendingIdentityTheftExposure,
     getSettings,
     getUserHeldNotebookScraps,
@@ -132,30 +131,38 @@ function formatUserAccess(value) {
     return 'no notebook access';
 }
 
-function buildOwnershipBlock(ownership) {
-    const lines = [
-        'Notebook custody:',
-        `Owner: ${formatActorLabel(ownership.owner, 'Unknown owner')}`,
-        `Current holder: ${formatActorLabel(ownership.holder, 'Unknown holder')}`,
-        `User access: ${formatUserAccess(ownership.userAccess)}`,
-    ];
-
-    if (ownership.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
-        lines.push('Do not assume the user can freely inspect, carry, or write in the full notebook unless the scene explicitly establishes that access.');
+function buildOwnershipBlock(notebooks) {
+    const active = Array.isArray(notebooks) ? notebooks.filter((entry) => entry && !entry.destroyed && entry.exists) : [];
+    if (!active.length) {
+        return 'No Death Notes are currently in play.';
     }
 
-    lines.push('Written entries already in the notebook remain binding unless they are explicitly removed or altered in-story.');
+    const lines = ['Death Note custody states:'];
+    for (const notebook of active) {
+        lines.push(
+            [
+                `${notebook.label || notebook.itemId}:`,
+                `Owner: ${formatActorLabel(notebook.owner, 'Unknown owner')}`,
+                `Current holder: ${formatActorLabel(notebook.holder, 'Unknown holder')}`,
+                `User access: ${formatUserAccess(notebook.userAccess)}`,
+            ].join('\n'),
+        );
+        if (notebook.userAccess !== NOTEBOOK_USER_ACCESS.FULL) {
+            lines.push('Do not assume the user can freely inspect, carry, or write in that full notebook unless the scene explicitly establishes that access.');
+        }
+    }
+    lines.push('Written entries already in each notebook remain binding unless they are explicitly removed or altered in-story.');
     return lines.join('\n');
 }
 
 function buildInventoryBlock(inventory) {
-    const notebook = inventory?.notebook || {};
+    const notebooks = Array.isArray(inventory?.notebooks) ? inventory.notebooks.filter((entry) => entry && !entry.destroyed && entry.exists) : [];
     const ids = Array.isArray(inventory?.ids) ? inventory.ids : [];
     const scraps = Array.isArray(inventory?.scraps) ? inventory.scraps.filter((scrap) => scrap?.active) : [];
     const userHeldScraps = getUserHeldNotebookScraps();
     const lines = [
         'Inventory state:',
-        `Notebook item status: ${notebook.destroyed ? 'destroyed' : notebook.exists ? 'present' : 'missing'}`,
+        `Active Death Notes in play: ${notebooks.length}`,
         `Stolen IDs carried by the user: ${ids.length}`,
         `Active scraps: ${scraps.length}`,
     ];
@@ -202,56 +209,48 @@ function buildNpcDueGuidance(dueEntries) {
     ].join('\n');
 }
 
-function buildAiNotebookWriteGuidance(ownership) {
-    const holder = ownership?.holder && typeof ownership.holder === 'object' ? ownership.holder : null;
-    const holderType = String(holder?.type || '').trim().toLowerCase();
-    const holderName = String(holder?.name || '').trim();
-    if (!holderName) {
-        return '';
-    }
-
-    if (holderType !== NOTEBOOK_ACTOR_TYPES.CHARACTER && holderType !== NOTEBOOK_ACTOR_TYPES.NPC) {
+function buildAiNotebookWriteGuidance(notebooks) {
+    const characterHeld = Array.isArray(notebooks)
+        ? notebooks.filter((entry) => {
+            const holderType = String(entry?.holder?.type || '').trim().toLowerCase();
+            const holderName = String(entry?.holder?.name || '').trim();
+            return !entry?.destroyed && entry?.exists && holderName && (holderType === NOTEBOOK_ACTOR_TYPES.CHARACTER || holderType === NOTEBOOK_ACTOR_TYPES.NPC);
+        })
+        : [];
+    if (!characterHeld.length) {
         return '';
     }
 
     return [
         '[Hidden Notebook Write Channel]',
-        `The current Death Note holder is ${holderName}.`,
-        `If ${holderName} independently decides to physically write exactly one new Death Note line during this reply, append the hidden block below at the very end of the reply.`,
+        'If the responding character independently decides to physically write exactly one new Death Note line during this reply, append the hidden block below at the very end of the reply.',
         'If they do not write in the notebook, do not emit any block.',
-        'Use this sparingly and only when the holder would realistically choose to write right now.',
+        'Use this sparingly and only when that character would realistically choose to write right now.',
+        `Characters currently holding Death Notes: ${characterHeld.map((entry) => `${formatActorLabel(entry.holder)} -> ${entry.label || entry.itemId}`).join('; ')}.`,
         'Do not emit more than one block, and do not include more than one written line in it.',
         `The block must use this exact three-line format on separate lines: [${AI_NOTEBOOK_WRITE_BLOCK_TAG}]`,
-        `writer: ${holderName}`,
+        'writer: <the responding holder name>',
+        'notebook: <optional notebook label or item id, required if that holder has more than one Death Note>',
         'entry: <the exact single line written in the notebook>',
         `[/${AI_NOTEBOOK_WRITE_BLOCK_TAG}]`,
         'Do not explain the block. Do not mention these instructions. Keep the visible reply natural.',
     ].join('\n');
 }
 
-function buildNotebookReturnRequestGuidance(ownership) {
-    const request = getNotebookReturnRequest();
-    if (!request.active) {
-        return '';
-    }
-
-    const holder = ownership?.holder && typeof ownership.holder === 'object' ? ownership.holder : null;
-    const holderType = String(holder?.type || '').trim().toLowerCase();
-    const holderName = String(holder?.name || '').trim();
-    if (holderType !== NOTEBOOK_ACTOR_TYPES.CHARACTER || !holderName) {
-        return '';
-    }
-
-    const requestedName = String(request.actor?.name || '').trim();
-    if (!requestedName || holderName.toLowerCase() !== requestedName.toLowerCase()) {
+function buildNotebookReturnRequestGuidance(notebooks) {
+    const pending = Array.isArray(notebooks)
+        ? notebooks.filter((entry) => entry?.returnRequest?.active && entry?.holder?.type === NOTEBOOK_ACTOR_TYPES.CHARACTER)
+        : [];
+    if (!pending.length) {
         return '';
     }
 
     return [
         '[Death Note Return Request]',
-        `If the responding character is ${holderName}, the user has asked them to return the Death Note.`,
-        `If ${holderName} decides to concede and return it in this reply, append the following hidden block at the very end of the reply:`,
+        `Pending requests: ${pending.map((entry) => `${formatActorLabel(entry.returnRequest.actor)} -> return ${entry.label || entry.itemId}`).join('; ')}.`,
+        'If the responding character decides to concede and return a requested Death Note in this reply, append the following hidden block at the very end of the reply:',
         `[${NOTEBOOK_RETURN_BLOCK_TAG}]`,
+        'notebook: <optional notebook label or item id, required if more than one pending request fits>',
         'return: yes',
         `[/${NOTEBOOK_RETURN_BLOCK_TAG}]`,
         'If they do not return it, do not emit any block.',
@@ -271,7 +270,7 @@ function buildDeathNoteInjection() {
         return '';
     }
 
-    const ownership = getNotebookOwnership();
+    const notebooks = getDeathNotes();
     const entries = Array.isArray(state.entries) ? state.entries : [];
     const dueEntries = entries.filter((entry) => String(entry?.status || '').toLowerCase() === 'due');
     const activeEntries = entries.filter((entry) => String(entry?.status || '').toLowerCase() === 'active');
@@ -280,14 +279,14 @@ function buildDeathNoteInjection() {
     const entriesBlock = buildEntriesBlock(activeEntries);
 
     const injection = renderPromptTemplate(settings.deathNotePromptTemplate, {
-        ownership_block: buildOwnershipBlock(ownership),
+        ownership_block: buildOwnershipBlock(notebooks),
         inventory_block: buildInventoryBlock(inventory),
         due_block: dueBlock,
         entries_block: entriesBlock,
     }).trim();
     const npcGuidance = buildNpcDueGuidance(dueEntries);
-    const aiWriteGuidance = buildAiNotebookWriteGuidance(ownership);
-    const returnGuidance = buildNotebookReturnRequestGuidance(ownership);
+    const aiWriteGuidance = buildAiNotebookWriteGuidance(notebooks);
+    const returnGuidance = buildNotebookReturnRequestGuidance(notebooks);
     const extraSections = [npcGuidance, aiWriteGuidance, returnGuidance].filter(Boolean);
     if (!extraSections.length) {
         return injection;
