@@ -1,6 +1,6 @@
 /**
  * Headless checks for Investigator Hub V1.5:
- * officers, kwCaseAction mutations, case prompt injection.
+ * officers, clearance, warrants, confront, kwCaseAction, case prompt injection.
  */
 import assert from 'node:assert/strict';
 import {
@@ -11,6 +11,8 @@ import {
 import {
     CASE_ACTION_BLOCK_TAG,
     INVESTIGATOR_MODULE_NAME,
+    OFFICER_CLEARANCE,
+    WARRANT_STATUS,
 } from '../investigator/config.js';
 
 const metadataByChatId = new Map();
@@ -59,11 +61,18 @@ const {
     applyCaseAction,
     assignOfficer,
     buildCasePromptReplacements,
+    confrontSuspect,
+    fileWarrant,
+    getCaseStrength,
     getInvestigatorState,
     isTaskForceOfficer,
+    linkEvidenceToSuspect,
+    logEvidence,
+    pinSuspect,
     processAssistantCaseActionMessage,
     removeOfficer,
     setPlayRole,
+    tickWarrantsForGeneration,
 } = await import('../investigator/core.js');
 
 const {
@@ -105,15 +114,16 @@ function suspectActor(name = 'Light Yagami', id = 'light.png') {
 
 reset();
 
-// Officers assign / remove / membership
+// Officers assign / remove / membership / clearance
 {
-    const created = assignOfficer(officerActor(), { rank: 'Lead' });
+    const created = assignOfficer(officerActor(), { rank: 'Lead', clearance: OFFICER_CLEARANCE.LEAD });
     assert.equal(created.applied, true);
     assert.equal(created.officer.rank, 'Lead');
+    assert.equal(created.officer.clearance, OFFICER_CLEARANCE.LEAD);
     assert.equal(isTaskForceOfficer(officerActor()), true);
     assert.equal(getInvestigatorState().officers.length, 1);
 
-    const updated = assignOfficer(officerActor(), { rank: 'Chief' });
+    const updated = assignOfficer(officerActor(), { rank: 'Chief', clearance: OFFICER_CLEARANCE.LEAD });
     assert.equal(updated.applied, true);
     assert.equal(updated.reason, 'updated');
     assert.equal(getInvestigatorState().officers[0].rank, 'Chief');
@@ -126,10 +136,35 @@ reset();
 
 reset();
 
+// Clearance gates advanced actions
+{
+    const speaker = officerActor();
+    assignOfficer(speaker, { rank: 'Officer', clearance: OFFICER_CLEARANCE.FIELD });
+    const blocked = applyCaseAction({
+        officer: 'L Lawliet',
+        action: 'restrain',
+        target: 'Light Yagami',
+        reason: 'No clearance',
+    }, speaker);
+    assert.equal(blocked.applied, false);
+    assert.equal(blocked.reason, 'insufficient_clearance');
+
+    assignOfficer(speaker, { clearance: OFFICER_CLEARANCE.DETECTIVE });
+    const allowed = applyCaseAction({
+        officer: 'L Lawliet',
+        action: 'restrain',
+        target: 'Light Yagami',
+        reason: 'Detective custody',
+    }, speaker);
+    assert.equal(allowed.applied, true);
+}
+
+reset();
+
 // Case actions require Task Force officer + matching officer field
 {
     const speaker = officerActor();
-    assignOfficer(speaker, { rank: 'Detective' });
+    assignOfficer(speaker, { rank: 'Detective', clearance: OFFICER_CLEARANCE.DETECTIVE });
 
     const rejected = applyCaseAction({
         officer: 'Wrong Name',
@@ -197,9 +232,75 @@ reset();
 
 reset();
 
+// Warrants resolve after generation ticks; confront gates on case strength
+{
+    const target = suspectActor();
+    pinSuspect(target, { status: 'poi' });
+
+    const weakConfront = confrontSuspect(target, { note: 'Too early' });
+    assert.equal(weakConfront.applied, false);
+    assert.equal(weakConfront.reason, 'insufficient_strength');
+
+    const warrant = fileWarrant(target, { generations: 2, note: 'Search apartment' });
+    assert.equal(warrant.applied, true);
+    assert.equal(getInvestigatorState().warrants[0].status, WARRANT_STATUS.PENDING);
+
+    tickWarrantsForGeneration(1);
+    assert.equal(getInvestigatorState().warrants[0].generationsLeft, 1);
+    assert.equal(getInvestigatorState().warrants[0].status, WARRANT_STATUS.PENDING);
+
+    const resolvedTick = tickWarrantsForGeneration(2);
+    assert.equal(resolvedTick.resolved.length, 1);
+    assert.equal(getInvestigatorState().warrants[0].status, WARRANT_STATUS.RESOLVED);
+    assert.ok(getInvestigatorState().evidence.some((entry) => entry.type === 'warrant_result'));
+
+    const evidence = logEvidence({
+        type: 'statement',
+        title: 'Linked lead',
+        detail: 'Builds case strength',
+        source: 'test',
+    }).evidence;
+    linkEvidenceToSuspect(evidence.id, getInvestigatorState().suspects[0].key);
+    pinSuspect(target, { status: 'prime' });
+    assert.ok(getCaseStrength(target).strength >= 2);
+
+    const strongConfront = confrontSuspect(target, { note: 'Prime pressure' });
+    assert.equal(strongConfront.applied, true);
+    assert.ok(['pressure', 'probable_cause', 'overreach'].includes(strongConfront.outcome));
+}
+
+reset();
+
+// Lead officer can file warrant via kwCaseAction
+{
+    assignOfficer(officerActor(), { rank: 'Lead', clearance: OFFICER_CLEARANCE.LEAD });
+    chat = [{
+        name: 'L Lawliet',
+        original_avatar: 'l.png',
+        is_user: false,
+        is_system: false,
+        mes: [
+            'Filing a search.',
+            `[${CASE_ACTION_BLOCK_TAG}]`,
+            'officer: L Lawliet',
+            'action: warrant',
+            'target: Light Yagami',
+            'generations: 1',
+            'note: Room search',
+            `[/${CASE_ACTION_BLOCK_TAG}]`,
+        ].join('\n'),
+        extra: {},
+    }];
+    assert.equal(processAssistantCaseActionMessage(0), true);
+    assert.equal(getInvestigatorState().warrants.length, 1);
+    assert.doesNotMatch(String(chat[0].mes), new RegExp(CASE_ACTION_BLOCK_TAG, 'i'));
+}
+
+reset();
+
 // processAssistantCaseActionMessage applies + strips hidden blocks
 {
-    assignOfficer(officerActor(), { rank: 'Lead' });
+    assignOfficer(officerActor(), { rank: 'Lead', clearance: OFFICER_CLEARANCE.LEAD });
     chat = [{
         name: 'L Lawliet',
         original_avatar: 'l.png',
@@ -236,16 +337,17 @@ reset();
     assert.equal(shouldInjectInvestigatorCasePrompt(), false);
     assert.equal(getInvestigatorCasePromptInjectionMessage(), null);
 
-    assignOfficer(officerActor(), { rank: 'Lead' });
+    assignOfficer(officerActor(), { rank: 'Lead', clearance: OFFICER_CLEARANCE.LEAD });
     assert.equal(shouldInjectInvestigatorCasePrompt(), true);
     const injection = getInvestigatorCasePromptInjectionMessage();
     assert.ok(injection);
     assert.match(injection.mes, /L Lawliet/);
     assert.match(injection.mes, new RegExp(CASE_ACTION_BLOCK_TAG));
+    assert.match(injection.mes, /warrant\|confront|Pending warrants/i);
 
     const replacements = buildCasePromptReplacements();
     assert.equal(replacements.example_officer, 'L Lawliet');
-    assert.match(replacements.officers_block, /Lead/);
+    assert.match(replacements.officers_block, /clearance:lead/i);
 }
 
 reset();

@@ -3,13 +3,17 @@ import {
     EVIDENCE_TYPES,
     INVESTIGATOR_DOCK_ID,
     INVESTIGATOR_HUB_ID,
+    OFFICER_CLEARANCE,
     PLAY_ROLES,
     SUSPECT_STATUSES,
 } from './config.js';
 import {
     assignOfficer,
     commitInvestigatorMutation,
+    confrontSuspect,
+    fileWarrant,
     getBoardSuspectChoices,
+    getCaseStrength,
     getInvestigatorSettings,
     getInvestigatorState,
     getInvestigatorVictimTimeline,
@@ -343,12 +347,33 @@ function renderOpsScreen(state) {
             <article class="kw-investigator-row">
                 <div class="kw-investigator-row__main">
                     <div class="kw-investigator-row__title">${escapeHtml(entry.actor?.name || 'Officer')}</div>
-                    <div class="kw-investigator-row__meta">${escapeHtml(entry.rank || 'Officer')}${entry.notes ? ` · ${escapeHtml(entry.notes)}` : ''}</div>
+                    <div class="kw-investigator-row__meta">${escapeHtml(entry.rank || 'Officer')} · clearance:${escapeHtml(entry.clearance || OFFICER_CLEARANCE.FIELD)}${entry.notes ? ` · ${escapeHtml(entry.notes)}` : ''}</div>
                 </div>
                 <button type="button" class="menu_button kw-investigator-btn" data-inv-remove-officer="${escapeHtml(entry.key)}">Remove</button>
             </article>
         `).join('')
         : '<p class="kw-investigator-empty">No Task Force officers assigned. Assign characters so they can file case actions.</p>';
+
+    const warrantsHtml = (state.warrants || []).length
+        ? state.warrants.slice().reverse().slice(0, 8).map((entry) => `
+            <article class="kw-investigator-row">
+                <div class="kw-investigator-row__main">
+                    <div class="kw-investigator-row__title">${escapeHtml(entry.target?.name || 'Unknown')}</div>
+                    <div class="kw-investigator-row__meta">${escapeHtml(entry.status)}${entry.status === 'pending' ? ` · ${escapeHtml(String(entry.generationsLeft))} gen left` : entry.result ? ` · ${escapeHtml(entry.result)}` : ''}${entry.note ? ` · ${escapeHtml(entry.note)}` : ''}</div>
+                </div>
+            </article>
+        `).join('')
+        : '<p class="kw-investigator-empty">No warrants filed.</p>';
+
+    const confrontChoices = (state.suspects || []).map((entry) => {
+        const strength = getCaseStrength(entry.key).strength;
+        const value = JSON.stringify({
+            type: entry.actor?.type || NOTEBOOK_ACTOR_TYPES.CHARACTER,
+            id: entry.actor?.id || '',
+            name: entry.actor?.name || '',
+        });
+        return `<option value="${escapeHtml(value)}">${escapeHtml(entry.actor?.name || 'Suspect')} [${escapeHtml(entry.status)} · str ${strength}]</option>`;
+    }).join('');
 
     const candidates = getSeizeCandidates();
     const notebookSeize = (candidates.notebooks || []).map((notebook) => `
@@ -377,77 +402,128 @@ function renderOpsScreen(state) {
         <section class="kw-investigator-screen kw-investigator-screen--ops" data-screen="ops">
             <header class="kw-investigator-screen__head">
                 <h2>Operations</h2>
-                <p>Assign officers, restrain subjects, seize evidence, tune case AI.</p>
+                <p>Scroll for officers, warrants, confront, seize, and debug tools.</p>
             </header>
-            <div class="kw-investigator-ops-grid">
-                <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">Case file</div>
-                    <div class="kw-investigator-row__meta">${escapeHtml(state.caseId)} · ${escapeHtml(state.caseTitle)}</div>
-                    <label class="kw-investigator-field">
-                        <span>Play role</span>
-                        <select id="kw-investigator-play-role" class="text_pole">
-                            <option value="${PLAY_ROLES.INVESTIGATOR}" selected>Investigator</option>
-                            <option value="${PLAY_ROLES.KIRA}">Kira</option>
-                        </select>
-                    </label>
-                    <small class="kw-investigator-hint">One role at a time. Switching roles swaps which tools are available.</small>
-                </div>
-                <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">Task Force officers</div>
-                    <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="assign-officer">
+            <div class="kw-investigator-ops-scroll">
+                <div class="kw-investigator-ops-grid">
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Case file</div>
+                        <div class="kw-investigator-row__meta">${escapeHtml(state.caseId)} · ${escapeHtml(state.caseTitle)}</div>
                         <label class="kw-investigator-field">
-                            <span>Character</span>
-                            <select name="actorJson" class="text_pole" required>
-                                <option value="">Select character…</option>
-                                ${options}
+                            <span>Play role</span>
+                            <select id="kw-investigator-play-role" class="text_pole">
+                                <option value="${PLAY_ROLES.INVESTIGATOR}" selected>Investigator</option>
+                                <option value="${PLAY_ROLES.KIRA}">Kira</option>
                             </select>
                         </label>
-                        <label class="kw-investigator-field">
-                            <span>Rank</span>
-                            <input name="rank" class="text_pole" type="text" maxlength="80" placeholder="Officer / Detective / Lead" />
+                        <button type="button" class="menu_button kw-investigator-btn kw-investigator-btn--block" data-inv-open-dn-registry>Open notebook registry (debug)</button>
+                        <small class="kw-investigator-hint">Terminal-styled Death Note manager for debug peek / ownership tools.</small>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Task Force officers</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="assign-officer">
+                            <label class="kw-investigator-field">
+                                <span>Character</span>
+                                <select name="actorJson" class="text_pole" required>
+                                    <option value="">Select character…</option>
+                                    ${options}
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Rank label</span>
+                                <input name="rank" class="text_pole" type="text" maxlength="80" placeholder="Officer / Detective / Lead" />
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Clearance</span>
+                                <select name="clearance" class="text_pole">
+                                    <option value="${OFFICER_CLEARANCE.FIELD}">Field — log / pin / status</option>
+                                    <option value="${OFFICER_CLEARANCE.DETECTIVE}">Detective — + restrain / release</option>
+                                    <option value="${OFFICER_CLEARANCE.LEAD}" selected>Lead — + warrant / confront</option>
+                                </select>
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Assign officer</button>
+                        </form>
+                        <small class="kw-investigator-hint">Clearance gates which <code>kwCaseAction</code> verbs an officer may file.</small>
+                        <div class="kw-investigator-list">${officersHtml}</div>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Warrant / search</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="warrant">
+                            <label class="kw-investigator-field">
+                                <span>Target</span>
+                                <select name="actorJson" class="text_pole" required>
+                                    <option value="">Select character…</option>
+                                    ${options}
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Resolve after generations</span>
+                                <input name="generations" class="text_pole" type="number" min="1" max="8" value="2" />
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Note</span>
+                                <input name="note" class="text_pole" type="text" maxlength="200" placeholder="Scope / probable cause" />
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">File warrant</button>
+                        </form>
+                        <div class="kw-investigator-list">${warrantsHtml}</div>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Confront</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="confront">
+                            <label class="kw-investigator-field">
+                                <span>Suspect</span>
+                                <select name="actorJson" class="text_pole" required>
+                                    <option value="">Select pinned suspect…</option>
+                                    ${confrontChoices || options}
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Note</span>
+                                <input name="note" class="text_pole" type="text" maxlength="200" placeholder="Accusation / pressure angle" />
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Confront</button>
+                        </form>
+                        <small class="kw-investigator-hint">Needs case strength ≥ 2. Prime + strength ≥ 3 records probable cause (restrain still required to seize).</small>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Mark restrained</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="restrain">
+                            <label class="kw-investigator-field">
+                                <span>Subject</span>
+                                <select name="actorJson" class="text_pole" required>
+                                    <option value="">Select character…</option>
+                                    ${options}
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Reason</span>
+                                <input name="reason" class="text_pole" type="text" maxlength="200" placeholder="In-scene custody / arrest" />
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Mark restrained</button>
+                        </form>
+                        <div class="kw-investigator-list">${restrainedHtml}</div>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Seize</div>
+                        <div class="kw-investigator-actions">${seizeBlock}</div>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Case AI</div>
+                        <label class="kw-investigator-field kw-investigator-field--row">
+                            <input id="kw-investigator-show-case-action-debug" type="checkbox" ${settings.showCaseActionDebugBlocks ? 'checked' : ''} />
+                            <span>Show hidden officer case-action blocks in chat</span>
                         </label>
-                        <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Assign officer</button>
-                    </form>
-                    <small class="kw-investigator-hint">Only assigned officers can append hidden <code>kwCaseAction</code> blocks that update this case file.</small>
-                    <div class="kw-investigator-list">${officersHtml}</div>
-                </div>
-                <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">Mark restrained</div>
-                    <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="restrain">
                         <label class="kw-investigator-field">
-                            <span>Subject</span>
-                            <select name="actorJson" class="text_pole" required>
-                                <option value="">Select character…</option>
-                                ${options}
-                            </select>
+                            <span>Case context prompt template</span>
+                            <textarea id="kw-investigator-case-prompt-template" class="text_pole" rows="8">${escapeHtml(casePromptTemplate)}</textarea>
                         </label>
-                        <label class="kw-investigator-field">
-                            <span>Reason</span>
-                            <input name="reason" class="text_pole" type="text" maxlength="200" placeholder="In-scene custody / arrest" />
-                        </label>
-                        <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Mark restrained</button>
-                    </form>
-                    <div class="kw-investigator-list">${restrainedHtml}</div>
-                </div>
-                <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">Seize (restrained only)</div>
-                    <div class="kw-investigator-actions">${seizeBlock}</div>
-                </div>
-                <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">Case AI</div>
-                    <label class="kw-investigator-field kw-investigator-field--row">
-                        <input id="kw-investigator-show-case-action-debug" type="checkbox" ${settings.showCaseActionDebugBlocks ? 'checked' : ''} />
-                        <span>Show hidden officer case-action blocks in chat</span>
-                    </label>
-                    <label class="kw-investigator-field">
-                        <span>Case context prompt template</span>
-                        <textarea id="kw-investigator-case-prompt-template" class="text_pole" rows="10">${escapeHtml(casePromptTemplate)}</textarea>
-                    </label>
-                    <small class="kw-investigator-hint">Placeholders: play_role, case_id, case_title, officers_block, suspects_block, evidence_block, restrained_block, case_action_tag, example_officer.</small>
-                </div>
-                <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">System log</div>
-                    <div class="kw-investigator-log">${caseLog}</div>
+                        <small class="kw-investigator-hint">Placeholders include warrants_block and clearance-aware officers_block.</small>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">System log</div>
+                        <div class="kw-investigator-log">${caseLog}</div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -822,6 +898,22 @@ function bindHubInteractions(root) {
         });
     });
 
+    root.querySelectorAll('[data-inv-open-dn-registry]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            try {
+                const module = await import('../deathnote/ui.js');
+                if (typeof module.openDeathNoteManageModal === 'function') {
+                    module.openDeathNoteManageModal({ theme: 'terminal' });
+                } else {
+                    globalThis.toastr?.warning?.('Death Note registry is unavailable.');
+                }
+            } catch (error) {
+                console.warn('[killer_within_investigator] Could not open Death Note registry', error);
+                globalThis.toastr?.error?.('Could not open notebook registry.');
+            }
+        });
+    });
+
     root.querySelectorAll('[data-inv-seize-notebook]').forEach((button) => {
         button.addEventListener('click', async () => {
             const id = button.getAttribute('data-inv-seize-notebook');
@@ -923,9 +1015,49 @@ function bindHubInteractions(root) {
                     return;
                 }
                 await commitInvestigatorMutation(
-                    () => assignOfficer(actor, { rank: String(data.get('rank') || 'Officer') }),
+                    () => assignOfficer(actor, {
+                        rank: String(data.get('rank') || 'Officer'),
+                        clearance: String(data.get('clearance') || OFFICER_CLEARANCE.LEAD),
+                    }),
                     'Task Force officer assigned.',
                 );
+            } else if (kind === 'warrant') {
+                const actor = parseActorJson(data.get('actorJson'));
+                if (!actor?.name) {
+                    return;
+                }
+                const result = await commitInvestigatorMutation(
+                    () => fileWarrant(actor, {
+                        generations: data.get('generations'),
+                        note: String(data.get('note') || ''),
+                    }),
+                    'Warrant filed.',
+                );
+                if (!result || !result.applied) {
+                    globalThis.toastr?.warning?.(
+                        result?.reason === 'already_pending'
+                            ? 'A pending warrant already exists for that target.'
+                            : 'Could not file warrant.',
+                    );
+                }
+            } else if (kind === 'confront') {
+                const actor = parseActorJson(data.get('actorJson'));
+                if (!actor?.name) {
+                    return;
+                }
+                const result = await commitInvestigatorMutation(
+                    () => confrontSuspect(actor, { note: String(data.get('note') || '') }),
+                    'Confrontation logged.',
+                );
+                if (!result || !result.applied) {
+                    globalThis.toastr?.warning?.(
+                        result?.reason === 'insufficient_strength'
+                            ? `Need case strength ≥ ${result.required || 2} (current ${result.strength ?? 0}).`
+                            : 'Confront blocked.',
+                    );
+                } else if (result.seizeUnlocked) {
+                    globalThis.toastr?.success?.('Seize rights unlocked for this subject.');
+                }
             } else if (kind === 'link-evidence') {
                 const evidenceId = form.getAttribute('data-evidence-id');
                 const suspectKey = String(data.get('suspectKey') || '');

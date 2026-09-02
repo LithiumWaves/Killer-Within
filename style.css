@@ -3067,9 +3067,43 @@
 }
 
 .kw-investigator-hub__body {
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     overflow: auto;
+    overflow-x: hidden;
     padding: 0.85rem 0.95rem 1rem;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+.kw-investigator-screen--ops {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+}
+
+.kw-investigator-screen--ops .kw-investigator-screen__head {
+    flex: 0 0 auto;
+}
+
+.kw-investigator-ops-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+    overflow-x: hidden;
+    padding-right: 0.15rem;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+.kw-investigator-ops-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.65rem;
+    padding-bottom: 0.35rem;
 }
 
 .kw-investigator-hub__status {
@@ -3259,10 +3293,6 @@
     gap: 0.85rem;
 }
 
-.kw-investigator-ops-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .kw-investigator-panel {
     min-width: 0;
     padding: 0.7rem;
@@ -3418,4 +3448,101 @@
     #kw-investigator-hub.is-mobile .kw-investigator-log {
         max-height: 8rem;
     }
+}
+
+/* Terminal-styled Manage Death Notes (opened from Task Force Ops) */
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal {
+    z-index: 2147483647;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-manage-terminal__backdrop {
+    background: rgba(4, 10, 16, 0.72);
+    backdrop-filter: blur(2px);
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-manage-terminal__dialog {
+    width: min(56rem, calc(100vw - 1.5rem));
+    max-height: min(82dvh, 720px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(90, 208, 255, 0.28);
+    border-radius: 0.55rem;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(70, 170, 220, 0.12), transparent 45%),
+        linear-gradient(180deg, #0b1822, #071018 55%, #050b10);
+    color: #d7e7f2;
+    box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.55),
+        inset 0 0 0 1px rgba(90, 208, 255, 0.08);
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-manage-terminal__header {
+    border-bottom: 1px solid rgba(90, 208, 255, 0.22);
+    padding: 0.85rem 1rem 0.7rem;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-settings-modal__eyebrow {
+    color: #7fd7ff;
+    letter-spacing: 0.1em;
+    font-family: "IBM Plex Mono", "Consolas", monospace;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-settings-modal__title {
+    color: #e8f4fb;
+    font-family: "IBM Plex Mono", "Consolas", monospace;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 1rem;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-manage-terminal__body {
+    overflow: auto;
+    padding: 0.85rem 1rem 1rem;
+    -webkit-overflow-scrolling: touch;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-settings-modal__section,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-deathnote-item,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-deathnote-manager__summary {
+    border-color: rgba(90, 208, 255, 0.18);
+    background: rgba(8, 16, 24, 0.72);
+    color: #d7e7f2;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-settings-modal__section-title,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-deathnote-item__title {
+    color: #e8f4fb;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-settings-modal__eyebrow,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-deathnote-name-state,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-deathnote-item__meta-line,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal small {
+    color: #8fb0c4;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .text_pole,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal select.text_pole,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal input.text_pole {
+    background: rgba(4, 10, 16, 0.95);
+    color: #d7e7f2;
+    border-color: rgba(90, 208, 255, 0.28);
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .menu_button,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-inventory__header-action,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-inventory__context-action {
+    background: linear-gradient(180deg, rgba(30, 55, 75, 0.9), rgba(12, 24, 36, 0.95));
+    color: #d7e7f2;
+    border: 1px solid rgba(90, 208, 255, 0.28);
+    border-radius: 0.3rem;
+}
+
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .menu_button:hover,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-inventory__header-action:hover,
+#kw-deathnote-inventory-manage-modal.kw-dn-manage--terminal .kw-dn-inventory__context-action:hover {
+    border-color: rgba(127, 215, 255, 0.55);
+    color: #fff;
 }
