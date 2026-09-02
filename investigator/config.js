@@ -26,6 +26,8 @@ export const EVIDENCE_TYPES = Object.freeze({
     STATEMENT: 'statement',
     WARRANT_RESULT: 'warrant_result',
     CONFRONTATION: 'confrontation',
+    PATTERN_REPORT: 'pattern_report',
+    TRAP_LINK: 'trap_link',
     OTHER: 'other',
 });
 
@@ -37,6 +39,9 @@ export const CASE_ACTIONS = Object.freeze({
     RELEASE: 'release',
     WARRANT: 'warrant',
     CONFRONT: 'confront',
+    SURVEIL: 'surveil',
+    ANALYZE: 'analyze',
+    BROADCAST: 'broadcast',
 });
 
 export const OFFICER_CLEARANCE = Object.freeze({
@@ -50,6 +55,7 @@ export const OFFICER_CLEARANCE_ACTIONS = Object.freeze({
         CASE_ACTIONS.LOG,
         CASE_ACTIONS.PIN,
         CASE_ACTIONS.STATUS,
+        CASE_ACTIONS.SURVEIL,
     ]),
     [OFFICER_CLEARANCE.DETECTIVE]: Object.freeze([
         CASE_ACTIONS.LOG,
@@ -57,6 +63,8 @@ export const OFFICER_CLEARANCE_ACTIONS = Object.freeze({
         CASE_ACTIONS.STATUS,
         CASE_ACTIONS.RESTRAIN,
         CASE_ACTIONS.RELEASE,
+        CASE_ACTIONS.SURVEIL,
+        CASE_ACTIONS.ANALYZE,
     ]),
     [OFFICER_CLEARANCE.LEAD]: Object.freeze([
         CASE_ACTIONS.LOG,
@@ -66,6 +74,9 @@ export const OFFICER_CLEARANCE_ACTIONS = Object.freeze({
         CASE_ACTIONS.RELEASE,
         CASE_ACTIONS.WARRANT,
         CASE_ACTIONS.CONFRONT,
+        CASE_ACTIONS.SURVEIL,
+        CASE_ACTIONS.ANALYZE,
+        CASE_ACTIONS.BROADCAST,
     ]),
 });
 
@@ -82,9 +93,43 @@ export const WARRANT_RESULTS = Object.freeze({
     ID_HIT: 'id_hit',
 });
 
+export const SURVEILLANCE_KINDS = Object.freeze({
+    BUG_ROOM: 'bug_room',
+    TRAIL: 'trail',
+    WATCH_NOTEBOOK: 'watch_notebook',
+});
+
+export const SURVEILLANCE_STATUS = Object.freeze({
+    ACTIVE: 'active',
+    REMOVED: 'removed',
+});
+
+export const SURVEILLANCE_SIGNAL_KINDS = Object.freeze({
+    SIGHTING_OPEN: 'sighting_open',
+    CUSTODY_MOVE: 'custody_move',
+    SUBJECT_ACTIVE: 'subject_active',
+    OFFICER_REPORT: 'officer_report',
+});
+
+export const BROADCAST_TRAP_STATUS = Object.freeze({
+    ACTIVE: 'active',
+    TRIGGERED: 'triggered',
+    EXPIRED: 'expired',
+});
+
 export const DEFAULT_WARRANT_GENERATIONS = 2;
 export const CONFRONT_MIN_STRENGTH = 2;
 export const CONFRONT_PRIME_STRENGTH = 3;
+export const MAX_ACTIVE_SURVEILLANCE_PLANTS = 3;
+export const MAX_SURVEILLANCE_SIGNALS = 40;
+
+export const DEFAULT_BROADCAST_TRAP_PROMPT_TEMPLATE = [
+    '[Task Force Broadcast / Public Incident]',
+    'A public broadcast names "{{decoy_name}}" as a condemned criminal / challenge target.',
+    'Challenge detail: {{challenge}}',
+    'If anyone acts on this information by killing that person, the death must use that exact name.',
+    'Do not mention Task Force terminal systems.',
+].join('\n');
 
 export const DEFAULT_CASE_PROMPT_TEMPLATE = [
     '[Task Force Case Context]',
@@ -108,15 +153,23 @@ export const DEFAULT_CASE_PROMPT_TEMPLATE = [
     'Pending warrants:',
     '{{warrants_block}}',
     '',
+    'Active surveillance:',
+    '{{surveillance_block}}',
+    '',
+    'Active broadcast traps:',
+    '{{traps_block}}',
+    '',
     'If you are speaking as a listed Task Force officer and file a case update, append a hidden block at the end of your reply using this exact format:',
     '[{{case_action_tag}}]',
     'officer: {{example_officer}}',
-    'action: log|pin|status|restrain|release|warrant|confront',
+    'action: log|pin|status|restrain|release|warrant|confront|surveil|analyze|broadcast',
     'target: Character Name',
     'status: poi|prime|cleared|deceased',
+    'kind: trail|bug_room|watch_notebook',
     'title: short title',
     'detail: short detail',
     'reason: short reason',
+    'note: short note',
     'generations: 2',
     '[/{{case_action_tag}}]',
     'Only use action fields that apply. officer must match your speaking character. Clearance limits which actions you may file. Do not narrate the block.',
@@ -132,4 +185,5 @@ export const DEFAULT_INVESTIGATOR_SETTINGS = Object.freeze({
     dockY: null,
     showCaseActionDebugBlocks: false,
     casePromptTemplate: DEFAULT_CASE_PROMPT_TEMPLATE,
+    broadcastTrapPromptTemplate: DEFAULT_BROADCAST_TRAP_PROMPT_TEMPLATE,
 });

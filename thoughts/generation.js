@@ -23,8 +23,8 @@ import {
     getCharacterShinigamiEyesPromptInjectionMessage,
 } from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
-import { getInvestigatorCasePromptInjectionMessage } from '../investigator/prompts.js';
-import { tickWarrantsForGeneration } from '../investigator/core.js';
+import { getInvestigatorCasePromptInjectionMessage, getBroadcastTrapPromptInjectionMessage } from '../investigator/prompts.js';
+import { tickSurveillanceForGeneration, tickWarrantsForGeneration } from '../investigator/core.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
 import { state } from './state.js';
 
@@ -255,6 +255,11 @@ export function installInterceptor() {
             await persistDeathNoteChatChanges();
         }
 
+        const surveillanceTick = tickSurveillanceForGeneration(chat.length);
+        if (surveillanceTick?.ticked && surveillanceTick.added) {
+            await persistDeathNoteChatChanges();
+        }
+
         const deathNoteInjection = getDeathNotePromptInjectionMessage();
         if (deathNoteInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
@@ -295,6 +300,12 @@ export function installInterceptor() {
         if (investigatorCaseInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
             chat.splice(insertAt, 0, investigatorCaseInjection);
+        }
+
+        const broadcastTrapInjection = getBroadcastTrapPromptInjectionMessage();
+        if (broadcastTrapInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, broadcastTrapInjection);
         }
 
         const settings = getSettings();
