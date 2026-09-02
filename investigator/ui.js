@@ -328,13 +328,15 @@ function renderOpsScreen(state) {
 
     const candidates = getSeizeCandidates();
     const notebookSeize = (candidates.notebooks || []).map((notebook) => `
-        <button type="button" class="menu_button kw-investigator-btn kw-investigator-btn--danger" data-inv-seize-notebook="${escapeHtml(notebook.itemId)}">
-            Seize ${escapeHtml(notebook.label || 'Death Note')} (${escapeHtml(notebook.holder?.name || 'held')})
+        <button type="button" class="menu_button kw-investigator-btn kw-investigator-btn--danger kw-investigator-btn--block" data-inv-seize-notebook="${escapeHtml(notebook.itemId)}">
+            <span class="kw-investigator-btn__main">Seize notebook</span>
+            <span class="kw-investigator-btn__sub">${escapeHtml(notebook.label || 'Death Note')} · ${escapeHtml(notebook.holder?.name || 'held')}</span>
         </button>
     `).join('');
     const scrapSeize = (candidates.scraps || []).map((scrap) => `
-        <button type="button" class="menu_button kw-investigator-btn kw-investigator-btn--danger" data-inv-seize-scrap="${escapeHtml(scrap.id)}">
-            Seize scrap (${escapeHtml(scrap.holder?.name || 'held')})
+        <button type="button" class="menu_button kw-investigator-btn kw-investigator-btn--danger kw-investigator-btn--block" data-inv-seize-scrap="${escapeHtml(scrap.id)}">
+            <span class="kw-investigator-btn__main">Seize scrap</span>
+            <span class="kw-investigator-btn__sub">${escapeHtml(scrap.holder?.name || 'held')}</span>
         </button>
     `).join('');
     const seizeBlock = (notebookSeize || scrapSeize)
@@ -346,7 +348,7 @@ function renderOpsScreen(state) {
     `).join('') || '<p class="kw-investigator-empty">System log quiet.</p>';
 
     return `
-        <section class="kw-investigator-screen" data-screen="ops">
+        <section class="kw-investigator-screen kw-investigator-screen--ops" data-screen="ops">
             <header class="kw-investigator-screen__head">
                 <h2>Operations</h2>
                 <p>Restrain subjects, seize evidence, switch play role.</p>
@@ -358,15 +360,15 @@ function renderOpsScreen(state) {
                     <label class="kw-investigator-field">
                         <span>Play role</span>
                         <select id="kw-investigator-play-role" class="text_pole">
-                            <option value="${PLAY_ROLES.INVESTIGATOR}" selected>Investigator (Task Force terminal)</option>
-                            <option value="${PLAY_ROLES.KIRA}">Kira (Death Note tools)</option>
+                            <option value="${PLAY_ROLES.INVESTIGATOR}" selected>Investigator</option>
+                            <option value="${PLAY_ROLES.KIRA}">Kira</option>
                         </select>
                     </label>
                     <small class="kw-investigator-hint">One role at a time. Switching roles swaps which tools are available.</small>
                 </div>
                 <div class="kw-investigator-panel">
                     <div class="kw-investigator-subhead">Mark restrained</div>
-                    <form class="kw-investigator-form" data-inv-form="restrain">
+                    <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="restrain">
                         <label class="kw-investigator-field">
                             <span>Subject</span>
                             <select name="actorJson" class="text_pole" required>
@@ -378,12 +380,12 @@ function renderOpsScreen(state) {
                             <span>Reason</span>
                             <input name="reason" class="text_pole" type="text" maxlength="200" placeholder="In-scene custody / arrest" />
                         </label>
-                        <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary">Mark restrained</button>
+                        <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Mark restrained</button>
                     </form>
                     <div class="kw-investigator-list">${restrainedHtml}</div>
                 </div>
                 <div class="kw-investigator-panel">
-                    <div class="kw-investigator-subhead">Seize (restrained holders only)</div>
+                    <div class="kw-investigator-subhead">Seize (restrained only)</div>
                     <div class="kw-investigator-actions">${seizeBlock}</div>
                 </div>
                 <div class="kw-investigator-panel">
