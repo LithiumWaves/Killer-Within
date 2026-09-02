@@ -1,6 +1,7 @@
-import { FLOATING_ID, NOTEBOOK_ACTOR_TYPES, NOTEBOOK_USER_ACCESS } from './config.js';
+import { DEFAULT_USER_LIFESPAN_YEARS, FLOATING_ID, NOTEBOOK_ACTOR_TYPES, NOTEBOOK_USER_ACCESS } from './config.js';
 import {
     addNotebookToucher,
+    acceptShinigamiEyesDeal,
     attemptStealCharacterId,
     clearNotebookTouchers,
     createDeathNote,
@@ -9,6 +10,7 @@ import {
     forgetCharacterName,
     getActorByTrueName,
     getActorDisplayName,
+    getActorShinigamiLifespan,
     getCharacterActorForMessage,
     getChatState,
     getCharacterNameDirectory,
@@ -19,6 +21,7 @@ import {
     getIdentityStealAttemptState,
     getIdentityStealSuccessChance,
     getLinkedShinigami,
+    getLinkedShinigamiForEyesDeal,
     getNotebookPages,
     getNotebookOwnership,
     getNotebookReturnRequest,
@@ -26,6 +29,7 @@ import {
     getRecentChatMemoryCandidates,
     getSelectedNotebookIdState,
     getSettings,
+    getShinigamiEyesState,
     learnCharacterName,
     linkNotebookShinigami,
     markNotebookPresenceRevealPending,
@@ -43,10 +47,12 @@ import {
     setNotebookPages,
     setUserNotebookAccess,
     syncAllAiNotebookWriteMessageVisibility,
+    syncShinigamiEyesNameReveals,
     transferNotebookScrap,
     transferNotebookTo,
     updateNotebookScrapText,
     unlinkNotebookShinigami,
+    userHasShinigamiEyes,
 } from './core.js';
 import { syncLinkedShinigamiVisibility } from '../presence/index.js';
 import { getMessagePresenceTracker, isPresenceActive, resolvePresenceAvatar } from '../presence/core.js';
@@ -1166,7 +1172,101 @@ function restoreStandaloneMaskedMessageNameText($message, originalName) {
     return changed;
 }
 
+function getMessageAvatarHost($message) {
+    const root = $message && $message.length ? $message.get(0) : null;
+    if (!root) {
+        return null;
+    }
+
+    return root.querySelector('.mesAvatarWrapper, .avatarWrapper, .mes_avatar, .avatar') || null;
+}
+
+function renderShinigamiEyesNameHtml(name) {
+    const chars = Array.from(String(name || ''));
+    if (!chars.length) {
+        return '';
+    }
+
+    const mid = (chars.length - 1) / 2;
+    return chars.map((char, index) => {
+        const t = mid === 0 ? 0 : (index - mid) / Math.max(Math.abs(mid), 1);
+        const rotate = (t * -9).toFixed(2);
+        const lift = (-Math.abs(t) * 3.5).toFixed(2);
+        const glyph = char === ' ' ? '\u00a0' : char;
+        return `<span class="kw-shinigami-eyes-overlay__glyph" style="--kw-se-rot:${rotate}deg;--kw-se-y:${lift}px">${escapeHtml(glyph)}</span>`;
+    }).join('');
+}
+
+function renderShinigamiEyesLifespanHtml(displayCode) {
+    return String(displayCode || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((token) => `<span class="kw-shinigami-eyes-overlay__digit">${escapeHtml(token)}</span>`)
+        .join('');
+}
+
+function syncShinigamiEyesOverlay($message, actor) {
+    const messageRoot = $message && $message.length ? $message.get(0) : null;
+    if (!messageRoot) {
+        return;
+    }
+
+    const existing = Array.from(messageRoot.querySelectorAll('.kw-shinigami-eyes-overlay'));
+    const canShow = userHasShinigamiEyes()
+        && actor
+        && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+        && String(actor.name || '').trim();
+
+    if (!canShow) {
+        existing.forEach((node) => node.remove());
+        messageRoot.classList.remove('kw-mes--shinigami-eyes');
+        return;
+    }
+
+    const lifespan = getActorShinigamiLifespan(actor);
+    const trueName = String(actor.name || '').trim();
+    const displayCode = String(lifespan?.displayCode || '').trim();
+    const avatarHost = getMessageAvatarHost($message);
+    const nameHost = getMessageNameHosts($message)[0] || null;
+    const mount = avatarHost || (nameHost && nameHost.parentElement) || messageRoot;
+
+    if (mount && getComputedStyle(mount).position === 'static') {
+        mount.classList.add('kw-shinigami-eyes-mount');
+    }
+
+    let overlay = existing.find((node) => mount.contains(node)) || null;
+    for (const node of existing) {
+        if (node !== overlay) {
+            node.remove();
+        }
+    }
+
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'kw-shinigami-eyes-overlay';
+        overlay.setAttribute('aria-hidden', 'true');
+        if (avatarHost) {
+            avatarHost.append(overlay);
+        } else if (nameHost && nameHost.parentElement) {
+            nameHost.parentElement.insertBefore(overlay, nameHost);
+        } else {
+            messageRoot.prepend(overlay);
+        }
+    }
+
+    overlay.innerHTML = `
+        <div class="kw-shinigami-eyes-overlay__name">${renderShinigamiEyesNameHtml(trueName)}</div>
+        <div class="kw-shinigami-eyes-overlay__lifespan">${renderShinigamiEyesLifespanHtml(displayCode)}</div>
+    `;
+    messageRoot.classList.add('kw-mes--shinigami-eyes');
+}
+
 function renderMaskedChatMessageNames() {
+    if (userHasShinigamiEyes()) {
+        syncShinigamiEyesNameReveals();
+    }
+
     const context = getContext();
     const chat = context && Array.isArray(context.chat) ? context.chat : [];
 
@@ -1189,6 +1289,7 @@ function renderMaskedChatMessageNames() {
         const hosts = getMessageNameHosts($message);
 
         if (!hosts.length) {
+            syncShinigamiEyesOverlay($message, actor);
             return;
         }
 
@@ -1211,6 +1312,7 @@ function renderMaskedChatMessageNames() {
                     replaceMatchingTextNodes(element, displayName, storedOriginal);
                 }
             }
+            syncShinigamiEyesOverlay($message, actor);
             return;
         }
 
@@ -1256,6 +1358,7 @@ function renderMaskedChatMessageNames() {
         if (displayName === originalName) {
             restoreStandaloneMaskedMessageNameText($message, originalName);
         }
+        syncShinigamiEyesOverlay($message, actor);
     });
 }
 
@@ -2178,7 +2281,7 @@ async function commitInventoryMutation(mutate, successMessage = '') {
         return result;
     } catch (error) {
         console.error('[killer_within_deathnote] Inventory manager action failed', error);
-        notify('error', 'Death Note manager action failed.');
+        notify('error', error?.message || 'Death Note manager action failed.');
         return false;
     }
 }
@@ -2200,6 +2303,8 @@ function syncSettingsUi() {
     $('#kw-deathnote-prompt-theft-template').val(settings.identityTheftPromptTemplate);
     $('#kw-deathnote-prompt-reveal-template').val(settings.notebookRevealPromptTemplate);
     $('#kw-deathnote-prompt-presence-template').val(settings.presencePromptTemplate);
+    $('#kw-deathnote-prompt-eyes-template').val(settings.shinigamiEyesPromptTemplate);
+    $('#kw-deathnote-default-user-lifespan').val(String(Number(settings.defaultUserLifespanYears) || DEFAULT_USER_LIFESPAN_YEARS));
     $('#kw-deathnote-name-manager').html(renderNameKnowledgeManagerHtml());
     $('#kw-deathnote-memory-manager').html(renderMemoryManagerHtml());
     syncThoughtSettingsUi();
@@ -2339,6 +2444,20 @@ function bindSettingsUi() {
     $('#kw-deathnote-prompt-presence-template').off('input').on('input', (event) => {
         getSettings().presencePromptTemplate = String($(event.currentTarget).val() || '').trim();
         scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-prompt-eyes-template').off('input').on('input', (event) => {
+        getSettings().shinigamiEyesPromptTemplate = String($(event.currentTarget).val() || '');
+        scheduleSettingsSave();
+    });
+
+    $('#kw-deathnote-default-user-lifespan').off('change').on('change', (event) => {
+        const years = Math.max(1, Math.min(200, Math.round(Number($(event.currentTarget).val()) || DEFAULT_USER_LIFESPAN_YEARS)));
+        getSettings().defaultUserLifespanYears = years;
+        $(event.currentTarget).val(String(years));
+        scheduleSettingsSave();
+        // Refresh Eyes panel so pre-deal remaining life mirrors the new default.
+        refreshDeathNoteUi();
     });
 
     bindThoughtSettingsUi();
@@ -2679,6 +2798,7 @@ function renderInventorySettingsContentHtml() {
                     <div id="kw-deathnote-name-manager"></div>
                 </div>
             </section>
+            ${renderShinigamiEyesPanelHtml()}
             <section class="kw-dn-settings-modal__section">
                 <div class="kw-dn-settings-modal__section-head">
                     <div class="kw-dn-settings-modal__eyebrow">Memory</div>
@@ -2708,8 +2828,12 @@ function renderInventorySettingsContentHtml() {
                     <div class="kw-dn-settings-modal__foldout-body">
                     <div class="killer-within-settings__field">
                         <span>Template placeholders</span>
-                        <small>Use <code>{{ownership_block}}</code>, <code>{{inventory_block}}</code>, <code>{{due_block}}</code>, <code>{{entries_block}}</code>, <code>{{user_label}}</code>, <code>{{target_label}}</code>, <code>{{linked_shinigami}}</code>, and <code>{{touchers_block}}</code>.</small>
+                        <small>Use <code>{{ownership_block}}</code>, <code>{{inventory_block}}</code>, <code>{{due_block}}</code>, <code>{{entries_block}}</code>, <code>{{user_label}}</code>, <code>{{target_label}}</code>, <code>{{linked_shinigami}}</code>, <code>{{touchers_block}}</code>, <code>{{granted_by}}</code>, <code>{{original_lifespan_years}}</code>, <code>{{remaining_lifespan_years}}</code>, <code>{{deal_count_clause}}</code>, and <code>{{eyes_roster_block}}</code>.</small>
                     </div>
+                    <label class="killer-within-settings__field">
+                        <span>Default user lifespan (years, before Eye deals)</span>
+                        <input id="kw-deathnote-default-user-lifespan" class="text_pole" type="number" min="1" max="200" step="1" />
+                    </label>
                     <label class="killer-within-settings__field">
                         <span>Death Note context template</span>
                         <textarea id="kw-deathnote-prompt-template" class="text_pole" rows="12"></textarea>
@@ -2725,6 +2849,10 @@ function renderInventorySettingsContentHtml() {
                     <label class="killer-within-settings__field">
                         <span>Presence template</span>
                         <textarea id="kw-deathnote-prompt-presence-template" class="text_pole" rows="9"></textarea>
+                    </label>
+                    <label class="killer-within-settings__field">
+                        <span>Shinigami Eyes template</span>
+                        <textarea id="kw-deathnote-prompt-eyes-template" class="text_pole" rows="10"></textarea>
                     </label>
                     <div class="killer-within-settings__field">
                         <span>Hidden thought prompts</span>
@@ -2784,6 +2912,53 @@ function renderInventorySettingsModalHtml() {
                 </div>
             </div>
         </div>
+    `;
+}
+
+function renderShinigamiEyesPanelHtml() {
+    const eyes = getShinigamiEyesState();
+    const linked = getLinkedShinigamiForEyesDeal();
+    const canDeal = Boolean(linked?.active);
+    const isActive = Boolean(eyes.active);
+    const remaining = Math.max(0, Math.floor(Number(eyes.remainingLifespanYears) || 0));
+    const canTrade = canDeal && (!isActive || remaining >= 1);
+    const dealLabel = isActive ? 'Trade Half Again' : 'Accept Shinigami Eyes';
+    const warning = isActive
+        ? 'Another deal will halve your remaining life again. This cannot be undone.'
+        : 'You will see human true names and lifespans. Half your remaining life will be taken. This cannot be undone.';
+
+    return `
+        <section class="kw-dn-settings-modal__section kw-shinigami-eyes-panel">
+            <div class="kw-dn-settings-modal__section-head">
+                <div class="kw-dn-settings-modal__eyebrow">Deal</div>
+                <div class="kw-dn-settings-modal__section-title">Shinigami Eyes</div>
+            </div>
+            <div class="kw-dn-settings-modal__section-body">
+                <div class="kw-shinigami-eyes-card">
+                    <div class="kw-shinigami-eyes-card__status">
+                        <span class="kw-deathnote-item__badge ${isActive ? 'is-linked' : ''}">${isActive ? 'Eyes Active' : 'Dormant'}</span>
+                        <span class="kw-deathnote-item__badge">Deals: ${Math.max(0, Number(eyes.dealCount) || 0)}</span>
+                    </div>
+                    <div class="kw-deathnote-item__meta-grid">
+                        <span class="kw-deathnote-item__meta-line"><b>Granted by:</b> ${escapeHtml(isActive ? formatActorLabel(eyes.grantedBy) : (linked?.active ? formatActorLabel(linked.actor) : 'No linked Shinigami'))}</span>
+                        <span class="kw-deathnote-item__meta-line"><b>Original lifespan:</b> ${escapeHtml(String(eyes.originalLifespanYears))} years</span>
+                        <span class="kw-deathnote-item__meta-line kw-shinigami-eyes-card__remaining"><b>Remaining lifespan:</b> ${escapeHtml(String(remaining))} years</span>
+                        <span class="kw-deathnote-item__meta-line"><b>Cost:</b> Half of remaining life per deal (irreversible)</span>
+                    </div>
+                    <p class="kw-shinigami-eyes-card__warning">${escapeHtml(warning)}</p>
+                    <div class="kw-deathnote-item__actions">
+                        <button
+                            type="button"
+                            id="kw-dn-shinigami-eyes-accept"
+                            class="menu_button kw-dn-manage-action kw-dn-manage-action--primary"
+                            ${canTrade ? '' : 'disabled'}
+                        >${dealLabel}</button>
+                    </div>
+                    ${canDeal ? '' : '<small>Link a Shinigami to a Death Note before making the Eye deal.</small>'}
+                    ${canDeal && !canTrade ? '<small>No remaining lifespan left to trade.</small>' : ''}
+                </div>
+            </div>
+        </section>
     `;
 }
 
@@ -2923,6 +3098,7 @@ function renderInventoryManageContentHtml() {
 
     return `
         <div class="kw-dn-settings-modal__sections">
+            ${renderShinigamiEyesPanelHtml()}
             <section class="kw-dn-settings-modal__section">
                 <div class="kw-dn-settings-modal__section-head">
                     <div class="kw-dn-settings-modal__eyebrow">Registry</div>
@@ -3965,6 +4141,33 @@ function bindInventoryUi() {
                 notebookItemId: notebookId,
                 reason: 'Linked Shinigami cleared via manager.',
             }), 'Linked Shinigami cleared.');
+        })
+        .off('click', '#kw-dn-shinigami-eyes-accept')
+        .on('click', '#kw-dn-shinigami-eyes-accept', async (event) => {
+            event.preventDefault();
+            const eyes = getShinigamiEyesState();
+            const dealCount = Math.max(0, Math.floor(Number(eyes.dealCount) || 0));
+            const remaining = Math.max(0, Math.floor(Number(eyes.remainingLifespanYears) || 0));
+            const remainingLabel = String(remaining);
+            const message = dealCount > 0
+                ? `Second Shinigami Eyes deal?\n\nYour remaining lifespan (${remainingLabel} years) will be halved again. This cannot be undone.`
+                : 'Accept the Shinigami Eyes deal?\n\nYou will permanently trade half of your remaining lifespan for the Eyes. This cannot be undone.';
+            if (!window.confirm(message)) {
+                return;
+            }
+
+            await commitInventoryMutation(() => {
+                const result = acceptShinigamiEyesDeal({});
+                if (!result?.applied) {
+                    throw new Error(
+                        result?.reason === 'no_linked_shinigami'
+                            ? 'Link a Shinigami to a Death Note before making the Eye deal.'
+                            : 'Shinigami Eyes deal failed.',
+                    );
+                }
+                return result;
+            }, `Shinigami Eyes granted. Remaining lifespan: ${Math.max(0, Math.floor((remaining || 1) / 2))} years.`);
+            queueMaskedChatNameRender();
         })
         .off('click', '#kw-dn-manage-link-shinigami')
         .off('click', '#kw-dn-manage-unlink-shinigami')

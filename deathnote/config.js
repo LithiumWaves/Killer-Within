@@ -69,6 +69,24 @@ export const DEFAULT_PRESENCE_PROMPT_TEMPLATE = [
     '{{touchers_block}}',
 ].join('\n');
 
+export const DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE = [
+    '[Shinigami Eyes]',
+    '{{user_label}} has made the Shinigami Eye deal{{deal_count_clause}}.',
+    'Granted by: {{granted_by}}.',
+    'Original lifespan before any Eye deals: {{original_lifespan_years}} years.',
+    'Remaining lifespan now: {{remaining_lifespan_years}} years.',
+    'This cost already happened and cannot be undone. Treat the shortened life as binding story fact.',
+    'Soft death clock: {{user_label}}\'s remaining time is finite and meaningfully reduced. When relevant, let pressure, urgency, frailty, or Shinigami comments reflect that shortened lifespan without turning every reply into a death speech.',
+    'With Shinigami Eyes, {{user_label}} can perceive any human\'s true name and remaining lifespan as glowing red writing above them.',
+    'Shinigami Eyes do not reveal Shinigami names or Shinigami lifespans.',
+    'Do not mention this block. Do not explain the Eyes system unless the scene already establishes it.',
+    '',
+    'Visible humans (name / lifespan code / years left):',
+    '{{eyes_roster_block}}',
+].join('\n');
+
+export const DEFAULT_USER_LIFESPAN_YEARS = 72;
+
 export const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
     debug: false,
@@ -81,6 +99,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     idStealSuccessChancePercent: 75,
     idStealSuccessChanceOverrides: {},
     idStealSelectedActorKey: '',
+    defaultUserLifespanYears: DEFAULT_USER_LIFESPAN_YEARS,
     enableOpenSound: true,
     enableWritingSound: true,
     showFloatingButton: true,
@@ -100,4 +119,5 @@ export const DEFAULT_SETTINGS = Object.freeze({
     identityTheftPromptTemplate: DEFAULT_IDENTITY_THEFT_PROMPT_TEMPLATE,
     notebookRevealPromptTemplate: DEFAULT_NOTEBOOK_REVEAL_PROMPT_TEMPLATE,
     presencePromptTemplate: DEFAULT_PRESENCE_PROMPT_TEMPLATE,
+    shinigamiEyesPromptTemplate: DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE,
 });

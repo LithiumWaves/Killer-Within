@@ -2,6 +2,7 @@ import {
     AI_NOTEBOOK_WRITE_BLOCK_TAG,
     CHAT_METADATA_KEY,
     DEFAULT_SETTINGS,
+    DEFAULT_USER_LIFESPAN_YEARS,
     MAX_SIMULTANEOUS_DEATH_NOTES,
     MESSAGE_EXTRA_KEY,
     MODULE_NAME,
@@ -133,6 +134,7 @@ function createDefaultChatState() {
         ownership: cloneActorOwnershipState(defaultNotebook),
         shinigamiLink: normalizeShinigamiLinkState(defaultNotebook.linkedShinigami),
         nameKnowledge: createDefaultNameKnowledgeState(),
+        shinigamiEyes: createDefaultShinigamiEyesState(),
         identityTheft: createDefaultIdentityTheftState(),
         notebookReturnRequest: normalizeNotebookReturnRequestState(defaultNotebook.returnRequest),
         notebookPresenceReveal: normalizeNotebookPresenceRevealState(defaultNotebook.presenceReveal),
@@ -374,6 +376,26 @@ function createDefaultNameKnowledgeState() {
     };
 }
 
+function createDefaultShinigamiEyesState() {
+    const settings = (() => {
+        try {
+            return getSettings();
+        } catch (_error) {
+            return DEFAULT_SETTINGS;
+        }
+    })();
+    const defaultYears = Math.max(1, Math.floor(Number(settings?.defaultUserLifespanYears) || DEFAULT_USER_LIFESPAN_YEARS));
+    return {
+        active: false,
+        dealCount: 0,
+        grantedBy: createActorRef(NOTEBOOK_ACTOR_TYPES.SHINIGAMI, ''),
+        acceptedAt: null,
+        originalLifespanYears: defaultYears,
+        remainingLifespanYears: defaultYears,
+        lifespans: {},
+    };
+}
+
 function createDefaultIdentityTheftState() {
     return {
         cooldowns: [],
@@ -575,6 +597,87 @@ function normalizeNameKnowledgeState(value) {
 
     return {
         known,
+    };
+}
+
+function hashLifespanSeed(value) {
+    const source = String(value || '');
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+        hash ^= source.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function buildShinigamiLifespanDisplayCode(yearsRemaining, seedValue = '') {
+    // Anime/manga style: irregular digit clusters with spaces, e.g. "9 3 31 26 3 9"
+    const years = Math.max(0, Math.floor(Number(yearsRemaining) || 0));
+    const hash = hashLifespanSeed(`${seedValue}|${years}`);
+    const a = String((hash % 9) + 1);
+    const b = String(((hash >>> 3) % 9) + 1);
+    const c = String(((hash >>> 7) % 90) + 10).padStart(2, '0');
+    const d = String(((hash >>> 14) % 90) + 10).padStart(2, '0');
+    const e = String(((hash >>> 20) % 9) + 1);
+    const f = String(((hash >>> 24) % 9) + 1);
+    return `${a} ${b} ${c} ${d} ${e} ${f}`;
+}
+
+function normalizeLifespanEntry(value, key = '') {
+    const entry = value && typeof value === 'object' ? value : {};
+    const yearsRemaining = Math.max(0, Math.floor(Number(entry.yearsRemaining) || 0));
+    const seed = String(entry.seed || key || '').trim();
+    const displayCode = String(entry.displayCode || '').trim()
+        || buildShinigamiLifespanDisplayCode(yearsRemaining || 1, seed || key);
+    return {
+        key: String(entry.key || key || '').trim(),
+        yearsRemaining,
+        displayCode,
+        seed,
+        seededAt: normalizeTransferredAt(entry.seededAt),
+    };
+}
+
+function normalizeShinigamiEyesState(value) {
+    const defaults = createDefaultShinigamiEyesState();
+    const eyes = value && typeof value === 'object' ? value : {};
+    const lifespansRaw = eyes.lifespans && typeof eyes.lifespans === 'object' ? eyes.lifespans : {};
+    const lifespans = {};
+    for (const [key, entry] of Object.entries(lifespansRaw)) {
+        const normalizedKey = String(key || '').trim();
+        if (!normalizedKey) {
+            continue;
+        }
+        lifespans[normalizedKey] = normalizeLifespanEntry(entry, normalizedKey);
+    }
+
+    const active = Boolean(eyes.active);
+    const dealCount = Math.max(0, Math.floor(Number(eyes.dealCount) || 0));
+    let originalLifespanYears = Math.max(
+        1,
+        Math.floor(Number(eyes.originalLifespanYears) || defaults.originalLifespanYears),
+    );
+    let remainingLifespanYears = Math.max(
+        0,
+        Math.floor(Number(eyes.remainingLifespanYears) || (
+            active ? Math.floor(originalLifespanYears / 2) : originalLifespanYears
+        )),
+    );
+
+    // Before any Eye deal, keep lifespan in sync with the editable settings default.
+    if (!active && dealCount === 0) {
+        originalLifespanYears = defaults.originalLifespanYears;
+        remainingLifespanYears = defaults.remainingLifespanYears;
+    }
+
+    return {
+        active,
+        dealCount,
+        grantedBy: normalizeActorRef(eyes.grantedBy, NOTEBOOK_ACTOR_TYPES.SHINIGAMI, ''),
+        acceptedAt: normalizeTransferredAt(eyes.acceptedAt),
+        originalLifespanYears,
+        remainingLifespanYears,
+        lifespans,
     };
 }
 
@@ -1651,6 +1754,7 @@ export function getChatState() {
     state.notebooks = normalizeNotebookCollection(state.notebooks, state);
     state.selectedNotebookId = getSelectedNotebookId(state);
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
+    state.shinigamiEyes = normalizeShinigamiEyesState(state.shinigamiEyes);
     state.identityTheft = normalizeIdentityTheftState(state.identityTheft);
     const selectedNotebook = ensureSelectedNotebook(state) || createDefaultNotebookState();
     state.ownership = cloneActorOwnershipState(selectedNotebook);
@@ -1720,6 +1824,166 @@ export function getNameKnowledgeState() {
     const state = getChatState();
     state.nameKnowledge = normalizeNameKnowledgeState(state.nameKnowledge);
     return state.nameKnowledge;
+}
+
+export function getShinigamiEyesState() {
+    const state = getChatState();
+    state.shinigamiEyes = normalizeShinigamiEyesState(state.shinigamiEyes);
+    return state.shinigamiEyes;
+}
+
+export function userHasShinigamiEyes() {
+    return Boolean(getShinigamiEyesState().active);
+}
+
+function ensureActorLifespanEntry(state, actor, options = {}) {
+    state.shinigamiEyes = normalizeShinigamiEyesState(state.shinigamiEyes);
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKnowledgeKey(normalized);
+    if (!key || normalized.type === NOTEBOOK_ACTOR_TYPES.SHINIGAMI || normalized.type === NOTEBOOK_ACTOR_TYPES.USER) {
+        return null;
+    }
+
+    const existing = state.shinigamiEyes.lifespans[key];
+    if (existing && Number.isFinite(Number(existing.yearsRemaining))) {
+        return existing;
+    }
+
+    const hash = hashLifespanSeed(key);
+    const yearsRemaining = Math.max(
+        1,
+        Math.floor(Number(options.yearsRemaining)) || ((hash % 55) + 12),
+    );
+    const entry = normalizeLifespanEntry({
+        key,
+        yearsRemaining,
+        seed: key,
+        displayCode: buildShinigamiLifespanDisplayCode(yearsRemaining, key),
+        seededAt: Date.now(),
+    }, key);
+    state.shinigamiEyes.lifespans[key] = entry;
+    return entry;
+}
+
+export function getActorShinigamiLifespan(actor) {
+    const state = getChatState();
+    return ensureActorLifespanEntry(state, actor);
+}
+
+export function getShinigamiEyesRoster() {
+    const eyes = getShinigamiEyesState();
+    if (!eyes.active) {
+        return [];
+    }
+
+    return getCurrentChatCharacterActors()
+        .filter((actor) => actor && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER)
+        .map((actor) => {
+            const lifespan = getActorShinigamiLifespan(actor);
+            return {
+                actor,
+                key: getActorKnowledgeKey(actor),
+                trueName: String(actor.name || '').trim(),
+                yearsRemaining: lifespan?.yearsRemaining ?? null,
+                displayCode: lifespan?.displayCode || '',
+            };
+        });
+}
+
+function revealAllHumanNamesForEyes(state, reason = 'Shinigami Eyes revealed this name.') {
+    const roster = collectCurrentChatActors();
+    let changed = false;
+    for (const actor of roster) {
+        if (!actor || actor.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+            continue;
+        }
+        ensureActorLifespanEntry(state, actor);
+        if (learnCharacterName(actor, {
+            source: 'shinigami_eyes',
+            reason,
+            timestamp: Date.now(),
+        })) {
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+export function getLinkedShinigamiForEyesDeal(notebookId = '') {
+    const notebooks = getDeathNotes();
+    const preferredId = String(notebookId || '').trim();
+    const candidates = notebooks.filter((entry) => {
+        if (!entry || entry.destroyed || !entry.exists) {
+            return false;
+        }
+        const linked = normalizeShinigamiLinkState(entry.linkedShinigami);
+        return linked.active && (linked.actor.name || linked.avatar);
+    });
+    if (!candidates.length) {
+        return null;
+    }
+    if (preferredId) {
+        const preferred = candidates.find((entry) => entry.itemId === preferredId);
+        if (preferred) {
+            return normalizeShinigamiLinkState(preferred.linkedShinigami);
+        }
+    }
+    return normalizeShinigamiLinkState(candidates[0].linkedShinigami);
+}
+
+export function acceptShinigamiEyesDeal(options = {}) {
+    const state = getChatState();
+    state.shinigamiEyes = normalizeShinigamiEyesState(state.shinigamiEyes);
+    const linked = getLinkedShinigamiForEyesDeal(options.notebookItemId);
+    if (!linked?.active) {
+        return { applied: false, reason: 'no_linked_shinigami' };
+    }
+
+    const timestamp = normalizeTransferredAt(options.timestamp) ?? Date.now();
+    const beforeYears = Math.max(1, Math.floor(Number(state.shinigamiEyes.remainingLifespanYears) || DEFAULT_USER_LIFESPAN_YEARS));
+    const afterYears = Math.max(0, Math.floor(beforeYears / 2));
+    const isSecondDeal = state.shinigamiEyes.active || state.shinigamiEyes.dealCount > 0;
+
+    if (!state.shinigamiEyes.active) {
+        state.shinigamiEyes.originalLifespanYears = beforeYears;
+    }
+
+    state.shinigamiEyes.active = true;
+    state.shinigamiEyes.dealCount = Math.max(0, Math.floor(Number(state.shinigamiEyes.dealCount) || 0)) + 1;
+    state.shinigamiEyes.grantedBy = normalizeActorRef(linked.actor, NOTEBOOK_ACTOR_TYPES.SHINIGAMI, linked.actor.name);
+    state.shinigamiEyes.acceptedAt = timestamp;
+    state.shinigamiEyes.remainingLifespanYears = afterYears;
+
+    revealAllHumanNamesForEyes(state, 'Shinigami Eyes made this true name visible.');
+
+    pushInventoryHistory(state, {
+        action: isSecondDeal ? 'shinigami_eyes_second_deal' : 'shinigami_eyes_deal',
+        itemId: linked.notebookItemId || '',
+        detail: String(options.reason || '').trim()
+            || `${linked.actor.name || 'A Shinigami'} granted Shinigami Eyes. Lifespan reduced from ${beforeYears} to ${afterYears} years.`,
+        actor: state.shinigamiEyes.grantedBy,
+        target: createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User'),
+        timestamp,
+    });
+
+    return {
+        applied: true,
+        reason: isSecondDeal ? 'second_deal' : 'first_deal',
+        beforeYears,
+        afterYears,
+        remainingLifespanYears: afterYears,
+        dealCount: state.shinigamiEyes.dealCount,
+        grantedBy: state.shinigamiEyes.grantedBy,
+    };
+}
+
+export function syncShinigamiEyesNameReveals() {
+    const state = getChatState();
+    state.shinigamiEyes = normalizeShinigamiEyesState(state.shinigamiEyes);
+    if (!state.shinigamiEyes.active) {
+        return false;
+    }
+    return revealAllHumanNamesForEyes(state, 'Shinigami Eyes made this true name visible.');
 }
 
 export function getLinkedShinigami(notebookId = '') {

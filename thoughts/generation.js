@@ -19,6 +19,7 @@ import {
     getDeathNotePromptInjectionMessage,
     getIdentityTheftPromptInjectionMessage,
     getNotebookRevealPromptInjectionMessage,
+    getShinigamiEyesPromptInjectionMessage,
 } from '../deathnote/prompts.js';
 import { getPresencePromptInjectionMessage } from '../presence/prompts.js';
 import { persistChatChanges as persistDeathNoteChatChanges, tickDeathNoteCountdownForGeneration } from '../deathnote/core.js';
@@ -268,6 +269,12 @@ export function installInterceptor() {
         if (presenceInjection) {
             const insertAt = Math.max(chat.length - 1, 0);
             chat.splice(insertAt, 0, presenceInjection);
+        }
+
+        const shinigamiEyesInjection = getShinigamiEyesPromptInjectionMessage();
+        if (shinigamiEyesInjection) {
+            const insertAt = Math.max(chat.length - 1, 0);
+            chat.splice(insertAt, 0, shinigamiEyesInjection);
         }
 
         const settings = getSettings();
