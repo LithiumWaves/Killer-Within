@@ -1,4 +1,4 @@
-import { DEFAULT_USER_LIFESPAN_YEARS, FLOATING_ID, NOTEBOOK_ACTOR_TYPES, NOTEBOOK_USER_ACCESS } from './config.js';
+import { DEFAULT_USER_LIFESPAN_YEARS, FLOATING_ID, NOTEBOOK_ACTOR_TYPES, NOTEBOOK_USER_ACCESS, PLAY_ROLES } from './config.js';
 import {
     addNotebookToucher,
     acceptShinigamiEyesDeal,
@@ -64,6 +64,8 @@ import {
     renderThoughtPromptSettingsHtml,
     syncThoughtSettingsUi,
 } from '../thoughts/ui.js';
+import { isInvestigatorRole, setPlayRole } from '../investigator/core.js';
+import { refreshInvestigatorUi } from '../investigator/ui.js';
 
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
@@ -1216,6 +1218,7 @@ function syncShinigamiEyesOverlay($message, actor) {
 
     const existing = Array.from(messageRoot.querySelectorAll('.kw-shinigami-eyes-overlay'));
     const canShow = userHasShinigamiEyes()
+        && !isInvestigatorRole()
         && actor
         && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
         && !isLinkedDeathNoteShinigami(actor)
@@ -2295,6 +2298,10 @@ function getSettingsHost() {
 
 function syncSettingsUi() {
     const settings = getSettings();
+    const playRole = String(settings.playRole || PLAY_ROLES.KIRA).toLowerCase() === PLAY_ROLES.INVESTIGATOR
+        ? PLAY_ROLES.INVESTIGATOR
+        : PLAY_ROLES.KIRA;
+    $('#kw-deathnote-play-role').val(playRole);
     $('#kw-deathnote-font-mode').val(settings.fontMode === 'script' ? 'script' : 'print');
     $('#kw-deathnote-require-known-names').prop('checked', Boolean(settings.requireKnownNamesForKills));
     $('#kw-deathnote-permanent-notebook').prop('checked', Boolean(settings.permanentResolvedNotebookEntries));
@@ -2317,6 +2324,13 @@ function syncSettingsUi() {
 }
 
 function bindSettingsUi() {
+    $('#kw-deathnote-play-role').off('change').on('change', (event) => {
+        const value = String($(event.currentTarget).val() || PLAY_ROLES.KIRA).trim().toLowerCase();
+        setPlayRole(value === PLAY_ROLES.INVESTIGATOR ? PLAY_ROLES.INVESTIGATOR : PLAY_ROLES.KIRA);
+        refreshDeathNoteUi();
+        refreshInvestigatorUi();
+    });
+
     $('#kw-deathnote-font-mode').off('input').on('input', (event) => {
         const value = String($(event.currentTarget).val() || 'print').trim().toLowerCase();
         getSettings().fontMode = value === 'script' ? 'script' : 'print';
@@ -2768,8 +2782,28 @@ function bindSettingsUi() {
 }
 
 function renderInventorySettingsContentHtml() {
+    const settings = getSettings();
+    const playRole = String(settings.playRole || PLAY_ROLES.KIRA).toLowerCase() === PLAY_ROLES.INVESTIGATOR
+        ? PLAY_ROLES.INVESTIGATOR
+        : PLAY_ROLES.KIRA;
     return `
         <div class="kw-dn-settings-modal__sections">
+            <section class="kw-dn-settings-modal__section">
+                <div class="kw-dn-settings-modal__section-head">
+                    <div class="kw-dn-settings-modal__eyebrow">Play</div>
+                    <div class="kw-dn-settings-modal__section-title">Role</div>
+                </div>
+                <div class="kw-dn-settings-modal__section-body">
+                    <label class="killer-within-settings__field">
+                        <span>User play role</span>
+                        <select id="kw-deathnote-play-role" class="text_pole">
+                            <option value="${PLAY_ROLES.KIRA}" ${playRole === PLAY_ROLES.KIRA ? 'selected' : ''}>Kira — Death Note / Eyes / inventory</option>
+                            <option value="${PLAY_ROLES.INVESTIGATOR}" ${playRole === PLAY_ROLES.INVESTIGATOR ? 'selected' : ''}>Investigator — Task Force terminal</option>
+                        </select>
+                        <small>V1: one role at a time. Investigator hides gothic Death Note tools and opens a clinical hub.</small>
+                    </label>
+                </div>
+            </section>
             <section class="kw-dn-settings-modal__section">
                 <div class="kw-dn-settings-modal__section-head">
                     <div class="kw-dn-settings-modal__eyebrow">Notebook</div>
@@ -3257,7 +3291,7 @@ function ensureInventoryTray() {
     const settings = getSettings();
     const existing = document.getElementById(INVENTORY_ID);
 
-    if (!settings.enabled) {
+    if (!settings.enabled || isInvestigatorRole()) {
         if (existing) {
             existing.remove();
         }
@@ -3415,7 +3449,7 @@ function buildWidgetHtml() {
 
 function ensureWidget() {
     const settings = getSettings();
-    if (!settings.enabled || (!settings.showFloatingButton && !settings.isOpen)) {
+    if (!settings.enabled || isInvestigatorRole() || (!settings.showFloatingButton && !settings.isOpen)) {
         const existing = document.getElementById(FLOATING_ID);
         if (existing) {
             existing.remove();
