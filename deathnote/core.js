@@ -21,7 +21,7 @@ export function getContext() {
 
 function getActiveChatCacheKey(context) {
     if (!context) {
-        return 'global';
+        return '';
     }
 
     const chatId = String(context?.chatId ?? '').trim();
@@ -34,11 +34,9 @@ function getActiveChatCacheKey(context) {
         return `group:${groupId}`;
     }
 
-    if (Number.isFinite(Number(context?.characterId))) {
-        return `character:${Number(context.characterId)}`;
-    }
-
-    return 'global';
+    // Character/global fallbacks are too coarse and can leak Eyes / notebook
+    // ownership across chats. Prefer no cache key over an unstable shared key.
+    return '';
 }
 
 function bindCachedChatState(context) {
@@ -46,18 +44,50 @@ function bindCachedChatState(context) {
         return createDefaultChatState();
     }
 
-    const cacheKey = getActiveChatCacheKey(context);
-    const cachedState = cacheKey ? liveChatStateCache.get(cacheKey) : null;
     context.chatMetadata ??= {};
-    if (cachedState && context.chatMetadata[CHAT_METADATA_KEY] !== cachedState) {
+    const cacheKey = getActiveChatCacheKey(context);
+    const metadataState = context.chatMetadata[CHAT_METADATA_KEY];
+
+    // Chat metadata is authoritative. Never overwrite a loaded chat bag with a
+    // cached object from another visit/key — that leaked Shinigami Eyes deals.
+    if (metadataState && typeof metadataState === 'object') {
+        if (cacheKey) {
+            liveChatStateCache.set(cacheKey, metadataState);
+        }
+        return metadataState;
+    }
+
+    const cachedState = cacheKey ? liveChatStateCache.get(cacheKey) : null;
+    if (cachedState && typeof cachedState === 'object') {
         context.chatMetadata[CHAT_METADATA_KEY] = cachedState;
+        return cachedState;
     }
-    context.chatMetadata[CHAT_METADATA_KEY] ??= createDefaultChatState();
-    const state = context.chatMetadata[CHAT_METADATA_KEY];
+
+    const created = createDefaultChatState();
+    context.chatMetadata[CHAT_METADATA_KEY] = created;
     if (cacheKey) {
-        liveChatStateCache.set(cacheKey, state);
+        liveChatStateCache.set(cacheKey, created);
     }
-    return state;
+    return created;
+}
+
+/**
+ * Rebind live cache to the active chat's metadata after CHAT_CHANGED.
+ * Drops unstable legacy cache keys so Eyes ownership cannot bleed across chats.
+ */
+export function syncChatStateCacheFromMetadata() {
+    const context = getContext();
+    if (!context) {
+        return null;
+    }
+
+    for (const key of [...liveChatStateCache.keys()]) {
+        if (key === 'global' || key.startsWith('character:')) {
+            liveChatStateCache.delete(key);
+        }
+    }
+
+    return bindCachedChatState(context);
 }
 
 export function getSettings() {
@@ -388,6 +418,7 @@ function createDefaultShinigamiEyesState() {
     return {
         active: false,
         dealCount: 0,
+        owner: createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User'),
         grantedBy: createActorRef(NOTEBOOK_ACTOR_TYPES.SHINIGAMI, ''),
         acceptedAt: null,
         originalLifespanYears: defaultYears,
@@ -673,6 +704,11 @@ function normalizeShinigamiEyesState(value) {
     return {
         active,
         dealCount,
+        owner: normalizeActorRef(
+            eyes.owner,
+            NOTEBOOK_ACTOR_TYPES.USER,
+            defaults.owner.name || 'User',
+        ),
         grantedBy: normalizeActorRef(eyes.grantedBy, NOTEBOOK_ACTOR_TYPES.SHINIGAMI, ''),
         acceptedAt: normalizeTransferredAt(eyes.acceptedAt),
         originalLifespanYears,
@@ -1950,6 +1986,7 @@ export function acceptShinigamiEyesDeal(options = {}) {
 
     state.shinigamiEyes.active = true;
     state.shinigamiEyes.dealCount = Math.max(0, Math.floor(Number(state.shinigamiEyes.dealCount) || 0)) + 1;
+    state.shinigamiEyes.owner = createActorRef(NOTEBOOK_ACTOR_TYPES.USER, 'User');
     state.shinigamiEyes.grantedBy = normalizeActorRef(linked.actor, NOTEBOOK_ACTOR_TYPES.SHINIGAMI, linked.actor.name);
     state.shinigamiEyes.acceptedAt = timestamp;
     state.shinigamiEyes.remainingLifespanYears = afterYears;

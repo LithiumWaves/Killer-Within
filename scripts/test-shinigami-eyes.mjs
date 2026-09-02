@@ -1,22 +1,30 @@
 /**
- * Headless checks for Shinigami Eyes V1 deal / lifespan / prompt wiring.
- * Mocks SillyTavern.getContext with an in-memory chat metadata bag.
+ * Headless checks for Shinigami Eyes V1 deal / lifespan / prompt wiring,
+ * plus chat-scoped ownership isolation.
  */
 import assert from 'node:assert/strict';
-import { MODULE_NAME, NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
+import { CHAT_METADATA_KEY, MODULE_NAME, NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
 
-const chatMetadata = {};
+const metadataByChatId = new Map();
 const extensionSettings = {
     [MODULE_NAME]: {},
 };
 
 let chatId = 'eyes-test-chat';
+let characterId = 0;
+
+function ensureChatMetadata(id) {
+    if (!metadataByChatId.has(id)) {
+        metadataByChatId.set(id, {});
+    }
+    return metadataByChatId.get(id);
+}
 
 globalThis.SillyTavern = {
     getContext() {
         return {
             chatId,
-            chatMetadata,
+            chatMetadata: ensureChatMetadata(chatId),
             extensionSettings,
             chat: [],
             characters: [
@@ -24,7 +32,7 @@ globalThis.SillyTavern = {
                 { avatar: 'ryuk.png', name: 'Ryuk', description: 'Shinigami' },
             ],
             groups: null,
-            characterId: 0,
+            characterId,
         };
     },
 };
@@ -36,19 +44,42 @@ const {
     getSettings,
     getShinigamiEyesState,
     linkNotebookShinigami,
+    syncChatStateCacheFromMetadata,
     userHasShinigamiEyes,
 } = await import('../deathnote/core.js');
 
 const { getShinigamiEyesPromptInjectionMessage } = await import('../deathnote/prompts.js');
 
+function switchChat(nextChatId, nextCharacterId = 0) {
+    chatId = String(nextChatId);
+    characterId = nextCharacterId;
+    syncChatStateCacheFromMetadata();
+}
+
 function resetEyesState() {
     const settings = getSettings();
     settings.defaultUserLifespanYears = 72;
     settings.enabled = true;
-    chatId = `eyes-test-chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    for (const key of Object.keys(chatMetadata)) {
-        delete chatMetadata[key];
-    }
+    metadataByChatId.clear();
+    switchChat(`eyes-test-chat-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+}
+
+function seedLinkedShinigami() {
+    const notebook = createDeathNote({
+        holder: { type: NOTEBOOK_ACTOR_TYPES.USER, name: 'User' },
+        owner: { type: NOTEBOOK_ACTOR_TYPES.USER, name: 'User' },
+    });
+    assert.ok(notebook?.itemId);
+    linkNotebookShinigami({
+        type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
+        id: 'ryuk.png',
+        name: 'Ryuk',
+    }, {
+        notebookItemId: notebook.itemId,
+        avatar: 'ryuk.png',
+        name: 'Ryuk',
+    });
+    return notebook;
 }
 
 resetEyesState();
@@ -59,6 +90,7 @@ resetEyesState();
     assert.equal(eyes.active, false);
     assert.equal(eyes.dealCount, 0);
     assert.equal(eyes.remainingLifespanYears, 72);
+    assert.equal(eyes.owner?.type, NOTEBOOK_ACTOR_TYPES.USER);
     assert.equal(userHasShinigamiEyes(), false);
     assert.equal(getShinigamiEyesPromptInjectionMessage(), null);
 }
@@ -70,21 +102,7 @@ resetEyesState();
     assert.equal(blocked.reason, 'no_linked_shinigami');
 }
 
-const notebook = createDeathNote({
-    holder: { type: NOTEBOOK_ACTOR_TYPES.USER, name: 'User' },
-    owner: { type: NOTEBOOK_ACTOR_TYPES.USER, name: 'User' },
-});
-assert.ok(notebook?.itemId);
-
-linkNotebookShinigami({
-    type: NOTEBOOK_ACTOR_TYPES.SHINIGAMI,
-    id: 'ryuk.png',
-    name: 'Ryuk',
-}, {
-    notebookItemId: notebook.itemId,
-    avatar: 'ryuk.png',
-    name: 'Ryuk',
-});
+seedLinkedShinigami();
 
 // First deal: irreversible half-life + Eyes active.
 {
@@ -102,6 +120,8 @@ linkNotebookShinigami({
     assert.equal(eyes.originalLifespanYears, 72);
     assert.equal(eyes.remainingLifespanYears, 36);
     assert.equal(eyes.grantedBy?.name, 'Ryuk');
+    assert.equal(eyes.owner?.type, NOTEBOOK_ACTOR_TYPES.USER);
+    assert.ok(ensureChatMetadata(chatId)[CHAT_METADATA_KEY]?.shinigamiEyes?.active);
 }
 
 // Soft death-clock / Eyes prompt injection present after deal.
@@ -137,6 +157,36 @@ linkNotebookShinigami({
     assert.equal(getShinigamiEyesState().remainingLifespanYears, 18);
 }
 
+const chatA = chatId;
+
+// Switching chats must not carry Eyes ownership into the other chat,
+// even when both chats share the same characterId.
+{
+    switchChat('eyes-chat-b', 0);
+    assert.equal(userHasShinigamiEyes(), false);
+    assert.equal(getShinigamiEyesState().active, false);
+    assert.equal(getShinigamiEyesState().dealCount, 0);
+    assert.equal(getShinigamiEyesState().remainingLifespanYears, 72);
+    assert.equal(getShinigamiEyesPromptInjectionMessage(), null);
+
+    // Accepting Eyes in chat B stays on chat B only.
+    seedLinkedShinigami();
+    const dealB = acceptShinigamiEyesDeal({});
+    assert.equal(dealB.applied, true);
+    assert.equal(dealB.afterYears, 36);
+    assert.equal(userHasShinigamiEyes(), true);
+
+    switchChat(chatA, 0);
+    assert.equal(userHasShinigamiEyes(), true);
+    assert.equal(getShinigamiEyesState().remainingLifespanYears, 18);
+    assert.equal(getShinigamiEyesState().dealCount, 2);
+
+    switchChat('eyes-chat-b', 0);
+    assert.equal(userHasShinigamiEyes(), true);
+    assert.equal(getShinigamiEyesState().remainingLifespanYears, 36);
+    assert.equal(getShinigamiEyesState().dealCount, 1);
+}
+
 // Default lifespan setting syncs only before any deal.
 {
     resetEyesState();
@@ -146,4 +196,10 @@ linkNotebookShinigami({
     assert.equal(eyes.originalLifespanYears, 80);
 }
 
-console.log('Shinigami Eyes V1 checks passed.');
+// Eyes deal fields must not live in extension settings.
+{
+    assert.equal(Object.hasOwn(getSettings(), 'shinigamiEyes'), false);
+    assert.equal(Object.hasOwn(extensionSettings[MODULE_NAME], 'shinigamiEyes'), false);
+}
+
+console.log('Shinigami Eyes V1 + chat-scope checks passed.');

@@ -7,6 +7,7 @@ import {
     consumePendingIdentityTheftExposureForMessage,
     getSettings,
     reconcileEntriesFromNotebookText,
+    syncChatStateCacheFromMetadata,
 } from './core.js';
 import { registerEventHandlers } from './events.js';
 import { resolveDueEntriesForAssistantMessage } from './core.js';
@@ -19,7 +20,10 @@ export function setupDeathNoteExtension() {
         reconcileEntriesFromNotebookText();
         setupDeathNoteUi();
         registerEventHandlers({
-            onChatChanged: refreshDeathNoteUi,
+            onChatChanged: () => {
+                syncChatStateCacheFromMetadata();
+                refreshDeathNoteUi();
+            },
             onAssistantMessage: resolveDueEntriesForAssistantMessage,
             onMessageAdded: async (messageIndex, details = {}) => {
                 const assistantResult = details && details.assistantResult ? details.assistantResult : null;
