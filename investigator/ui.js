@@ -1,4 +1,4 @@
-import { INVESTIGATOR_HUB_ID, PLAY_ROLES, SUSPECT_STATUSES, EVIDENCE_TYPES } from './config.js';
+import { INVESTIGATOR_HUB_ID, INVESTIGATOR_WORKSTATION_ID, PLAY_ROLES, SUSPECT_STATUSES, EVIDENCE_TYPES } from './config.js';
 import {
     commitInvestigatorMutation,
     getBoardSuspectChoices,
@@ -23,25 +23,12 @@ import {
 import { NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
 
 const MOBILE_VIEWPORT_MAX = 720;
-const LAUNCHER_ID = 'kw-investigator-launcher';
 const SCREENS = Object.freeze({
     BOARD: 'board',
     TIMELINE: 'timeline',
     LOCKER: 'locker',
     OPS: 'ops',
 });
-
-let hubDragState = {
-    dragging: false,
-    startX: 0,
-    startY: 0,
-    originX: 0,
-    originY: 0,
-    pointerId: null,
-    handlersInstalled: false,
-    moveHandler: null,
-    upHandler: null,
-};
 
 let refreshDeathNoteUiHook = null;
 
@@ -113,24 +100,6 @@ function setActiveScreen(screen) {
     settings.activeScreen = next;
     scheduleInvestigatorSettingsSave();
     refreshInvestigatorUi();
-}
-
-function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-}
-
-function resolveHubPosition(root) {
-    const settings = getInvestigatorSettings();
-    const width = root?.offsetWidth || 720;
-    const height = root?.offsetHeight || 480;
-    const maxX = Math.max(0, window.innerWidth - width);
-    const maxY = Math.max(0, window.innerHeight - height);
-    const x = Number.isFinite(Number(settings.hubX)) ? Number(settings.hubX) : Math.max(24, Math.round((window.innerWidth - width) / 2));
-    const y = Number.isFinite(Number(settings.hubY)) ? Number(settings.hubY) : Math.max(24, Math.round((window.innerHeight - height) / 5));
-    return {
-        x: clamp(x, 0, maxX),
-        y: clamp(y, 0, maxY),
-    };
 }
 
 function renderNavHtml(activeScreen) {
@@ -372,11 +341,11 @@ function renderOpsScreen(state) {
                     <label class="kw-investigator-field">
                         <span>Play role</span>
                         <select id="kw-investigator-play-role" class="text_pole">
-                            <option value="${PLAY_ROLES.INVESTIGATOR}" selected>Investigator (Task Force hub)</option>
+                            <option value="${PLAY_ROLES.INVESTIGATOR}" selected>Investigator (Task Force terminal)</option>
                             <option value="${PLAY_ROLES.KIRA}">Kira (Death Note tools)</option>
                         </select>
                     </label>
-                    <small class="kw-investigator-hint">V1: one role at a time. Gothic Death Note UI stays on the Kira side.</small>
+                    <small class="kw-investigator-hint">One role at a time. Switching roles swaps which tools are available.</small>
                 </div>
                 <div class="kw-investigator-panel">
                     <div class="kw-investigator-subhead">Mark restrained</div>
@@ -427,7 +396,7 @@ function buildHubHtml(settings, state) {
     const mobile = isMobileViewport();
     return `
         <div class="kw-investigator-hub__chrome">
-            <header class="kw-investigator-hub__titlebar" data-inv-drag="${mobile ? 'false' : 'true'}">
+            <header class="kw-investigator-hub__titlebar">
                 <div class="kw-investigator-hub__brand">
                     <span class="kw-investigator-hub__led" aria-hidden="true"></span>
                     <div>
@@ -436,8 +405,7 @@ function buildHubHtml(settings, state) {
                     </div>
                 </div>
                 <div class="kw-investigator-hub__window-controls">
-                    ${mobile ? '' : '<button type="button" class="kw-investigator-hub__winbtn" data-inv-close title="Close">×</button>'}
-                    ${mobile ? '<button type="button" class="kw-investigator-hub__winbtn" data-inv-close title="Close">Done</button>' : ''}
+                    <button type="button" class="kw-investigator-hub__winbtn" data-inv-close title="Lock terminal">${mobile ? 'Lock' : 'Lock session'}</button>
                 </div>
             </header>
             <nav class="kw-investigator-nav ${mobile ? 'kw-investigator-nav--dock' : ''}" aria-label="Hub screens">
@@ -454,29 +422,47 @@ function buildHubHtml(settings, state) {
     `;
 }
 
-function ensureLauncher() {
-    let root = document.getElementById(LAUNCHER_ID);
-    if (!isInvestigatorRole()) {
+function ensureWorkstation() {
+    let root = document.getElementById(INVESTIGATOR_WORKSTATION_ID);
+    const settings = getInvestigatorSettings();
+    const shouldShow = isInvestigatorRole() && !settings.hubOpen;
+
+    if (!shouldShow) {
         if (root) {
             root.remove();
         }
         return null;
     }
 
+    const state = getInvestigatorState();
+    const mobile = isMobileViewport();
+
     if (!root) {
-        root = document.createElement('button');
-        root.id = LAUNCHER_ID;
-        root.type = 'button';
-        root.className = 'kw-investigator-launcher';
-        root.setAttribute('aria-label', 'Open Task Force terminal');
+        root = document.createElement('div');
+        root.id = INVESTIGATOR_WORKSTATION_ID;
         document.body.append(root);
     }
 
-    const settings = getInvestigatorSettings();
-    root.hidden = Boolean(settings.hubOpen);
+    root.className = `kw-investigator-workstation ${mobile ? 'is-mobile' : 'is-desktop'}`;
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+    root.setAttribute('aria-label', 'Task Force workstation');
     root.innerHTML = `
-        <span class="kw-investigator-launcher__glyph" aria-hidden="true"></span>
-        <span class="kw-investigator-launcher__label">TF Terminal</span>
+        <div class="kw-investigator-workstation__room">
+            <div class="kw-investigator-workstation__desk" aria-hidden="true"></div>
+            <button type="button" class="kw-investigator-workstation__monitor" data-inv-wake>
+                <span class="kw-investigator-workstation__bezel">
+                    <span class="kw-investigator-workstation__crt">
+                        <span class="kw-investigator-workstation__scan" aria-hidden="true"></span>
+                        <span class="kw-investigator-workstation__led" aria-hidden="true"></span>
+                        <span class="kw-investigator-workstation__os">TASK FORCE WORKSTATION</span>
+                        <span class="kw-investigator-workstation__case">${escapeHtml(state.caseId)}</span>
+                        <span class="kw-investigator-workstation__prompt">${mobile ? 'Tap screen to log in' : 'Click screen to log in'}</span>
+                    </span>
+                </span>
+            </button>
+            <p class="kw-investigator-workstation__hint">Sit down at the terminal to continue the case.</p>
+        </div>
     `;
     return root;
 }
@@ -504,7 +490,7 @@ function ensureHub() {
 
     root.className = `kw-investigator-hub ${mobile ? 'is-mobile' : 'is-desktop'}`;
     root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-modal', mobile ? 'true' : 'false');
+    root.setAttribute('aria-modal', 'true');
     root.innerHTML = buildHubHtml(settings, state);
 
     if (mobile) {
@@ -513,16 +499,12 @@ function ensureHub() {
         root.style.right = '0';
         root.style.bottom = '0';
     } else {
-        const position = resolveHubPosition(root);
-        root.style.left = `${position.x}px`;
-        root.style.top = `${position.y}px`;
-        root.style.right = 'auto';
-        root.style.bottom = 'auto';
-        if (settings.hubX !== position.x || settings.hubY !== position.y) {
-            settings.hubX = position.x;
-            settings.hubY = position.y;
-            scheduleInvestigatorSettingsSave();
-        }
+        // Desktop: also immersive full-bleed terminal session (GTA computer sit-down).
+        root.style.left = '0';
+        root.style.top = '0';
+        root.style.right = '0';
+        root.style.bottom = '0';
+        root.classList.add('is-immersive');
     }
 
     return root;
@@ -549,16 +531,33 @@ async function handleRoleChange(nextRole) {
     if (!changed && getPlayRole() === nextRole) {
         return;
     }
-    if (nextRole === PLAY_ROLES.KIRA) {
-        closeHub();
+    if (nextRole === PLAY_ROLES.INVESTIGATOR) {
+        const settings = getInvestigatorSettings();
+        settings.hubOpen = true;
+        settings.hubCollapsed = false;
+        scheduleInvestigatorSettingsSave();
+    } else {
+        const settings = getInvestigatorSettings();
+        settings.hubOpen = false;
+        scheduleInvestigatorSettingsSave();
     }
     refreshDeathNoteUiHook?.();
     refreshInvestigatorUi();
     globalThis.toastr?.info?.(
         nextRole === PLAY_ROLES.INVESTIGATOR
-            ? 'Switched to Investigator terminal.'
-            : 'Switched to Kira tools.',
+            ? 'Logging into Task Force terminal…'
+            : 'Returned to Death Note tools.',
     );
+}
+
+function bindWorkstation(root) {
+    if (!root) {
+        return;
+    }
+    const wake = root.querySelector('[data-inv-wake]');
+    if (wake) {
+        wake.addEventListener('click', () => openHub());
+    }
 }
 
 function bindHubInteractions(root) {
@@ -677,70 +676,6 @@ function bindHubInteractions(root) {
             refreshInvestigatorUi();
         });
     });
-
-    if (!isMobileViewport()) {
-        installHubDrag(root);
-    }
-}
-
-function installHubDrag(root) {
-    const handle = root.querySelector('[data-inv-drag="true"]');
-    if (!(handle instanceof HTMLElement)) {
-        return;
-    }
-
-    handle.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) {
-            return;
-        }
-        if (event.target instanceof HTMLElement && event.target.closest('button, select, input, textarea, a')) {
-            return;
-        }
-        const settings = getInvestigatorSettings();
-        hubDragState.dragging = true;
-        hubDragState.startX = event.clientX;
-        hubDragState.startY = event.clientY;
-        hubDragState.originX = Number(settings.hubX) || root.offsetLeft || 0;
-        hubDragState.originY = Number(settings.hubY) || root.offsetTop || 0;
-        hubDragState.pointerId = event.pointerId;
-        handle.setPointerCapture?.(event.pointerId);
-
-        if (!hubDragState.handlersInstalled) {
-            hubDragState.moveHandler = (moveEvent) => {
-                if (!hubDragState.dragging) {
-                    return;
-                }
-                const dx = moveEvent.clientX - hubDragState.startX;
-                const dy = moveEvent.clientY - hubDragState.startY;
-                const width = root.offsetWidth || 720;
-                const height = root.offsetHeight || 480;
-                const nextX = clamp(hubDragState.originX + dx, 0, Math.max(0, window.innerWidth - width));
-                const nextY = clamp(hubDragState.originY + dy, 0, Math.max(0, window.innerHeight - height));
-                root.style.left = `${nextX}px`;
-                root.style.top = `${nextY}px`;
-                settings.hubX = nextX;
-                settings.hubY = nextY;
-            };
-            hubDragState.upHandler = () => {
-                if (!hubDragState.dragging) {
-                    return;
-                }
-                hubDragState.dragging = false;
-                scheduleInvestigatorSettingsSave();
-            };
-            window.addEventListener('pointermove', hubDragState.moveHandler);
-            window.addEventListener('pointerup', hubDragState.upHandler);
-            hubDragState.handlersInstalled = true;
-        }
-    });
-}
-
-function bindLauncher() {
-    const launcher = document.getElementById(LAUNCHER_ID);
-    if (!launcher) {
-        return;
-    }
-    launcher.onclick = () => openHub();
 }
 
 export function refreshInvestigatorUi() {
@@ -749,9 +684,9 @@ export function refreshInvestigatorUi() {
         settings.activeScreen = SCREENS.BOARD;
     }
 
-    ensureLauncher();
+    const workstation = ensureWorkstation();
     const hub = ensureHub();
-    bindLauncher();
+    bindWorkstation(workstation);
     bindHubInteractions(hub);
 }
 

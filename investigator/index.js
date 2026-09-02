@@ -33,7 +33,7 @@ export function setupInvestigatorExtension() {
         registerInvestigatorEvents();
         refreshInvestigatorUi();
 
-        // Late-bind Death Note UI refresh so role switches tear down gothic widgets.
+        // Late-bind Death Note UI refresh so role switches tear down Kira widgets.
         void import('../deathnote/ui.js')
             .then((module) => {
                 if (typeof module.refreshDeathNoteUi === 'function') {

@@ -2616,7 +2616,7 @@
 }
 
 /* ==========================================================================
-   Investigator Hub V1 — clinical Task Force terminal (not gothic)
+   Investigator Hub V1 — clinical Task Force terminal
    ========================================================================== */
 
 :root {
@@ -2633,50 +2633,159 @@
     --kw-inv-font-mono: "IBM Plex Mono", "Consolas", "Courier New", monospace;
 }
 
-#kw-investigator-launcher.kw-investigator-launcher {
+/* Immersive desk / workstation — sit down to log in (no floating button) */
+#kw-investigator-workstation.kw-investigator-workstation {
     position: fixed;
-    right: 1rem;
-    bottom: 1rem;
+    inset: 0;
     z-index: 10050;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.65rem 0.9rem;
-    border: 1px solid var(--kw-inv-line);
-    border-radius: 0.35rem;
+    display: grid;
+    place-items: center;
+    padding: 1.25rem;
     background:
-        linear-gradient(180deg, rgba(40, 70, 95, 0.95), rgba(14, 24, 34, 0.98));
+        radial-gradient(ellipse at 50% 18%, rgba(40, 70, 95, 0.35), transparent 55%),
+        linear-gradient(180deg, #0a121a 0%, #121820 42%, #1a1510 100%);
     color: var(--kw-inv-text);
-    font-family: var(--kw-inv-font-mono);
-    font-size: 0.78rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-family: var(--kw-inv-font-ui);
+    animation: kw-investigator-room-in 280ms ease-out;
+}
+
+.kw-investigator-workstation__room {
+    display: grid;
+    justify-items: center;
+    gap: 1rem;
+    width: min(34rem, 100%);
+}
+
+.kw-investigator-workstation__desk {
+    width: min(42rem, 118%);
+    height: 3.5rem;
+    margin-top: -0.35rem;
+    border-radius: 0.2rem;
+    background:
+        linear-gradient(180deg, rgba(70, 48, 28, 0.55), rgba(28, 18, 10, 0.95));
+    box-shadow:
+        0 -18px 40px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 220, 170, 0.08);
+    opacity: 0.9;
+}
+
+.kw-investigator-workstation__monitor {
+    appearance: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
     cursor: pointer;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+    width: min(28rem, 100%);
+    transition: transform 180ms ease, filter 180ms ease;
 }
 
-#kw-investigator-launcher.kw-investigator-launcher[hidden] {
-    display: none !important;
+.kw-investigator-workstation__monitor:hover,
+.kw-investigator-workstation__monitor:focus-visible {
+    transform: translateY(-2px) scale(1.01);
+    filter: brightness(1.06);
+    outline: none;
 }
 
-.kw-investigator-launcher__glyph {
-    width: 0.55rem;
-    height: 0.55rem;
+.kw-investigator-workstation__bezel {
+    display: block;
+    padding: 0.85rem 0.85rem 1.15rem;
+    border-radius: 0.55rem;
+    background:
+        linear-gradient(160deg, #2a323a, #12161b 55%, #0a0d10);
+    box-shadow:
+        0 18px 40px rgba(0, 0, 0, 0.45),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.kw-investigator-workstation__crt {
+    position: relative;
+    display: grid;
+    place-items: center;
+    gap: 0.45rem;
+    min-height: 12.5rem;
+    padding: 1.4rem 1rem;
+    border-radius: 0.28rem;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 50% 30%, rgba(58, 160, 216, 0.16), transparent 55%),
+        linear-gradient(180deg, #0d1822, #071018);
+    box-shadow: inset 0 0 0 1px rgba(58, 160, 216, 0.18);
+    color: var(--kw-inv-text);
+    text-align: center;
+}
+
+.kw-investigator-workstation__scan {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(255, 255, 255, 0.025) 0,
+        rgba(255, 255, 255, 0.025) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    animation: kw-investigator-scan 5.5s linear infinite;
+    opacity: 0.7;
+}
+
+.kw-investigator-workstation__led {
+    position: absolute;
+    top: 0.65rem;
+    left: 0.65rem;
+    width: 0.45rem;
+    height: 0.45rem;
     border-radius: 50%;
     background: #4fd2a5;
-    box-shadow: 0 0 0 2px rgba(79, 210, 165, 0.2);
+    box-shadow: 0 0 0 2px rgba(79, 210, 165, 0.18);
     animation: kw-investigator-led 2.4s ease-in-out infinite;
+}
+
+.kw-investigator-workstation__os {
+    position: relative;
+    font-family: var(--kw-inv-font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    color: var(--kw-inv-accent);
+}
+
+.kw-investigator-workstation__case {
+    position: relative;
+    font-family: var(--kw-inv-font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: var(--kw-inv-muted);
+}
+
+.kw-investigator-workstation__prompt {
+    position: relative;
+    margin-top: 0.55rem;
+    font-family: var(--kw-inv-font-mono);
+    font-size: 0.92rem;
+    letter-spacing: 0.04em;
+    color: var(--kw-inv-text);
+    animation: kw-investigator-prompt 1.8s ease-in-out infinite;
+}
+
+.kw-investigator-workstation__hint {
+    margin: 0;
+    color: var(--kw-inv-muted);
+    font-size: 0.86rem;
+    text-align: center;
 }
 
 #kw-investigator-hub.kw-investigator-hub {
     position: fixed;
     z-index: 10060;
-    width: min(920px, calc(100vw - 2rem));
-    height: min(620px, calc(100vh - 2rem));
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
     color: var(--kw-inv-text);
     font-family: var(--kw-inv-font-ui);
-    border: 1px solid var(--kw-inv-line);
-    border-radius: 0.4rem;
+    border: 0;
+    border-radius: 0;
     overflow: hidden;
     background:
         linear-gradient(180deg, rgba(18, 32, 44, 0.2), transparent 40%),
@@ -2688,18 +2797,8 @@
             transparent 3px
         ),
         linear-gradient(160deg, var(--kw-inv-bg1), var(--kw-inv-bg0) 55%, #081018);
-    box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.03) inset,
-        0 24px 60px rgba(0, 0, 0, 0.45);
-}
-
-#kw-investigator-hub.kw-investigator-hub.is-mobile {
-    width: 100vw;
-    height: 100dvh;
-    max-width: none;
-    max-height: none;
-    border-radius: 0;
-    border: 0;
+    box-shadow: none;
+    animation: kw-investigator-boot 260ms ease-out;
 }
 
 .kw-investigator-hub__chrome {
@@ -2707,9 +2806,12 @@
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
     min-height: 0;
+    width: min(1100px, 100%);
+    margin: 0 auto;
 }
 
 #kw-investigator-hub.is-mobile .kw-investigator-hub__chrome {
+    width: 100%;
     grid-template-rows: auto 1fr auto auto;
 }
 
@@ -2726,12 +2828,7 @@
     padding: 0.7rem 0.85rem;
     border-bottom: 1px solid var(--kw-inv-line);
     background: linear-gradient(180deg, rgba(40, 62, 82, 0.55), rgba(16, 26, 36, 0.9));
-    cursor: grab;
     user-select: none;
-}
-
-#kw-investigator-hub.is-mobile .kw-investigator-hub__titlebar {
-    cursor: default;
 }
 
 .kw-investigator-hub__brand {
@@ -2771,9 +2868,11 @@
     background: rgba(20, 34, 48, 0.9);
     color: var(--kw-inv-text);
     font-family: var(--kw-inv-font-mono);
-    font-size: 0.85rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     line-height: 1;
-    padding: 0.35rem 0.55rem;
+    padding: 0.45rem 0.65rem;
     border-radius: 0.25rem;
     cursor: pointer;
 }
@@ -3027,14 +3126,42 @@
     50% { opacity: 1; }
 }
 
+@keyframes kw-investigator-prompt {
+    0%, 100% { opacity: 0.72; }
+    50% { opacity: 1; }
+}
+
+@keyframes kw-investigator-scan {
+    from { transform: translateY(-8%); }
+    to { transform: translateY(8%); }
+}
+
+@keyframes kw-investigator-room-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes kw-investigator-boot {
+    from { opacity: 0.4; filter: brightness(0.7); }
+    to { opacity: 1; filter: none; }
+}
+
 @media (max-width: 720px) {
     .kw-investigator-split,
     .kw-investigator-ops-grid {
         grid-template-columns: 1fr;
     }
 
-    #kw-investigator-launcher.kw-investigator-launcher {
-        right: 0.75rem;
-        bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    #kw-investigator-workstation.kw-investigator-workstation {
+        padding: 1rem 0.85rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    .kw-investigator-workstation__crt {
+        min-height: 14rem;
+    }
+
+    .kw-investigator-workstation__desk {
+        width: 100%;
+        height: 2.6rem;
     }
 }
