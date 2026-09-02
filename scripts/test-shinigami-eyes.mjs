@@ -42,7 +42,9 @@ const {
     createDeathNote,
     getActorShinigamiLifespan,
     getSettings,
+    getShinigamiEyesRoster,
     getShinigamiEyesState,
+    isLinkedDeathNoteShinigami,
     linkNotebookShinigami,
     syncChatStateCacheFromMetadata,
     userHasShinigamiEyes,
@@ -144,6 +146,23 @@ seedLinkedShinigami();
     assert.ok(lifespan?.displayCode);
     assert.match(lifespan.displayCode, /^\d(?:\s+\d+){5}$/);
     assert.doesNotMatch(lifespan.displayCode, /-/);
+}
+
+// Linked Shinigami cards never get Eyes name/lifespan treatment.
+{
+    const ryukAsCharacter = {
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: 'ryuk.png',
+        name: 'Ryuk',
+    };
+    assert.equal(isLinkedDeathNoteShinigami(ryukAsCharacter), true);
+    assert.equal(getActorShinigamiLifespan(ryukAsCharacter), null);
+    const roster = getShinigamiEyesRoster();
+    assert.ok(roster.every((entry) => entry.trueName !== 'Ryuk'));
+    assert.ok(roster.some((entry) => entry.trueName === 'Light Yagami'));
+    const injection = String(getShinigamiEyesPromptInjectionMessage()?.mes || '');
+    assert.doesNotMatch(injection, /Ryuk \//);
+    assert.match(injection, /Light Yagami/);
 }
 
 // Second deal (Tier C7): halves remaining life again.
