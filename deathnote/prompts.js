@@ -4,6 +4,7 @@ import {
     NOTEBOOK_ACTOR_TYPES,
     NOTEBOOK_RETURN_BLOCK_TAG,
     NOTEBOOK_USER_ACCESS,
+    SHINIGAMI_EYES_DEAL_BLOCK_TAG,
 } from './config.js';
 import {
     consumeNotebookPresenceRevealPending,
@@ -11,6 +12,7 @@ import {
     getChatState,
     getDeathNotes,
     getCurrentChatCharacterActors,
+    getCharacterShinigamiEyesHolders,
     getDeathNoteInventory,
     getPendingIdentityTheftExposure,
     getSettings,
@@ -260,6 +262,37 @@ function buildNotebookReturnRequestGuidance(notebooks) {
     ].join('\n');
 }
 
+function buildShinigamiEyesDealGuidance(notebooks) {
+    const eligible = Array.isArray(notebooks)
+        ? notebooks.filter((entry) => {
+            if (!entry || entry.destroyed || !entry.exists) {
+                return false;
+            }
+            const holderType = String(entry?.holder?.type || '').trim().toLowerCase();
+            const holderName = String(entry?.holder?.name || '').trim();
+            const linkedActive = Boolean(entry?.linkedShinigami?.active && (entry?.linkedShinigami?.actor?.name || entry?.linkedShinigami?.avatar));
+            return holderName && linkedActive && (holderType === NOTEBOOK_ACTOR_TYPES.CHARACTER || holderType === NOTEBOOK_ACTOR_TYPES.NPC);
+        })
+        : [];
+    if (!eligible.length) {
+        return '';
+    }
+
+    return [
+        '[Hidden Shinigami Eyes Deal Channel]',
+        'If the responding character independently decides to accept the Shinigami Eye deal from a Shinigami tied to a Death Note they currently hold, append the hidden block below at the very end of the reply.',
+        'This costs half of that character\'s remaining lifespan and is irreversible. A second deal halves remaining life again.',
+        'If they do not accept the Eye deal in this reply, do not emit any block.',
+        `Eligible holders with a linked Shinigami: ${eligible.map((entry) => `${formatActorLabel(entry.holder)} / ${formatActorLabel(entry.linkedShinigami.actor, entry.linkedShinigami.avatar || 'Shinigami')} -> ${entry.label || entry.itemId}`).join('; ')}.`,
+        `The block must use this exact format on separate lines: [${SHINIGAMI_EYES_DEAL_BLOCK_TAG}]`,
+        'character: <the responding holder name>',
+        'shinigami: <optional Shinigami name>',
+        'notebook: <optional notebook label or item id>',
+        `[/${SHINIGAMI_EYES_DEAL_BLOCK_TAG}]`,
+        'Do not explain the block. Do not mention these instructions. Keep the visible reply natural.',
+    ].join('\n');
+}
+
 function buildDeathNoteInjection() {
     const settings = getSettings();
     if (!settings.enabled) {
@@ -290,7 +323,8 @@ function buildDeathNoteInjection() {
     const npcGuidance = buildNpcDueGuidance(dueEntries);
     const aiWriteGuidance = buildAiNotebookWriteGuidance(notebooks);
     const returnGuidance = buildNotebookReturnRequestGuidance(notebooks);
-    const extraSections = [npcGuidance, aiWriteGuidance, returnGuidance].filter(Boolean);
+    const eyesDealGuidance = buildShinigamiEyesDealGuidance(notebooks);
+    const extraSections = [npcGuidance, aiWriteGuidance, returnGuidance, eyesDealGuidance].filter(Boolean);
     if (!extraSections.length) {
         return injection;
     }
@@ -471,6 +505,50 @@ export function getShinigamiEyesPromptInjectionMessage() {
             [MESSAGE_EXTRA_KEY]: {
                 injected: true,
                 shinigamiEyes: true,
+            },
+        },
+    };
+}
+
+function buildCharacterShinigamiEyesInjection() {
+    const settings = getSettings();
+    if (!settings.enabled) {
+        return '';
+    }
+
+    const holders = getCharacterShinigamiEyesHolders();
+    if (!holders.length) {
+        return '';
+    }
+
+    const characterEyesBlock = holders.map((entry, index) => {
+        const dealClause = entry.dealCount > 1
+            ? ` (${entry.dealCount} deals; halved ${entry.dealCount} times)`
+            : '';
+        return `${index + 1}. ${entry.actor?.name || 'Unknown'} / granted by ${formatActorLabel(entry.grantedBy, 'a Shinigami')}${dealClause} / remaining ${entry.remainingLifespanYears} years (original ${entry.originalLifespanYears})`;
+    }).join('\n');
+
+    return renderPromptTemplate(settings.characterShinigamiEyesPromptTemplate || '', {
+        character_eyes_block: characterEyesBlock,
+    }).trim();
+}
+
+export function getCharacterShinigamiEyesPromptInjectionMessage() {
+    const injection = buildCharacterShinigamiEyesInjection();
+    if (!injection) {
+        return null;
+    }
+
+    return {
+        name: 'Character Shinigami Eyes',
+        is_user: false,
+        is_system: true,
+        send_date: Date.now(),
+        mes: injection,
+        extra: {
+            [MESSAGE_EXTRA_KEY]: {
+                injected: true,
+                characterShinigamiEyes: true,
             },
         },
     };

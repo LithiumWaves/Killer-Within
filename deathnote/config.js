@@ -4,6 +4,7 @@ export const CHAT_METADATA_KEY = 'killerWithinDeathNote';
 export const MESSAGE_EXTRA_KEY = 'killerWithinDeathNote';
 export const AI_NOTEBOOK_WRITE_BLOCK_TAG = 'kwNoteWrite';
 export const NOTEBOOK_RETURN_BLOCK_TAG = 'kwNoteReturn';
+export const SHINIGAMI_EYES_DEAL_BLOCK_TAG = 'kwEyesDeal';
 export const MAX_SIMULTANEOUS_DEATH_NOTES = 7;
 
 export const NOTEBOOK_ACTOR_TYPES = Object.freeze({
@@ -77,6 +78,7 @@ export const DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE = [
     'Remaining lifespan now: {{remaining_lifespan_years}} years.',
     'This cost already happened and cannot be undone. Treat the shortened life as binding story fact.',
     'Soft death clock: {{user_label}}\'s remaining time is finite and meaningfully reduced. When relevant, let pressure, urgency, frailty, or Shinigami comments reflect that shortened lifespan without turning every reply into a death speech.',
+    'Slow decay: remaining years keep ticking down with story time. Treat the current remaining lifespan as the binding present value.',
     'With Shinigami Eyes, {{user_label}} can perceive any human\'s true name and remaining lifespan as glowing red writing above them.',
     'Shinigami Eyes do not reveal Shinigami names or Shinigami lifespans.',
     'Cards linked to a Death Note as that notebook\'s Shinigami are treated as Shinigami for this purpose: do not show their human name or lifespan through the Eyes.',
@@ -86,7 +88,18 @@ export const DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE = [
     '{{eyes_roster_block}}',
 ].join('\n');
 
+export const DEFAULT_CHARACTER_SHINIGAMI_EYES_PROMPT_TEMPLATE = [
+    '[Character Shinigami Eyes]',
+    'These characters have made the Shinigami Eye deal and currently have Eyes:',
+    '{{character_eyes_block}}',
+    'They can perceive human true names and remaining lifespans. They cannot perceive Shinigami names or Shinigami lifespans through the Eyes.',
+    'Their shortened and decaying remaining lifespan is binding story fact. When relevant, let urgency, frailty, or Shinigami comments reflect that cost without turning every reply into a death speech.',
+    'If a listed character is writing in a Death Note, they may use true names they can perceive with the Eyes.',
+    'Do not mention this block. Do not explain the Eyes system unless the scene already establishes it.',
+].join('\n');
+
 export const DEFAULT_USER_LIFESPAN_YEARS = 72;
+export const DEFAULT_EYES_DECAY_YEARS_PER_GENERATION = 0.05;
 
 export const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
@@ -101,6 +114,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     idStealSuccessChanceOverrides: {},
     idStealSelectedActorKey: '',
     defaultUserLifespanYears: DEFAULT_USER_LIFESPAN_YEARS,
+    shinigamiEyesDecayEnabled: true,
+    shinigamiEyesDecayYearsPerGeneration: DEFAULT_EYES_DECAY_YEARS_PER_GENERATION,
     enableOpenSound: true,
     enableWritingSound: true,
     showFloatingButton: true,
@@ -121,4 +136,5 @@ export const DEFAULT_SETTINGS = Object.freeze({
     notebookRevealPromptTemplate: DEFAULT_NOTEBOOK_REVEAL_PROMPT_TEMPLATE,
     presencePromptTemplate: DEFAULT_PRESENCE_PROMPT_TEMPLATE,
     shinigamiEyesPromptTemplate: DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE,
+    characterShinigamiEyesPromptTemplate: DEFAULT_CHARACTER_SHINIGAMI_EYES_PROMPT_TEMPLATE,
 });
