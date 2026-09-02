@@ -3,7 +3,7 @@
  * Mocks SillyTavern.getContext with an in-memory chat metadata bag.
  */
 import assert from 'node:assert/strict';
-import { CHAT_METADATA_KEY, MODULE_NAME, NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
+import { MODULE_NAME, NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
 
 const chatMetadata = {};
 const extensionSettings = {
