@@ -59,23 +59,30 @@ const { syncChatStateCacheFromMetadata } = await import('../deathnote/core.js');
 
 const {
     applyCaseAction,
+    analyzeVictimPattern,
     assignOfficer,
     buildCasePromptReplacements,
     confrontSuspect,
+    createBroadcastTrap,
     fileWarrant,
+    getActiveBroadcastTrap,
     getCaseStrength,
     getInvestigatorState,
     isTaskForceOfficer,
     linkEvidenceToSuspect,
     logEvidence,
+    matchBroadcastTrapsAgainstTimeline,
     pinSuspect,
+    plantSurveillance,
     processAssistantCaseActionMessage,
     removeOfficer,
     setPlayRole,
+    syncDeathReportsIntoTimelineEvidence,
     tickWarrantsForGeneration,
 } = await import('../investigator/core.js');
 
 const {
+    getBroadcastTrapPromptInjectionMessage,
     getInvestigatorCasePromptInjectionMessage,
     shouldInjectInvestigatorCasePrompt,
 } = await import('../investigator/prompts.js');
@@ -343,7 +350,7 @@ reset();
     assert.ok(injection);
     assert.match(injection.mes, /L Lawliet/);
     assert.match(injection.mes, new RegExp(CASE_ACTION_BLOCK_TAG));
-    assert.match(injection.mes, /warrant\|confront|Pending warrants/i);
+    assert.match(injection.mes, /warrant\|confront|surveil|Pending warrants/i);
 
     const replacements = buildCasePromptReplacements();
     assert.equal(replacements.example_officer, 'L Lawliet');
@@ -358,6 +365,94 @@ reset();
     const injection = getInvestigatorCasePromptInjectionMessage();
     assert.ok(injection);
     assert.match(injection.mes, /Task Force Case Context|case file/i);
+}
+
+reset();
+
+// Surveillance plant + analyze + broadcast trap
+{
+    const trail = plantSurveillance({
+        kind: 'trail',
+        target: officerActor('Light Yagami', 'light.png'),
+        label: 'Trail Light',
+    });
+    assert.equal(trail.applied, true);
+    assert.equal(getInvestigatorState().surveillance.length, 1);
+
+    const deathState = (await import('../deathnote/core.js')).getChatState();
+    deathState.entries = [
+        {
+            id: 'd1', status: 'resolved', targetName: 'A', targetType: 'npc',
+            cause: 'heart attack', resolvedAt: Date.now() - 10000, createdAt: Date.now() - 20000,
+        },
+        {
+            id: 'd2', status: 'resolved', targetName: 'B', targetType: 'npc',
+            cause: 'heart attack', resolvedAt: Date.now() - 8000, createdAt: Date.now() - 18000,
+        },
+        {
+            id: 'd3', status: 'resolved', targetName: 'C', targetType: 'npc',
+            cause: 'heart attack', resolvedAt: Date.now() - 6000, createdAt: Date.now() - 16000,
+        },
+    ];
+
+    const analysis = analyzeVictimPattern();
+    assert.equal(analysis.applied, true);
+    assert.equal(analysis.report.pattern, 'heart_attack_cluster');
+    assert.ok(getInvestigatorState().evidence.some((entry) => entry.type === 'pattern_report'));
+
+    const trap = createBroadcastTrap({
+        decoyName: 'Lind L. Tailor',
+        challenge: 'Kira, kill this man.',
+    });
+    assert.equal(trap.applied, true);
+    assert.equal(getActiveBroadcastTrap()?.decoyName, 'Lind L. Tailor');
+
+    const broadcastInjection = getBroadcastTrapPromptInjectionMessage();
+    assert.ok(broadcastInjection);
+    assert.match(broadcastInjection.mes, /Lind L\. Tailor/);
+
+    deathState.entries.push({
+        id: 'd-trap',
+        status: 'resolved',
+        targetName: 'Lind L. Tailor',
+        targetType: 'npc',
+        cause: 'heart attack',
+        resolvedAt: Date.now(),
+        createdAt: Date.now(),
+    });
+    const matched = matchBroadcastTrapsAgainstTimeline();
+    assert.equal(matched.triggered, 1);
+    assert.equal(getInvestigatorState().broadcastTraps[0].status, 'triggered');
+    assert.ok(getInvestigatorState().evidence.some((entry) => entry.type === 'trap_link'));
+
+    // syncDeathReports also triggers trap matching / death evidence
+    syncDeathReportsIntoTimelineEvidence();
+    assert.ok(getInvestigatorState().evidence.some((entry) => entry.type === 'death_report'));
+}
+
+reset();
+
+// Lead AI can analyze / broadcast via kwCaseAction
+{
+    assignOfficer(officerActor(), { rank: 'Lead', clearance: OFFICER_CLEARANCE.LEAD });
+    chat = [{
+        name: 'L Lawliet',
+        original_avatar: 'l.png',
+        is_user: false,
+        is_system: false,
+        mes: [
+            'Arming the broadcast.',
+            `[${CASE_ACTION_BLOCK_TAG}]`,
+            'officer: L Lawliet',
+            'action: broadcast',
+            'target: Decoy Criminal',
+            'detail: Public challenge.',
+            `[/${CASE_ACTION_BLOCK_TAG}]`,
+        ].join('\n'),
+        extra: {},
+    }];
+    assert.equal(processAssistantCaseActionMessage(0), true);
+    assert.equal(getActiveBroadcastTrap()?.decoyName, 'Decoy Criminal');
 }
 
 console.log('investigator-hub-v1-5 tests passed');

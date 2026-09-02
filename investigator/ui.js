@@ -5,12 +5,16 @@ import {
     INVESTIGATOR_HUB_ID,
     OFFICER_CLEARANCE,
     PLAY_ROLES,
+    SURVEILLANCE_KINDS,
+    SURVEILLANCE_STATUS,
     SUSPECT_STATUSES,
 } from './config.js';
 import {
+    analyzeVictimPattern,
     assignOfficer,
     commitInvestigatorMutation,
     confrontSuspect,
+    createBroadcastTrap,
     fileWarrant,
     getBoardSuspectChoices,
     getCaseStrength,
@@ -22,9 +26,12 @@ import {
     isInvestigatorRole,
     linkEvidenceToSuspect,
     logEvidence,
+    logSurveillanceSignalAsEvidence,
     pinSuspect,
+    plantSurveillance,
     releaseRestrainedActor,
     removeOfficer,
+    removeSurveillancePlant,
     restrainActor,
     scheduleInvestigatorSettingsSave,
     seizeNotebook,
@@ -34,7 +41,7 @@ import {
     syncAllCaseActionMessageVisibility,
     syncDeathReportsIntoTimelineEvidence,
 } from './core.js';
-import { persistChatChanges } from '../deathnote/core.js';
+import { getDeathNotes, persistChatChanges } from '../deathnote/core.js';
 import { NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
 
 const MOBILE_VIEWPORT_MAX = 720;
@@ -42,6 +49,7 @@ const SCREENS = Object.freeze({
     BOARD: 'board',
     TIMELINE: 'timeline',
     LOCKER: 'locker',
+    SURVEIL: 'surveil',
     OPS: 'ops',
 });
 
@@ -139,6 +147,7 @@ function renderNavHtml(activeScreen) {
         { id: SCREENS.BOARD, label: 'Board' },
         { id: SCREENS.TIMELINE, label: 'Timeline' },
         { id: SCREENS.LOCKER, label: 'Locker' },
+        { id: SCREENS.SURVEIL, label: 'Surveil' },
         { id: SCREENS.OPS, label: 'Ops' },
     ];
     return items.map((item) => `
@@ -273,6 +282,11 @@ function renderLockerScreen(state) {
         entry.type === EVIDENCE_TYPES.NOTEBOOK
         || entry.type === EVIDENCE_TYPES.SCRAP
         || entry.type === EVIDENCE_TYPES.DEATH_REPORT
+        || entry.type === EVIDENCE_TYPES.WARRANT_RESULT
+        || entry.type === EVIDENCE_TYPES.CONFRONTATION
+        || entry.type === EVIDENCE_TYPES.PATTERN_REPORT
+        || entry.type === EVIDENCE_TYPES.TRAP_LINK
+        || entry.type === EVIDENCE_TYPES.SIGHTING
     ));
     const suspects = state.suspects || [];
     const html = physical.length
@@ -315,6 +329,55 @@ function renderLockerScreen(state) {
                 <p>Sealed notebooks, scraps, and auto death reports. Seized notes cannot be rewritten.</p>
             </header>
             <div class="kw-investigator-list">${html}</div>
+        </section>
+    `;
+}
+
+function renderSurveillanceScreen(state) {
+    const plants = (state.surveillance || []).filter((entry) => entry.status === SURVEILLANCE_STATUS.ACTIVE);
+    const signals = (state.signals || []).slice(0, 16);
+    const plantsHtml = plants.length
+        ? plants.map((entry) => `
+            <article class="kw-investigator-row">
+                <div class="kw-investigator-row__main">
+                    <div class="kw-investigator-row__title">${escapeHtml(entry.label || entry.kind)}</div>
+                    <div class="kw-investigator-row__meta">${escapeHtml(entry.kind)}${entry.target?.name ? ` · ${escapeHtml(entry.target.name)}` : ''}${entry.location ? ` · ${escapeHtml(entry.location)}` : ''}${entry.lastSignalAt ? ` · last ${escapeHtml(formatClock(entry.lastSignalAt))}` : ''}</div>
+                </div>
+                <button type="button" class="menu_button kw-investigator-btn" data-inv-remove-plant="${escapeHtml(entry.id)}">Remove</button>
+            </article>
+        `).join('')
+        : '<p class="kw-investigator-empty">No active plants. Deploy from Ops.</p>';
+
+    const signalsHtml = signals.length
+        ? signals.map((entry) => `
+            <article class="kw-investigator-row">
+                <div class="kw-investigator-row__main">
+                    <div class="kw-investigator-row__title">${escapeHtml(entry.kind)}</div>
+                    <div class="kw-investigator-row__meta">${escapeHtml(formatClock(entry.at))} · ${escapeHtml(entry.text || '')}</div>
+                </div>
+                ${entry.evidenceId ? '<span class="kw-investigator-chip">Logged</span>' : `
+                    <button type="button" class="menu_button kw-investigator-btn" data-inv-log-signal="${escapeHtml(entry.id)}">Log evidence</button>
+                `}
+            </article>
+        `).join('')
+        : '<p class="kw-investigator-empty">No surveillance signals yet.</p>';
+
+    return `
+        <section class="kw-investigator-screen" data-screen="surveil">
+            <header class="kw-investigator-screen__head">
+                <h2>Surveillance</h2>
+                <p>Active bugs / trails / notebook watches and recent signals. Contents are never recovered.</p>
+            </header>
+            <div class="kw-investigator-split">
+                <div class="kw-investigator-panel">
+                    <div class="kw-investigator-subhead">Active plants</div>
+                    <div class="kw-investigator-list">${plantsHtml}</div>
+                </div>
+                <div class="kw-investigator-panel">
+                    <div class="kw-investigator-subhead">Signal feed</div>
+                    <div class="kw-investigator-list">${signalsHtml}</div>
+                </div>
+            </div>
         </section>
     `;
 }
@@ -397,6 +460,10 @@ function renderOpsScreen(state) {
     `).join('') || '<p class="kw-investigator-empty">System log quiet.</p>';
 
     const casePromptTemplate = String(settings.casePromptTemplate || DEFAULT_CASE_PROMPT_TEMPLATE);
+    const notebookOptions = getDeathNotes()
+        .filter((entry) => entry && !entry.destroyed && entry.exists)
+        .map((entry) => `<option value="${escapeHtml(entry.itemId)}">${escapeHtml(entry.label || entry.itemId)} · ${escapeHtml(entry.holder?.name || 'held')}</option>`)
+        .join('');
 
     return `
         <section class="kw-investigator-screen kw-investigator-screen--ops" data-screen="ops">
@@ -436,9 +503,9 @@ function renderOpsScreen(state) {
                             <label class="kw-investigator-field">
                                 <span>Clearance</span>
                                 <select name="clearance" class="text_pole">
-                                    <option value="${OFFICER_CLEARANCE.FIELD}">Field — log / pin / status</option>
-                                    <option value="${OFFICER_CLEARANCE.DETECTIVE}">Detective — + restrain / release</option>
-                                    <option value="${OFFICER_CLEARANCE.LEAD}" selected>Lead — + warrant / confront</option>
+                                    <option value="${OFFICER_CLEARANCE.FIELD}">Field — log / pin / status / report</option>
+                                    <option value="${OFFICER_CLEARANCE.DETECTIVE}">Detective — + restrain / surveil / analyze</option>
+                                    <option value="${OFFICER_CLEARANCE.LEAD}" selected>Lead — + warrant / confront / broadcast</option>
                                 </select>
                             </label>
                             <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Assign officer</button>
@@ -485,6 +552,65 @@ function renderOpsScreen(state) {
                             <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Confront</button>
                         </form>
                         <small class="kw-investigator-hint">Needs case strength ≥ 2. Prime + strength ≥ 3 records probable cause (restrain still required to seize).</small>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Plant surveillance</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="surveil">
+                            <label class="kw-investigator-field">
+                                <span>Kind</span>
+                                <select name="kind" class="text_pole" required>
+                                    <option value="${SURVEILLANCE_KINDS.TRAIL}">Trail character</option>
+                                    <option value="${SURVEILLANCE_KINDS.WATCH_NOTEBOOK}">Watch notebook</option>
+                                    <option value="${SURVEILLANCE_KINDS.BUG_ROOM}">Bug room / location</option>
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Character (trail)</span>
+                                <select name="actorJson" class="text_pole">
+                                    <option value="">Select character…</option>
+                                    ${options}
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Notebook (watch)</span>
+                                <select name="notebookItemId" class="text_pole">
+                                    <option value="">Select notebook…</option>
+                                    ${notebookOptions}
+                                </select>
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Location (bug)</span>
+                                <input name="location" class="text_pole" type="text" maxlength="120" placeholder="Light’s room / warehouse" />
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Plant</button>
+                        </form>
+                        <small class="kw-investigator-hint">Max 3 active plants. Signals never include notebook page text.</small>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Analyze pattern</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="analyze">
+                            <label class="kw-investigator-field">
+                                <span>Focus hint (optional)</span>
+                                <input name="note" class="text_pole" type="text" maxlength="120" placeholder="heart attack / timing / criminals" />
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Run pattern analysis</button>
+                        </form>
+                        <small class="kw-investigator-hint">Uses investigator-visible resolved deaths only.</small>
+                    </div>
+                    <div class="kw-investigator-panel">
+                        <div class="kw-investigator-subhead">Broadcast trap</div>
+                        <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="broadcast">
+                            <label class="kw-investigator-field">
+                                <span>Decoy name</span>
+                                <input name="decoyName" class="text_pole" type="text" maxlength="120" required placeholder="Fake criminal / challenge target" />
+                            </label>
+                            <label class="kw-investigator-field">
+                                <span>Challenge blurb</span>
+                                <input name="challenge" class="text_pole" type="text" maxlength="240" placeholder="Public broadcast detail" />
+                            </label>
+                            <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Arm broadcast trap</button>
+                        </form>
+                        <small class="kw-investigator-hint">One active trap. Matching resolved kill auto-links trap evidence.</small>
                     </div>
                     <div class="kw-investigator-panel">
                         <div class="kw-investigator-subhead">Mark restrained</div>
@@ -536,6 +662,8 @@ function renderActiveScreen(settings, state) {
             return renderTimelineScreen(state);
         case SCREENS.LOCKER:
             return renderLockerScreen(state);
+        case SCREENS.SURVEIL:
+            return renderSurveillanceScreen(state);
         case SCREENS.OPS:
             return renderOpsScreen(state);
         case SCREENS.BOARD:
@@ -898,6 +1026,30 @@ function bindHubInteractions(root) {
         });
     });
 
+    root.querySelectorAll('[data-inv-remove-plant]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const id = button.getAttribute('data-inv-remove-plant');
+            await commitInvestigatorMutation(() => removeSurveillancePlant(id), 'Surveillance plant removed.');
+            refreshInvestigatorUi();
+        });
+    });
+
+    root.querySelectorAll('[data-inv-log-signal]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const id = button.getAttribute('data-inv-log-signal');
+            const result = await commitInvestigatorMutation(
+                () => logSurveillanceSignalAsEvidence(id),
+                'Signal logged to evidence locker.',
+            );
+            if (!result || !result.applied) {
+                globalThis.toastr?.warning?.(
+                    result?.reason === 'already_logged' ? 'Signal already logged.' : 'Could not log signal.',
+                );
+            }
+            refreshInvestigatorUi();
+        });
+    });
+
     root.querySelectorAll('[data-inv-open-dn-registry]').forEach((button) => {
         button.addEventListener('click', async () => {
             try {
@@ -1057,6 +1209,48 @@ function bindHubInteractions(root) {
                     );
                 } else if (result.seizeUnlocked) {
                     globalThis.toastr?.success?.('Seize rights unlocked for this subject.');
+                }
+            } else if (kind === 'surveil') {
+                const plantKind = String(data.get('kind') || SURVEILLANCE_KINDS.TRAIL);
+                const actor = parseActorJson(data.get('actorJson'));
+                const result = await commitInvestigatorMutation(
+                    () => plantSurveillance({
+                        kind: plantKind,
+                        target: actor,
+                        notebookItemId: String(data.get('notebookItemId') || ''),
+                        location: String(data.get('location') || ''),
+                    }),
+                    'Surveillance plant deployed.',
+                );
+                if (!result || !result.applied) {
+                    globalThis.toastr?.warning?.(
+                        result?.reason === 'plant_cap'
+                            ? 'Maximum active plants reached (3).'
+                            : 'Could not plant surveillance.',
+                    );
+                }
+            } else if (kind === 'analyze') {
+                const result = await commitInvestigatorMutation(
+                    () => analyzeVictimPattern({ note: String(data.get('note') || '') }),
+                    'Pattern report filed.',
+                );
+                if (!result || !result.applied) {
+                    globalThis.toastr?.warning?.(
+                        result?.reason === 'duplicate_report'
+                            ? 'Identical pattern report already exists.'
+                            : 'Pattern analysis produced nothing new.',
+                    );
+                }
+            } else if (kind === 'broadcast') {
+                const result = await commitInvestigatorMutation(
+                    () => createBroadcastTrap({
+                        decoyName: String(data.get('decoyName') || ''),
+                        challenge: String(data.get('challenge') || ''),
+                    }),
+                    'Broadcast trap armed.',
+                );
+                if (!result || !result.applied) {
+                    globalThis.toastr?.warning?.('Could not arm broadcast trap.');
                 }
             } else if (kind === 'link-evidence') {
                 const evidenceId = form.getAttribute('data-evidence-id');

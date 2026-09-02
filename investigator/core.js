@@ -1,4 +1,5 @@
 import {
+    BROADCAST_TRAP_STATUS,
     CASE_ACTIONS,
     CASE_ACTION_BLOCK_TAG,
     CONFRONT_MIN_STRENGTH,
@@ -10,9 +11,14 @@ import {
     INVESTIGATOR_CHAT_METADATA_KEY,
     INVESTIGATOR_MESSAGE_EXTRA_KEY,
     INVESTIGATOR_MODULE_NAME,
+    MAX_ACTIVE_SURVEILLANCE_PLANTS,
+    MAX_SURVEILLANCE_SIGNALS,
     OFFICER_CLEARANCE,
     OFFICER_CLEARANCE_ACTIONS,
     PLAY_ROLES,
+    SURVEILLANCE_KINDS,
+    SURVEILLANCE_SIGNAL_KINDS,
+    SURVEILLANCE_STATUS,
     SUSPECT_STATUSES,
     WARRANT_RESULTS,
     WARRANT_STATUS,
@@ -40,7 +46,7 @@ import {
 
 function createDefaultInvestigatorState() {
     return {
-        version: 3,
+        version: 4,
         caseId: `TF-${String(Date.now()).slice(-6)}`,
         caseTitle: 'Kira Case File',
         suspects: [],
@@ -51,8 +57,13 @@ function createDefaultInvestigatorState() {
         seizeRightsKeys: [],
         seizedNotebookIds: [],
         seizedScrapIds: [],
+        surveillance: [],
+        signals: [],
+        patternReports: [],
+        broadcastTraps: [],
         log: [],
         warrantTickSignature: null,
+        surveillanceTickSignature: null,
     };
 }
 
@@ -197,11 +208,92 @@ function normalizeWarrant(value, index = 0) {
     };
 }
 
+function normalizeSurveillancePlant(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const kindRaw = String(entry.kind || SURVEILLANCE_KINDS.TRAIL).trim().toLowerCase();
+    const kind = Object.values(SURVEILLANCE_KINDS).includes(kindRaw) ? kindRaw : SURVEILLANCE_KINDS.TRAIL;
+    const statusRaw = String(entry.status || SURVEILLANCE_STATUS.ACTIVE).trim().toLowerCase();
+    const status = Object.values(SURVEILLANCE_STATUS).includes(statusRaw) ? statusRaw : SURVEILLANCE_STATUS.ACTIVE;
+    const target = normalizeActorRef(entry.target, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    return {
+        id: String(entry.id || `plant-${index + 1}-${Date.now()}`).trim(),
+        kind,
+        status,
+        location: String(entry.location || '').trim(),
+        target,
+        targetKey: String(entry.targetKey || getActorKey(target) || '').trim(),
+        notebookItemId: String(entry.notebookItemId || '').trim(),
+        label: String(entry.label || '').trim(),
+        plantedAt: Number.isFinite(Number(entry.plantedAt)) ? Number(entry.plantedAt) : Date.now(),
+        plantedBy: normalizeActorRef(entry.plantedBy, NOTEBOOK_ACTOR_TYPES.USER, 'Task Force'),
+        lastSignalAt: Number.isFinite(Number(entry.lastSignalAt)) ? Number(entry.lastSignalAt) : null,
+        lastSeenHolderKey: String(entry.lastSeenHolderKey || '').trim(),
+        lastSeenEventKey: String(entry.lastSeenEventKey || '').trim(),
+        signalIds: Array.isArray(entry.signalIds)
+            ? entry.signalIds.map((id) => String(id || '').trim()).filter(Boolean).slice(0, 20)
+            : [],
+    };
+}
+
+function normalizeSurveillanceSignal(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const kindRaw = String(entry.kind || SURVEILLANCE_SIGNAL_KINDS.OFFICER_REPORT).trim().toLowerCase();
+    const kind = Object.values(SURVEILLANCE_SIGNAL_KINDS).includes(kindRaw)
+        ? kindRaw
+        : SURVEILLANCE_SIGNAL_KINDS.OFFICER_REPORT;
+    return {
+        id: String(entry.id || `signal-${index + 1}-${Date.now()}`).trim(),
+        plantId: String(entry.plantId || '').trim(),
+        at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : Date.now(),
+        kind,
+        text: String(entry.text || '').trim(),
+        sourceEvent: String(entry.sourceEvent || '').trim(),
+        eventKey: String(entry.eventKey || '').trim(),
+        linkedSuspectKeys: Array.isArray(entry.linkedSuspectKeys)
+            ? entry.linkedSuspectKeys.map((key) => String(key || '').trim()).filter(Boolean)
+            : [],
+        evidenceId: String(entry.evidenceId || '').trim(),
+    };
+}
+
+function normalizePatternReport(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    return {
+        id: String(entry.id || `pattern-${index + 1}-${Date.now()}`).trim(),
+        pattern: String(entry.pattern || 'insufficient_data').trim() || 'insufficient_data',
+        deathIds: Array.isArray(entry.deathIds)
+            ? entry.deathIds.map((id) => String(id || '').trim()).filter(Boolean)
+            : [],
+        createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+        evidenceId: String(entry.evidenceId || '').trim(),
+        detail: String(entry.detail || '').trim(),
+    };
+}
+
+function normalizeBroadcastTrap(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const statusRaw = String(entry.status || BROADCAST_TRAP_STATUS.ACTIVE).trim().toLowerCase();
+    const status = Object.values(BROADCAST_TRAP_STATUS).includes(statusRaw)
+        ? statusRaw
+        : BROADCAST_TRAP_STATUS.ACTIVE;
+    return {
+        id: String(entry.id || `trap-${index + 1}-${Date.now()}`).trim(),
+        status,
+        decoyName: String(entry.decoyName || '').trim(),
+        challenge: String(entry.challenge || '').trim(),
+        createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+        createdBy: normalizeActorRef(entry.createdBy, NOTEBOOK_ACTOR_TYPES.USER, 'Task Force'),
+        matchedDeathId: String(entry.matchedDeathId || '').trim(),
+        evidenceId: String(entry.evidenceId || '').trim(),
+        triggeredAt: Number.isFinite(Number(entry.triggeredAt)) ? Number(entry.triggeredAt) : null,
+    };
+}
+
 function normalizeInvestigatorState(value) {
     const defaults = createDefaultInvestigatorState();
     const state = value && typeof value === 'object' ? value : {};
     return {
-        version: 3,
+        version: 4,
         caseId: String(state.caseId || defaults.caseId).trim() || defaults.caseId,
         caseTitle: String(state.caseTitle || defaults.caseTitle).trim() || defaults.caseTitle,
         suspects: (Array.isArray(state.suspects) ? state.suspects : []).map(normalizeSuspect),
@@ -218,12 +310,25 @@ function normalizeInvestigatorState(value) {
         seizedScrapIds: (Array.isArray(state.seizedScrapIds) ? state.seizedScrapIds : [])
             .map((id) => String(id || '').trim())
             .filter(Boolean),
+        surveillance: (Array.isArray(state.surveillance) ? state.surveillance : [])
+            .map(normalizeSurveillancePlant)
+            .slice(-20),
+        signals: (Array.isArray(state.signals) ? state.signals : [])
+            .map(normalizeSurveillanceSignal)
+            .slice(-MAX_SURVEILLANCE_SIGNALS),
+        patternReports: (Array.isArray(state.patternReports) ? state.patternReports : [])
+            .map(normalizePatternReport)
+            .slice(-20),
+        broadcastTraps: (Array.isArray(state.broadcastTraps) ? state.broadcastTraps : [])
+            .map(normalizeBroadcastTrap)
+            .slice(-20),
         log: (Array.isArray(state.log) ? state.log : []).slice(-80).map((entry, index) => ({
             id: String(entry?.id || `log-${index}`).trim(),
             at: Number.isFinite(Number(entry?.at)) ? Number(entry.at) : Date.now(),
             text: String(entry?.text || '').trim(),
         })),
         warrantTickSignature: state.warrantTickSignature == null ? null : state.warrantTickSignature,
+        surveillanceTickSignature: state.surveillanceTickSignature == null ? null : state.surveillanceTickSignature,
     };
 }
 
@@ -624,7 +729,504 @@ export function syncDeathReportsIntoTimelineEvidence() {
         });
         added += 1;
     }
+    const trapMatch = matchBroadcastTrapsAgainstTimeline();
+    const surveillance = syncSurveillanceFromWorldState();
+    return { added, trapsTriggered: trapMatch.triggered, surveillanceSignals: surveillance.added };
+}
+
+function makeEventKey(...parts) {
+    return parts.map((part) => normalizeKnowledgeKey(part)).filter(Boolean).join('|');
+}
+
+function pushSurveillanceSignal(plant, options = {}) {
+    const state = getInvestigatorState();
+    const livePlant = state.surveillance.find((entry) => entry.id === plant.id);
+    if (!livePlant || livePlant.status !== SURVEILLANCE_STATUS.ACTIVE) {
+        return { applied: false, reason: 'missing_plant' };
+    }
+
+    const eventKey = String(options.eventKey || '').trim();
+    if (eventKey && state.signals.some((entry) => (
+        entry.plantId === livePlant.id && entry.eventKey === eventKey
+    ))) {
+        return { applied: false, reason: 'duplicate_signal' };
+    }
+
+    const signal = normalizeSurveillanceSignal({
+        id: `signal-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+        plantId: livePlant.id,
+        at: Date.now(),
+        kind: options.kind || SURVEILLANCE_SIGNAL_KINDS.OFFICER_REPORT,
+        text: String(options.text || '').trim(),
+        sourceEvent: String(options.sourceEvent || '').trim(),
+        eventKey,
+        linkedSuspectKeys: Array.isArray(options.linkedSuspectKeys) ? options.linkedSuspectKeys : [],
+    });
+
+    state.signals.unshift(signal);
+    if (state.signals.length > MAX_SURVEILLANCE_SIGNALS) {
+        state.signals = state.signals.slice(0, MAX_SURVEILLANCE_SIGNALS);
+    }
+    livePlant.lastSignalAt = signal.at;
+    livePlant.signalIds = [signal.id, ...livePlant.signalIds].slice(0, 20);
+    if (Object.hasOwn(options, 'lastSeenHolderKey')) {
+        livePlant.lastSeenHolderKey = String(options.lastSeenHolderKey || '').trim();
+    }
+    if (Object.hasOwn(options, 'lastSeenEventKey')) {
+        livePlant.lastSeenEventKey = String(options.lastSeenEventKey || '').trim();
+    }
+    pushCaseLog(state, `SURVEIL signal: ${signal.text || signal.kind}`);
+    return { applied: true, signal };
+}
+
+export function plantSurveillance(options = {}) {
+    const state = getInvestigatorState();
+    const kindRaw = String(options.kind || SURVEILLANCE_KINDS.TRAIL).trim().toLowerCase();
+    const kind = Object.values(SURVEILLANCE_KINDS).includes(kindRaw) ? kindRaw : SURVEILLANCE_KINDS.TRAIL;
+    const activeCount = state.surveillance.filter((entry) => entry.status === SURVEILLANCE_STATUS.ACTIVE).length;
+    if (activeCount >= MAX_ACTIVE_SURVEILLANCE_PLANTS) {
+        return { applied: false, reason: 'plant_cap' };
+    }
+
+    const target = options.target
+        ? normalizeActorRef(options.target, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+        : normalizeActorRef({ type: NOTEBOOK_ACTOR_TYPES.NONE }, NOTEBOOK_ACTOR_TYPES.NONE, '');
+    const notebookItemId = String(options.notebookItemId || '').trim();
+    const location = String(options.location || '').trim();
+
+    if (kind === SURVEILLANCE_KINDS.TRAIL && !target.name) {
+        return { applied: false, reason: 'missing_target' };
+    }
+    if (kind === SURVEILLANCE_KINDS.WATCH_NOTEBOOK && !notebookItemId) {
+        return { applied: false, reason: 'missing_notebook' };
+    }
+    if (kind === SURVEILLANCE_KINDS.BUG_ROOM && !location) {
+        return { applied: false, reason: 'missing_location' };
+    }
+
+    let lastSeenHolderKey = '';
+    if (kind === SURVEILLANCE_KINDS.WATCH_NOTEBOOK) {
+        const notebook = getDeathNotes().find((entry) => entry?.itemId === notebookItemId);
+        lastSeenHolderKey = getActorKey(notebook?.holder);
+    } else if (kind === SURVEILLANCE_KINDS.TRAIL) {
+        lastSeenHolderKey = getActorKey(target);
+    }
+
+    const label = String(options.label || '').trim()
+        || (kind === SURVEILLANCE_KINDS.BUG_ROOM
+            ? `Bug: ${location}`
+            : kind === SURVEILLANCE_KINDS.WATCH_NOTEBOOK
+                ? `Watch note ${notebookItemId.slice(-6)}`
+                : `Trail: ${target.name}`);
+
+    const plant = normalizeSurveillancePlant({
+        id: `plant-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+        kind,
+        status: SURVEILLANCE_STATUS.ACTIVE,
+        location,
+        target,
+        targetKey: getActorKey(target),
+        notebookItemId,
+        label,
+        plantedAt: Date.now(),
+        plantedBy: options.plantedBy
+            ? normalizeActorRef(options.plantedBy, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+            : normalizeActorRef({ type: NOTEBOOK_ACTOR_TYPES.USER, name: 'Task Force' }, NOTEBOOK_ACTOR_TYPES.USER, 'Task Force'),
+        lastSeenHolderKey,
+    });
+    state.surveillance.push(plant);
+    pushCaseLog(state, `Surveillance planted: ${plant.label}.`);
+    return { applied: true, plant };
+}
+
+export function removeSurveillancePlant(plantId) {
+    const state = getInvestigatorState();
+    const plant = state.surveillance.find((entry) => entry.id === String(plantId || '').trim());
+    if (!plant) {
+        return { applied: false, reason: 'missing_plant' };
+    }
+    plant.status = SURVEILLANCE_STATUS.REMOVED;
+    pushCaseLog(state, `Surveillance removed: ${plant.label || plant.id}.`);
+    return { applied: true, plant };
+}
+
+export function logSurveillanceSignalAsEvidence(signalId) {
+    const state = getInvestigatorState();
+    const signal = state.signals.find((entry) => entry.id === String(signalId || '').trim());
+    if (!signal) {
+        return { applied: false, reason: 'missing_signal' };
+    }
+    if (signal.evidenceId) {
+        return { applied: false, reason: 'already_logged', evidenceId: signal.evidenceId };
+    }
+    const plant = state.surveillance.find((entry) => entry.id === signal.plantId);
+    const evidence = logEvidence({
+        type: EVIDENCE_TYPES.SIGHTING,
+        title: `Surveillance: ${plant?.label || signal.kind}`,
+        detail: signal.text,
+        source: `surveil:${signal.id}`,
+        linkedSuspectKeys: signal.linkedSuspectKeys,
+    }).evidence;
+    const live = getInvestigatorState().signals.find((entry) => entry.id === signal.id);
+    if (live) {
+        live.evidenceId = evidence.id;
+    }
+    return { applied: true, evidence };
+}
+
+export function syncSurveillanceFromWorldState() {
+    const state = getInvestigatorState();
+    const active = state.surveillance.filter((entry) => entry.status === SURVEILLANCE_STATUS.ACTIVE);
+    if (!active.length) {
+        return { added: 0 };
+    }
+
+    const notebooks = getDeathNotes();
+    const inventory = getDeathNoteInventory();
+    let added = 0;
+
+    for (const plant of active) {
+        if (plant.kind === SURVEILLANCE_KINDS.WATCH_NOTEBOOK) {
+            const notebook = notebooks.find((entry) => entry?.itemId === plant.notebookItemId);
+            if (!notebook || notebook.destroyed) {
+                continue;
+            }
+            const holderKey = getActorKey(notebook.holder);
+            if (holderKey && holderKey !== plant.lastSeenHolderKey) {
+                const fromLabel = plant.lastSeenHolderKey || 'unknown';
+                const toLabel = notebook.holder?.name || holderKey;
+                const result = pushSurveillanceSignal(plant, {
+                    kind: SURVEILLANCE_SIGNAL_KINDS.CUSTODY_MOVE,
+                    sourceEvent: 'note_lend',
+                    eventKey: makeEventKey('custody', plant.id, fromLabel, holderKey, notebook.updatedAt || Date.now()),
+                    text: `SURVEIL ${plant.label}: custody change — ${notebook.label || 'Death Note'} → ${toLabel}.`,
+                    linkedSuspectKeys: [holderKey].filter(Boolean),
+                    lastSeenHolderKey: holderKey,
+                });
+                if (result.applied) {
+                    added += 1;
+                }
+            } else if (!plant.lastSeenHolderKey && holderKey) {
+                plant.lastSeenHolderKey = holderKey;
+            }
+
+            if (notebook.presenceReveal?.pending) {
+                const eventKey = makeEventKey('open', plant.id, notebook.presenceReveal.openedAt || Date.now());
+                const result = pushSurveillanceSignal(plant, {
+                    kind: SURVEILLANCE_SIGNAL_KINDS.SIGHTING_OPEN,
+                    sourceEvent: 'notebook_open_reveal',
+                    eventKey,
+                    text: `SURVEIL ${plant.label}: notebook activity detected near ${notebook.holder?.name || 'holder'}. Contents unknown.`,
+                    linkedSuspectKeys: [holderKey].filter(Boolean),
+                    lastSeenEventKey: eventKey,
+                });
+                if (result.applied) {
+                    added += 1;
+                }
+            }
+        }
+
+        if (plant.kind === SURVEILLANCE_KINDS.TRAIL && plant.targetKey) {
+            for (const notebook of notebooks) {
+                if (!notebook || notebook.destroyed || !notebook.exists) {
+                    continue;
+                }
+                const holderKey = getActorKey(notebook.holder);
+                if (holderKey !== plant.targetKey) {
+                    continue;
+                }
+                if (notebook.presenceReveal?.pending) {
+                    const eventKey = makeEventKey('trail-open', plant.id, notebook.itemId, notebook.presenceReveal.openedAt || Date.now());
+                    const result = pushSurveillanceSignal(plant, {
+                        kind: SURVEILLANCE_SIGNAL_KINDS.SIGHTING_OPEN,
+                        sourceEvent: 'notebook_open_reveal',
+                        eventKey,
+                        text: `SURVEIL ${plant.label}: subject active with notebook. No page contents recovered.`,
+                        linkedSuspectKeys: [plant.targetKey],
+                    });
+                    if (result.applied) {
+                        added += 1;
+                    }
+                }
+            }
+
+            for (const scrap of inventory.scraps || []) {
+                if (!scrap?.active) {
+                    continue;
+                }
+                const holderKey = getActorKey(scrap.holder);
+                if (holderKey !== plant.targetKey) {
+                    continue;
+                }
+                const eventKey = makeEventKey('scrap', plant.id, scrap.id, scrap.updatedAt || scrap.createdAt || '');
+                if (eventKey && eventKey !== makeEventKey('scrap', plant.id, scrap.id, '')) {
+                    const result = pushSurveillanceSignal(plant, {
+                        kind: SURVEILLANCE_SIGNAL_KINDS.CUSTODY_MOVE,
+                        sourceEvent: 'scrap_move',
+                        eventKey,
+                        text: `SURVEIL ${plant.label}: scrap custody with ${scrap.holder?.name || 'subject'} observed.`,
+                        linkedSuspectKeys: [plant.targetKey],
+                        lastSeenEventKey: eventKey,
+                    });
+                    if (result.applied) {
+                        added += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Subject-active: newly resolved deaths written from a watched notebook source.
+    const deathState = getDeathNoteChatState();
+    const entries = Array.isArray(deathState?.entries) ? deathState.entries : [];
+    for (const plant of active.filter((entry) => entry.kind === SURVEILLANCE_KINDS.WATCH_NOTEBOOK)) {
+        for (const entry of entries) {
+            const sourceId = String(entry?.sourceId || entry?.source?.id || '').trim();
+            if (!sourceId || sourceId !== plant.notebookItemId) {
+                continue;
+            }
+            const eventKey = makeEventKey('write', plant.id, entry.id || entry.createdAt);
+            const result = pushSurveillanceSignal(plant, {
+                kind: SURVEILLANCE_SIGNAL_KINDS.SUBJECT_ACTIVE,
+                sourceEvent: 'holder_write',
+                eventKey,
+                text: `SURVEIL ${plant.label}: subject active with notebook. No page contents recovered.`,
+                linkedSuspectKeys: [getActorKey(notebooks.find((note) => note?.itemId === plant.notebookItemId)?.holder)].filter(Boolean),
+            });
+            if (result.applied) {
+                added += 1;
+            }
+        }
+    }
+
     return { added };
+}
+
+export function tickSurveillanceForGeneration(signature) {
+    const state = getInvestigatorState();
+    const nextSignature = signature == null ? Date.now() : signature;
+    if (state.surveillanceTickSignature === nextSignature) {
+        return { ticked: false, added: 0 };
+    }
+    state.surveillanceTickSignature = nextSignature;
+    const result = syncSurveillanceFromWorldState();
+    return { ticked: true, added: result.added };
+}
+
+function detectVictimPatterns(timeline) {
+    const deaths = Array.isArray(timeline) ? timeline : [];
+    const directoryNames = new Set(
+        getCharacterNameDirectory().map((entry) => normalizeKnowledgeKey(entry.actor?.name)),
+    );
+    const patterns = [];
+
+    const heartAttacks = deaths.filter((entry) => /heart\s*attack/i.test(String(entry.cause || '')));
+    if (heartAttacks.length >= 3) {
+        patterns.push({
+            pattern: 'heart_attack_cluster',
+            deathIds: heartAttacks.map((entry) => entry.id),
+            detail: `${heartAttacks.length} resolved deaths share heart-attack causes.`,
+        });
+    }
+
+    if (deaths.length >= 4) {
+        const gaps = [];
+        for (let index = 1; index < deaths.length; index += 1) {
+            const prev = Number(deaths[index - 1].resolvedAt) || 0;
+            const next = Number(deaths[index].resolvedAt) || 0;
+            if (prev && next && next >= prev) {
+                gaps.push(next - prev);
+            }
+        }
+        if (gaps.length) {
+            const sorted = gaps.slice().sort((left, right) => left - right);
+            const median = sorted[Math.floor(sorted.length / 2)];
+            if (median <= 6 * 60 * 60 * 1000) {
+                patterns.push({
+                    pattern: 'timing_window',
+                    deathIds: deaths.map((entry) => entry.id),
+                    detail: `Median gap between consecutive resolved deaths is ${Math.round(median / 60000)} minutes.`,
+                });
+            }
+        }
+    }
+
+    if (deaths.length >= 3) {
+        const offCard = deaths.filter((entry) => !directoryNames.has(normalizeKnowledgeKey(entry.targetName)));
+        if ((offCard.length / deaths.length) >= 0.7) {
+            patterns.push({
+                pattern: 'criminals_only',
+                deathIds: offCard.map((entry) => entry.id),
+                detail: `${offCard.length}/${deaths.length} victims are off the active character roster.`,
+            });
+        }
+    }
+
+    const recent = deaths.slice(-5);
+    const characterVictims = recent.filter((entry) => directoryNames.has(normalizeKnowledgeKey(entry.targetName)));
+    if (characterVictims.length >= 2) {
+        patterns.push({
+            pattern: 'anyone_pattern',
+            deathIds: characterVictims.map((entry) => entry.id),
+            detail: `${characterVictims.length} of the last ${recent.length} victims are named cast characters.`,
+        });
+    }
+
+    const inventory = getDeathNoteInventory();
+    const scrapHolderNames = new Set(
+        (inventory.scraps || [])
+            .filter((scrap) => scrap?.active)
+            .map((scrap) => normalizeKnowledgeKey(scrap.holder?.name))
+            .filter(Boolean),
+    );
+    const scrapHolderDeaths = deaths.filter((entry) => scrapHolderNames.has(normalizeKnowledgeKey(entry.targetName)));
+    if (scrapHolderDeaths.length >= 1) {
+        patterns.push({
+            pattern: 'scrap_holder_deaths',
+            deathIds: scrapHolderDeaths.map((entry) => entry.id),
+            detail: `${scrapHolderDeaths.length} victim(s) currently/recently match scrap holders.`,
+        });
+    }
+
+    if (!patterns.length) {
+        patterns.push({
+            pattern: 'insufficient_data',
+            deathIds: deaths.map((entry) => entry.id),
+            detail: `Sample size ${deaths.length} is too thin for a confident pattern.`,
+        });
+    }
+
+    return patterns;
+}
+
+export function analyzeVictimPattern(options = {}) {
+    const timeline = getInvestigatorVictimTimeline();
+    const detected = detectVictimPatterns(timeline);
+    const focus = String(options.note || options.detail || '').trim().toLowerCase();
+    const chosen = focus
+        ? (detected.find((entry) => entry.pattern.includes(focus.replace(/\s+/g, '_'))) || detected[0])
+        : detected[0];
+
+    const deathKey = chosen.deathIds.slice().sort().join(',');
+    const state = getInvestigatorState();
+    const duplicate = state.patternReports.find((entry) => (
+        entry.pattern === chosen.pattern && entry.deathIds.slice().sort().join(',') === deathKey
+    ));
+    if (duplicate) {
+        return { applied: false, reason: 'duplicate_report', report: duplicate };
+    }
+
+    const evidence = logEvidence({
+        type: EVIDENCE_TYPES.PATTERN_REPORT,
+        title: `Pattern report: ${chosen.pattern}`,
+        detail: chosen.detail,
+        source: 'analyze_pattern',
+        itemRef: {
+            kind: 'pattern_report',
+            id: `pattern-${Date.now()}`,
+            label: chosen.pattern,
+            snapshot: JSON.stringify({
+                pattern: chosen.pattern,
+                deathIds: chosen.deathIds,
+                sampleSize: timeline.length,
+            }),
+        },
+    }).evidence;
+
+    const report = normalizePatternReport({
+        id: evidence.itemRef?.id || `pattern-${Date.now()}`,
+        pattern: chosen.pattern,
+        deathIds: chosen.deathIds,
+        createdAt: Date.now(),
+        evidenceId: evidence.id,
+        detail: chosen.detail,
+    });
+    const liveState = getInvestigatorState();
+    liveState.patternReports.push(report);
+    pushCaseLog(liveState, `Pattern analysis: ${chosen.pattern}.`);
+    return { applied: true, report, evidence, patterns: detected };
+}
+
+export function createBroadcastTrap(options = {}) {
+    const decoyName = String(options.decoyName || options.target || '').trim();
+    if (!decoyName) {
+        return { applied: false, reason: 'missing_decoy' };
+    }
+    const state = getInvestigatorState();
+    for (const trap of state.broadcastTraps) {
+        if (trap.status === BROADCAST_TRAP_STATUS.ACTIVE) {
+            trap.status = BROADCAST_TRAP_STATUS.EXPIRED;
+        }
+    }
+    const trap = normalizeBroadcastTrap({
+        id: `trap-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+        status: BROADCAST_TRAP_STATUS.ACTIVE,
+        decoyName,
+        challenge: String(options.challenge || options.detail || options.note || '').trim(),
+        createdAt: Date.now(),
+        createdBy: options.createdBy
+            ? normalizeActorRef(options.createdBy, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+            : normalizeActorRef({ type: NOTEBOOK_ACTOR_TYPES.USER, name: 'Task Force' }, NOTEBOOK_ACTOR_TYPES.USER, 'Task Force'),
+    });
+    state.broadcastTraps.push(trap);
+    pushCaseLog(state, `Broadcast trap armed: ${decoyName}.`);
+    return { applied: true, trap };
+}
+
+export function getActiveBroadcastTrap() {
+    return getInvestigatorState().broadcastTraps.find((entry) => entry.status === BROADCAST_TRAP_STATUS.ACTIVE) || null;
+}
+
+export function matchBroadcastTrapsAgainstTimeline() {
+    const state = getInvestigatorState();
+    const active = state.broadcastTraps.filter((entry) => entry.status === BROADCAST_TRAP_STATUS.ACTIVE);
+    if (!active.length) {
+        return { triggered: 0 };
+    }
+    const timeline = getInvestigatorVictimTimeline();
+    let triggered = 0;
+
+    for (const trap of active) {
+        const match = timeline.find((death) => (
+            normalizeKnowledgeKey(death.targetName) === normalizeKnowledgeKey(trap.decoyName)
+        ));
+        if (!match) {
+            continue;
+        }
+
+        const trapId = trap.id;
+        const evidence = logEvidence({
+            type: EVIDENCE_TYPES.TRAP_LINK,
+            title: `Trap link: ${trap.decoyName}`,
+            detail: [
+                `Broadcast decoy "${trap.decoyName}" killed.`,
+                `Death entry: ${match.id}`,
+                `Cause: ${match.cause}`,
+                trap.challenge ? `Challenge: ${trap.challenge}` : '',
+            ].filter(Boolean).join('\n'),
+            source: 'auto_trap_link',
+            itemRef: {
+                kind: 'broadcast_trap',
+                id: trapId,
+                label: trap.decoyName,
+                snapshot: match.noteText || '',
+            },
+        }).evidence;
+
+        const liveState = getInvestigatorState();
+        const live = liveState.broadcastTraps.find((entry) => entry.id === trapId);
+        if (!live) {
+            continue;
+        }
+        live.status = BROADCAST_TRAP_STATUS.TRIGGERED;
+        live.matchedDeathId = match.id;
+        live.evidenceId = evidence.id;
+        live.triggeredAt = Date.now();
+        pushCaseLog(liveState, `TRAP LINK: decoy ${live.decoyName} matched death ${match.id}.`);
+        triggered += 1;
+    }
+
+    return { triggered };
 }
 
 export function getSeizeCandidates() {
@@ -1071,6 +1673,8 @@ function parseCaseActionBlock(blockBody) {
         type: '',
         generations: '',
         note: '',
+        kind: '',
+        notebook: '',
     };
     for (const line of String(blockBody ?? '').split(/\r?\n/)) {
         const match = line.match(/^\s*([a-z_]+)\s*:\s*(.+?)\s*$/i);
@@ -1217,6 +1821,80 @@ export function applyCaseAction(parsed, speaker) {
         };
     }
 
+    if (action === CASE_ACTIONS.SURVEIL) {
+        const kindRaw = String(parsed.kind || '').trim().toLowerCase();
+        let kind = Object.values(SURVEILLANCE_KINDS).includes(kindRaw) ? kindRaw : '';
+        const target = parsed.target ? resolveTargetActorByName(parsed.target) : null;
+        if (!kind) {
+            kind = target?.name ? SURVEILLANCE_KINDS.TRAIL : SURVEILLANCE_KINDS.BUG_ROOM;
+        }
+
+        // Field officers may only append reports against existing plants.
+        const officer = getOfficerRecord(speaker);
+        if (officer?.clearance === OFFICER_CLEARANCE.FIELD) {
+            const state = getInvestigatorState();
+            const plant = state.surveillance.find((entry) => (
+                entry.status === SURVEILLANCE_STATUS.ACTIVE
+                && (
+                    (target?.name && normalizeKnowledgeKey(entry.target?.name) === normalizeKnowledgeKey(target.name))
+                    || (parsed.target && normalizeKnowledgeKey(entry.location) === normalizeKnowledgeKey(parsed.target))
+                    || (parsed.notebook && entry.notebookItemId === String(parsed.notebook || '').trim())
+                )
+            ));
+            if (!plant) {
+                return { applied: false, reason: 'insufficient_clearance' };
+            }
+            const signal = pushSurveillanceSignal(plant, {
+                kind: SURVEILLANCE_SIGNAL_KINDS.OFFICER_REPORT,
+                sourceEvent: 'ai_report',
+                eventKey: makeEventKey('ai', plant.id, Date.now(), parsed.note || parsed.detail),
+                text: parsed.note || parsed.detail || parsed.reason || `Officer report from ${speaker.name}.`,
+                linkedSuspectKeys: plant.targetKey ? [plant.targetKey] : [],
+            });
+            return { applied: Boolean(signal.applied), reason: signal.reason || 'surveil_reported', signal: signal.signal };
+        }
+
+        const result = plantSurveillance({
+            kind,
+            target,
+            location: kind === SURVEILLANCE_KINDS.BUG_ROOM ? (parsed.target || parsed.detail || '') : '',
+            notebookItemId: parsed.notebook || '',
+            label: parsed.title || '',
+            plantedBy: speaker,
+        });
+        if (result.applied && (parsed.note || parsed.detail || parsed.reason)) {
+            pushSurveillanceSignal(result.plant, {
+                kind: SURVEILLANCE_SIGNAL_KINDS.OFFICER_REPORT,
+                sourceEvent: 'ai_report',
+                eventKey: makeEventKey('ai-plant', result.plant.id, Date.now()),
+                text: parsed.note || parsed.detail || parsed.reason,
+                linkedSuspectKeys: result.plant.targetKey ? [result.plant.targetKey] : [],
+            });
+        }
+        return { applied: Boolean(result.applied), reason: result.reason || 'surveil_planted', plant: result.plant };
+    }
+
+    if (action === CASE_ACTIONS.ANALYZE) {
+        const result = analyzeVictimPattern({
+            note: parsed.note || parsed.detail || parsed.reason || '',
+        });
+        return {
+            applied: Boolean(result.applied),
+            reason: result.reason || 'analyzed',
+            report: result.report,
+            evidence: result.evidence,
+        };
+    }
+
+    if (action === CASE_ACTIONS.BROADCAST) {
+        const result = createBroadcastTrap({
+            decoyName: parsed.target || parsed.title || '',
+            challenge: parsed.detail || parsed.note || parsed.reason || '',
+            createdBy: speaker,
+        });
+        return { applied: Boolean(result.applied), reason: result.reason || 'broadcast_armed', trap: result.trap };
+    }
+
     return { applied: false, reason: 'unhandled_action' };
 }
 
@@ -1321,6 +1999,9 @@ export function buildCasePromptReplacements() {
     const evidence = (state.evidence || []).slice(0, 12);
     const restrained = state.restrained || [];
     const warrants = (state.warrants || []).filter((entry) => entry.status === WARRANT_STATUS.PENDING);
+    const plants = (state.surveillance || []).filter((entry) => entry.status === SURVEILLANCE_STATUS.ACTIVE);
+    const traps = (state.broadcastTraps || []).filter((entry) => entry.status === BROADCAST_TRAP_STATUS.ACTIVE);
+    const recentSignals = (state.signals || []).slice(0, 5);
 
     return {
         play_role: getPlayRole(),
@@ -1350,6 +2031,15 @@ export function buildCasePromptReplacements() {
                 `- ${entry.target?.name || 'Unknown'} (${entry.generationsLeft} gen left)${entry.note ? `: ${entry.note}` : ''}`
             )).join('\n')
             : 'No pending warrants.',
+        surveillance_block: plants.length
+            ? [
+                ...plants.map((entry) => `- ${entry.label || entry.kind} [${entry.kind}]`),
+                ...recentSignals.map((entry) => `  signal: ${entry.text || entry.kind}`),
+            ].join('\n')
+            : 'No active surveillance plants.',
+        traps_block: traps.length
+            ? traps.map((entry) => `- ${entry.decoyName}${entry.challenge ? `: ${entry.challenge}` : ''}`).join('\n')
+            : 'No active broadcast traps.',
     };
 }
 
@@ -1361,6 +2051,9 @@ export {
     CASE_ACTION_BLOCK_TAG,
     DEFAULT_CASE_PROMPT_TEMPLATE,
     OFFICER_CLEARANCE,
+    SURVEILLANCE_KINDS,
+    SURVEILLANCE_STATUS,
+    BROADCAST_TRAP_STATUS,
     WARRANT_STATUS,
     WARRANT_RESULTS,
     getActorKey,
