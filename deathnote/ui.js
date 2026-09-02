@@ -90,6 +90,7 @@ let chatNameMaskObserver = null;
 let chatNameMaskQueued = false;
 let inventorySettingsOpen = false;
 let inventoryManageOpen = false;
+let inventoryManageTheme = 'default';
 let notebookPageSessionCache = new Map();
 let notebookPageSessionKey = '';
 let inventoryDragState = {
@@ -3269,17 +3270,18 @@ function renderInventoryManageContentHtml() {
 }
 
 function renderInventoryManageModalHtml() {
+    const terminal = inventoryManageTheme === 'terminal';
     return `
-        <div class="kw-dn-settings-modal__backdrop" data-close-manage-modal="true">
-            <div class="kw-dn-settings-modal__dialog kw-dn-settings-modal__dialog--manage" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
-                <div class="kw-dn-settings-modal__header">
+        <div class="kw-dn-settings-modal__backdrop ${terminal ? 'kw-dn-manage-terminal__backdrop' : ''}" data-close-manage-modal="true">
+            <div class="kw-dn-settings-modal__dialog kw-dn-settings-modal__dialog--manage ${terminal ? 'kw-dn-manage-terminal__dialog' : ''}" role="dialog" aria-modal="true" aria-labelledby="kw-dn-manage-modal-title">
+                <div class="kw-dn-settings-modal__header ${terminal ? 'kw-dn-manage-terminal__header' : ''}">
                     <div>
-                        <div class="kw-dn-settings-modal__eyebrow">Killer Within</div>
-                        <h3 id="kw-dn-manage-modal-title" class="kw-dn-settings-modal__title">Manage Death Notes</h3>
+                        <div class="kw-dn-settings-modal__eyebrow">${terminal ? 'TASK FORCE OS // DEBUG' : 'Killer Within'}</div>
+                        <h3 id="kw-dn-manage-modal-title" class="kw-dn-settings-modal__title">${terminal ? 'Notebook Registry' : 'Manage Death Notes'}</h3>
                     </div>
-                    <button type="button" class="menu_button kw-dn-settings-modal__close" data-close-manage-modal="true" aria-label="Close manager">Close</button>
+                    <button type="button" class="menu_button kw-dn-settings-modal__close ${terminal ? 'kw-investigator-btn' : ''}" data-close-manage-modal="true" aria-label="Close manager">Close</button>
                 </div>
-                <div class="kw-dn-settings-modal__body">
+                <div class="kw-dn-settings-modal__body ${terminal ? 'kw-dn-manage-terminal__body' : ''}">
                     ${renderInventoryManageContentHtml()}
                 </div>
             </div>
@@ -3325,8 +3327,23 @@ function ensureInventoryManageModal() {
         document.body.append(root);
     }
 
+    root.classList.toggle('kw-dn-manage--terminal', inventoryManageTheme === 'terminal');
     root.innerHTML = renderInventoryManageModalHtml();
     return root;
+}
+
+export function openDeathNoteManageModal(options = {}) {
+    inventoryManageOpen = true;
+    inventoryManageTheme = String(options.theme || '').trim().toLowerCase() === 'terminal'
+        ? 'terminal'
+        : 'default';
+    refreshDeathNoteUi();
+}
+
+export function closeDeathNoteManageModal() {
+    inventoryManageOpen = false;
+    inventoryManageTheme = 'default';
+    refreshDeathNoteUi();
 }
 
 function ensureInventoryTray() {
@@ -4098,6 +4115,7 @@ function bindInventoryUi() {
         .on('click', '#kw-dn-inventory-manage-open', (event) => {
             event.preventDefault();
             inventoryManageOpen = true;
+            inventoryManageTheme = 'default';
             refreshDeathNoteUi();
         })
         .off('click', '#kw-deathnote-settings-open-drawer')
@@ -4130,12 +4148,14 @@ function bindInventoryUi() {
 
             event.preventDefault();
             inventoryManageOpen = false;
+            inventoryManageTheme = 'default';
             refreshDeathNoteUi();
         })
         .off('click', `#${INVENTORY_MANAGE_MODAL_ID} .kw-dn-settings-modal__close`)
         .on('click', `#${INVENTORY_MANAGE_MODAL_ID} .kw-dn-settings-modal__close`, (event) => {
             event.preventDefault();
             inventoryManageOpen = false;
+            inventoryManageTheme = 'default';
             refreshDeathNoteUi();
         })
         .off('click', '.kw-dn-inventory__slot[data-item-key]')
@@ -4225,6 +4245,7 @@ function bindInventoryUi() {
             settings.selectedNotebookId = notebookId;
             settings.inventorySelectedItemKey = `notebook:${notebookId}`;
             inventoryManageOpen = false;
+            inventoryManageTheme = 'default';
             setSelectedNotebookId(notebookId);
             scheduleSettingsSave();
             setNotebookOpenState(true, { notebookId, debugPeek: true });
@@ -4487,6 +4508,7 @@ function bindInventoryUi() {
 
             inventorySettingsOpen = false;
             inventoryManageOpen = false;
+            inventoryManageTheme = 'default';
             refreshDeathNoteUi();
         });
 }
