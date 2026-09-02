@@ -31,4 +31,6 @@ export const DEFAULT_INVESTIGATOR_SETTINGS = Object.freeze({
     activeScreen: 'board',
     hubX: null,
     hubY: null,
+    dockX: null,
+    dockY: null,
 });
