@@ -1,6 +1,8 @@
 import {
     getInvestigatorSettings,
+    ingestIdentityTheftExposureForMessage,
     processAssistantCaseActionMessage,
+    processInterrogationMessage,
     syncDeathReportsIntoTimelineEvidence,
 } from './core.js';
 import { persistChatChanges } from '../deathnote/core.js';
@@ -10,14 +12,17 @@ import {
     setupInvestigatorUi,
 } from './ui.js';
 
-function processLatestCaseAction() {
+function processLatestInvestigatorEffects() {
     const context = globalThis.SillyTavern?.getContext?.() ?? null;
     const chat = Array.isArray(context?.chat) ? context.chat : [];
     const lastIndex = chat.length - 1;
     if (lastIndex < 0) {
         return false;
     }
-    return processAssistantCaseActionMessage(lastIndex);
+    const ingested = ingestIdentityTheftExposureForMessage(lastIndex);
+    const caseChanged = processAssistantCaseActionMessage(lastIndex);
+    const clipped = processInterrogationMessage(lastIndex);
+    return ingested || clipped || caseChanged;
 }
 
 function registerInvestigatorEvents() {
@@ -37,7 +42,7 @@ function registerInvestigatorEvents() {
     eventSource.on(event_types.MESSAGE_SENT, () => refreshInvestigatorUi());
 
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
-        const changed = processLatestCaseAction();
+        const changed = processLatestInvestigatorEffects();
         if (changed) {
             await persistChatChanges();
         }
@@ -45,7 +50,7 @@ function registerInvestigatorEvents() {
     });
 
     const finalizeAssistantMessage = async () => {
-        const changed = processLatestCaseAction();
+        const changed = processLatestInvestigatorEffects();
         if (changed) {
             await persistChatChanges();
             refresh();

@@ -6,8 +6,11 @@ import {
     CONFRONT_PRIME_STRENGTH,
     DEFAULT_CASE_PROMPT_TEMPLATE,
     DEFAULT_INVESTIGATOR_SETTINGS,
+    DEFAULT_TASK_FORCE_TRUST,
     DEFAULT_WARRANT_GENERATIONS,
+    EVIDENCE_CUSTODY,
     EVIDENCE_TYPES,
+    INTERROGATION_STATUS,
     INVESTIGATOR_CHAT_METADATA_KEY,
     INVESTIGATOR_MESSAGE_EXTRA_KEY,
     INVESTIGATOR_MODULE_NAME,
@@ -20,6 +23,8 @@ import {
     SURVEILLANCE_SIGNAL_KINDS,
     SURVEILLANCE_STATUS,
     SUSPECT_STATUSES,
+    TASK_FORCE_TRUST_BLOCK,
+    TASK_FORCE_TRUST_WARN,
     WARRANT_RESULTS,
     WARRANT_STATUS,
 } from './config.js';
@@ -42,11 +47,12 @@ import {
     transferNotebookTo,
     transferNotebookScrap,
     getCharacterNameDirectory,
+    getPendingIdentityTheftExposure,
 } from '../deathnote/core.js';
 
 function createDefaultInvestigatorState() {
     return {
-        version: 4,
+        version: 5,
         caseId: `TF-${String(Date.now()).slice(-6)}`,
         caseTitle: 'Kira Case File',
         suspects: [],
@@ -61,6 +67,9 @@ function createDefaultInvestigatorState() {
         signals: [],
         patternReports: [],
         broadcastTraps: [],
+        interrogations: [],
+        taskForceTrust: DEFAULT_TASK_FORCE_TRUST,
+        idTheftIngestedAt: null,
         log: [],
         warrantTickSignature: null,
         surveillanceTickSignature: null,
@@ -136,7 +145,17 @@ function normalizeEvidence(value, index = 0) {
                 id: String(entry.itemRef.id || '').trim(),
                 label: String(entry.itemRef.label || '').trim(),
                 snapshot: String(entry.itemRef.snapshot || ''),
+                seizedFrom: entry.itemRef.seizedFrom && typeof entry.itemRef.seizedFrom === 'object'
+                    ? normalizeActorRef(entry.itemRef.seizedFrom, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+                    : null,
             }
+            : null,
+        custody: Object.values(EVIDENCE_CUSTODY).includes(String(entry.custody || '').trim().toLowerCase())
+            ? String(entry.custody).trim().toLowerCase()
+            : EVIDENCE_CUSTODY.NONE,
+        releasedAt: Number.isFinite(Number(entry.releasedAt)) ? Number(entry.releasedAt) : null,
+        releasedTo: entry.releasedTo && typeof entry.releasedTo === 'object'
+            ? normalizeActorRef(entry.releasedTo, NOTEBOOK_ACTOR_TYPES.NONE, '')
             : null,
         createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
     };
@@ -289,11 +308,31 @@ function normalizeBroadcastTrap(value, index = 0) {
     };
 }
 
+function normalizeInterrogation(value, index = 0) {
+    const entry = value && typeof value === 'object' ? value : {};
+    const actor = normalizeActorRef(entry.actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const statusRaw = String(entry.status || INTERROGATION_STATUS.ACTIVE).trim().toLowerCase();
+    const status = Object.values(INTERROGATION_STATUS).includes(statusRaw)
+        ? statusRaw
+        : INTERROGATION_STATUS.ACTIVE;
+    return {
+        key: String(entry.key || getActorKey(actor) || `interrogation-${index + 1}`).trim(),
+        actor,
+        status,
+        startedAt: Number.isFinite(Number(entry.startedAt)) ? Number(entry.startedAt) : Date.now(),
+        endedAt: Number.isFinite(Number(entry.endedAt)) ? Number(entry.endedAt) : null,
+        messageIds: Array.isArray(entry.messageIds)
+            ? entry.messageIds.map((id) => String(id || '').trim()).filter(Boolean).slice(-40)
+            : [],
+        autoClip: entry.autoClip !== false,
+    };
+}
+
 function normalizeInvestigatorState(value) {
     const defaults = createDefaultInvestigatorState();
     const state = value && typeof value === 'object' ? value : {};
     return {
-        version: 4,
+        version: 5,
         caseId: String(state.caseId || defaults.caseId).trim() || defaults.caseId,
         caseTitle: String(state.caseTitle || defaults.caseTitle).trim() || defaults.caseTitle,
         suspects: (Array.isArray(state.suspects) ? state.suspects : []).map(normalizeSuspect),
@@ -322,6 +361,15 @@ function normalizeInvestigatorState(value) {
         broadcastTraps: (Array.isArray(state.broadcastTraps) ? state.broadcastTraps : [])
             .map(normalizeBroadcastTrap)
             .slice(-20),
+        interrogations: (Array.isArray(state.interrogations) ? state.interrogations : [])
+            .map(normalizeInterrogation)
+            .slice(-20),
+        taskForceTrust: Math.max(0, Math.min(100, Math.round(
+            Number.isFinite(Number(state.taskForceTrust))
+                ? Number(state.taskForceTrust)
+                : DEFAULT_TASK_FORCE_TRUST,
+        ))),
+        idTheftIngestedAt: Number.isFinite(Number(state.idTheftIngestedAt)) ? Number(state.idTheftIngestedAt) : null,
         log: (Array.isArray(state.log) ? state.log : []).slice(-80).map((entry, index) => ({
             id: String(entry?.id || `log-${index}`).trim(),
             at: Number.isFinite(Number(entry?.at)) ? Number(entry.at) : Date.now(),
@@ -494,6 +542,7 @@ export function logEvidence(options = {}) {
         source: options.source || 'manual',
         linkedSuspectKeys: options.linkedSuspectKeys || [],
         itemRef: options.itemRef || null,
+        custody: options.custody || EVIDENCE_CUSTODY.NONE,
         createdAt: Date.now(),
     });
     state.evidence.unshift(evidence);
@@ -633,7 +682,9 @@ export function seizeNotebook(notebookId, options = {}) {
             id: notebook.itemId,
             label: notebook.label || 'Death Note',
             snapshot,
+            seizedFrom: holder,
         },
+        custody: EVIDENCE_CUSTODY.HELD,
     }).evidence;
 
     // Auto-pin holder as prime if not cleared.
@@ -693,13 +744,260 @@ export function seizeScrap(scrapId, options = {}) {
             id: scrap.id,
             label: scrap.label || 'Scrap',
             snapshot: String(scrap.noteText || ''),
+            seizedFrom: holder,
         },
+        custody: EVIDENCE_CUSTODY.HELD,
     }).evidence;
 
     pinSuspect(holder, { status: SUSPECT_STATUSES.PRIME });
     linkEvidenceToSuspect(evidence.id, getActorKey(holder));
     pushCaseLog(state, `SEIZE scrap success from ${holder.name}.`);
     return { applied: true, scrapId: scrap.id, evidence, holder };
+}
+
+function getUserActorRef() {
+    return normalizeActorRef({
+        type: NOTEBOOK_ACTOR_TYPES.USER,
+        id: '',
+        name: 'User',
+    }, NOTEBOOK_ACTOR_TYPES.USER, 'User');
+}
+
+export function getTaskForceTrust() {
+    const value = Number(getInvestigatorState().taskForceTrust);
+    if (!Number.isFinite(value)) {
+        return DEFAULT_TASK_FORCE_TRUST;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+export function isTaskForceTrustBlocked() {
+    return getTaskForceTrust() < TASK_FORCE_TRUST_BLOCK;
+}
+
+export function adjustTaskForceTrust(delta, reason = '') {
+    const state = getInvestigatorState();
+    const previous = getTaskForceTrust();
+    const next = Math.max(0, Math.min(100, previous + Math.round(Number(delta) || 0)));
+    state.taskForceTrust = next;
+    if (next !== previous) {
+        pushCaseLog(state, `Task Force trust ${previous} → ${next}${reason ? ` (${reason})` : ''}.`);
+    }
+    return next;
+}
+
+export function releaseSeizedEvidence(evidenceId, options = {}) {
+    const state = getInvestigatorState();
+    const evidence = state.evidence.find((entry) => entry.id === String(evidenceId || '').trim());
+    if (!evidence) {
+        return { applied: false, reason: 'missing_evidence' };
+    }
+    if (evidence.custody === EVIDENCE_CUSTODY.RELEASED) {
+        return { applied: false, reason: 'already_released', evidence };
+    }
+    if (evidence.type !== EVIDENCE_TYPES.NOTEBOOK && evidence.type !== EVIDENCE_TYPES.SCRAP) {
+        return { applied: false, reason: 'not_physical' };
+    }
+
+    const itemId = String(evidence.itemRef?.id || '').trim();
+    if (!itemId) {
+        return { applied: false, reason: 'missing_item' };
+    }
+
+    let target = options.target
+        ? normalizeActorRef(options.target, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+        : (evidence.itemRef?.seizedFrom
+            ? normalizeActorRef(evidence.itemRef.seizedFrom, NOTEBOOK_ACTOR_TYPES.CHARACTER, '')
+            : getUserActorRef());
+    if (!target?.name && !target?.type) {
+        target = getUserActorRef();
+    }
+    if (target.type === NOTEBOOK_ACTOR_TYPES.USER || options.toUser === true || String(options.toUser || '') === 'true') {
+        target = getUserActorRef();
+    }
+
+    const userAccess = target.type === NOTEBOOK_ACTOR_TYPES.USER
+        ? NOTEBOOK_USER_ACCESS.FULL
+        : NOTEBOOK_USER_ACCESS.NONE;
+
+    if (evidence.type === EVIDENCE_TYPES.NOTEBOOK) {
+        const transferred = transferNotebookTo(target, {
+            notebookItemId: itemId,
+            userAccess,
+            exists: true,
+            reason: String(options.reason || '').trim()
+                || `Released from Task Force evidence to ${target.name || target.type}.`,
+        });
+        if (!transferred) {
+            return { applied: false, reason: 'transfer_failed' };
+        }
+        const deathState = getDeathNoteChatState();
+        const live = (deathState.notebooks || []).find((entry) => entry?.itemId === itemId);
+        if (live) {
+            live.evidenceCustody = false;
+            live.updatedAt = Date.now();
+        }
+        state.seizedNotebookIds = state.seizedNotebookIds.filter((id) => id !== itemId);
+    } else {
+        const moved = transferNotebookScrap(itemId, target, {
+            userAccess,
+            reason: String(options.reason || '').trim()
+                || `Released scrap from Task Force evidence to ${target.name || target.type}.`,
+        });
+        if (!moved) {
+            return { applied: false, reason: 'transfer_failed' };
+        }
+        state.seizedScrapIds = state.seizedScrapIds.filter((id) => id !== itemId);
+    }
+
+    const liveEvidence = getInvestigatorState().evidence.find((entry) => entry.id === evidence.id);
+    if (liveEvidence) {
+        liveEvidence.custody = EVIDENCE_CUSTODY.RELEASED;
+        liveEvidence.releasedAt = Date.now();
+        liveEvidence.releasedTo = target;
+    }
+    pushCaseLog(getInvestigatorState(), `Released ${evidence.title} to ${target.name || target.type}.`);
+    return { applied: true, evidence: liveEvidence || evidence, target };
+}
+
+export function startInterrogation(actor, options = {}) {
+    const state = getInvestigatorState();
+    const normalized = normalizeActorRef(actor, NOTEBOOK_ACTOR_TYPES.CHARACTER, '');
+    const key = getActorKey(normalized);
+    if (!key || !normalized.name) {
+        return { applied: false, reason: 'invalid_actor' };
+    }
+    const existing = state.interrogations.find((entry) => entry.key === key);
+    if (existing && existing.status === INTERROGATION_STATUS.ACTIVE) {
+        return { applied: false, reason: 'already_active', interrogation: existing };
+    }
+    const interrogation = normalizeInterrogation({
+        key,
+        actor: normalized,
+        status: INTERROGATION_STATUS.ACTIVE,
+        startedAt: Date.now(),
+        autoClip: options.autoClip !== false,
+        messageIds: existing?.messageIds || [],
+    });
+    if (existing) {
+        const index = state.interrogations.findIndex((entry) => entry.key === key);
+        state.interrogations[index] = interrogation;
+    } else {
+        state.interrogations.push(interrogation);
+    }
+    const alreadyPinned = state.suspects.some((entry) => entry.key === key);
+    pinSuspect(normalized, alreadyPinned ? {} : { notes: 'Under interrogation.' });
+    pushCaseLog(state, `Interrogation started: ${normalized.name}.`);
+    return { applied: true, interrogation };
+}
+
+export function endInterrogation(actorOrKey) {
+    const state = getInvestigatorState();
+    const key = typeof actorOrKey === 'string'
+        ? String(actorOrKey || '').trim()
+        : getActorKey(actorOrKey);
+    const interrogation = state.interrogations.find((entry) => entry.key === key);
+    if (!interrogation || interrogation.status !== INTERROGATION_STATUS.ACTIVE) {
+        return { applied: false, reason: 'not_active' };
+    }
+    interrogation.status = INTERROGATION_STATUS.ENDED;
+    interrogation.endedAt = Date.now();
+    pushCaseLog(state, `Interrogation ended: ${interrogation.actor?.name || key}.`);
+    return { applied: true, interrogation };
+}
+
+export function processInterrogationMessage(messageIndex) {
+    const context = getContext();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+    const message = chat[index];
+    if (!message || message.is_user || message.is_system) {
+        return false;
+    }
+    const speaker = getCharacterActorForMessage(message);
+    if (!speaker) {
+        return false;
+    }
+    const key = getActorKey(speaker);
+    const interrogation = getInvestigatorState().interrogations.find((entry) => (
+        entry.status === INTERROGATION_STATUS.ACTIVE && entry.key === key
+    ));
+    if (!interrogation || interrogation.autoClip === false) {
+        return false;
+    }
+    const stamp = String(message.send_date || index);
+    if (interrogation.messageIds.includes(stamp)) {
+        return false;
+    }
+
+    const text = String(message.mes || '').replace(/\s+/g, ' ').trim();
+    if (!text) {
+        return false;
+    }
+    const clipped = text.slice(0, 500);
+    const evidence = logEvidence({
+        type: EVIDENCE_TYPES.STATEMENT,
+        title: `Statement: ${speaker.name}`,
+        detail: clipped,
+        source: 'interrogation',
+        linkedSuspectKeys: [key],
+    }).evidence;
+    linkEvidenceToSuspect(evidence.id, key);
+    const live = getInvestigatorState().interrogations.find((entry) => entry.key === key);
+    if (live) {
+        live.messageIds = [...live.messageIds, stamp].slice(-40);
+    }
+    return true;
+}
+
+export function ingestIdentityTheftExposureForMessage(messageIndex) {
+    const pending = getPendingIdentityTheftExposure();
+    if (!pending?.active) {
+        return false;
+    }
+    const context = getContext();
+    const chat = Array.isArray(context?.chat) ? context.chat : [];
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= chat.length) {
+        return false;
+    }
+    const message = chat[index];
+    if (!message || message.is_user || message.is_system) {
+        return false;
+    }
+    const speaker = getCharacterActorForMessage(message);
+    if (!speaker || getActorKey(speaker) !== getActorKey(pending.actor)) {
+        return false;
+    }
+
+    const createdAt = Number(pending.createdAt) || Date.now();
+    const state = getInvestigatorState();
+    if (state.idTheftIngestedAt === createdAt) {
+        return false;
+    }
+    state.idTheftIngestedAt = createdAt;
+
+    const evidence = logEvidence({
+        type: EVIDENCE_TYPES.SIGHTING,
+        title: `Failed ID theft exposure: ${speaker.name}`,
+        detail: `${speaker.name} reacted after a failed identity theft attempt.`,
+        source: 'id_theft_exposure',
+        linkedSuspectKeys: [getActorKey(speaker)],
+    }).evidence;
+
+    const existing = state.suspects.find((entry) => entry.key === getActorKey(speaker));
+    if (!existing) {
+        pinSuspect(speaker, { status: SUSPECT_STATUSES.PERSON_OF_INTEREST, notes: 'Exposed by failed ID theft.' });
+    } else if (existing.status === SUSPECT_STATUSES.PERSON_OF_INTEREST) {
+        setSuspectStatus(existing.key, SUSPECT_STATUSES.PRIME);
+    } else if (existing.status !== SUSPECT_STATUSES.CLEARED && existing.status !== SUSPECT_STATUSES.DECEASED) {
+        pinSuspect(speaker, { notes: 'Failed ID theft exposure.' });
+    }
+    linkEvidenceToSuspect(evidence.id, getActorKey(speaker));
+    return true;
 }
 
 export function syncDeathReportsIntoTimelineEvidence() {
@@ -1433,6 +1731,10 @@ export function fileWarrant(actor, options = {}) {
     if (!key || !target.name) {
         return { applied: false, reason: 'invalid_actor' };
     }
+    if (isTaskForceTrustBlocked()) {
+        pushCaseLog(state, `Warrant blocked: Task Force trust ${getTaskForceTrust()} below ${TASK_FORCE_TRUST_BLOCK}.`);
+        return { applied: false, reason: 'trust_blocked', trust: getTaskForceTrust() };
+    }
 
     const pending = state.warrants.find((entry) => (
         entry.status === WARRANT_STATUS.PENDING && entry.targetKey === key
@@ -1551,6 +1853,10 @@ export function confrontSuspect(actor, options = {}) {
     if (!key || !target.name) {
         return { applied: false, reason: 'invalid_actor' };
     }
+    if (isTaskForceTrustBlocked()) {
+        pushCaseLog(state, `Confront blocked: Task Force trust ${getTaskForceTrust()} below ${TASK_FORCE_TRUST_BLOCK}.`);
+        return { applied: false, reason: 'trust_blocked', trust: getTaskForceTrust() };
+    }
 
     let suspect = state.suspects.find((entry) => entry.key === key);
     if (!suspect) {
@@ -1589,10 +1895,17 @@ export function confrontSuspect(actor, options = {}) {
         pushCaseLog(state, `Confront overreach on ${target.name}: case noise / trust strain logged.`);
     }
 
+    if (outcome === 'overreach') {
+        adjustTaskForceTrust(-15, 'confront overreach');
+    } else if (outcome === 'probable_cause') {
+        adjustTaskForceTrust(5, 'probable cause');
+    }
+
     const detailParts = [
         String(options.detail || options.reason || options.note || '').trim(),
         `Case strength ${strengthInfo.strength} (linked ${strengthInfo.linked}, status ${suspect?.status || 'none'}).`,
         `Outcome: ${outcome}.`,
+        `Task Force trust ${getTaskForceTrust()}.`,
         seizeUnlocked
             ? (restrained
                 ? 'Seize rights confirmed while subject is restrained.'
@@ -1895,6 +2208,34 @@ export function applyCaseAction(parsed, speaker) {
         return { applied: Boolean(result.applied), reason: result.reason || 'broadcast_armed', trap: result.trap };
     }
 
+    if (action === CASE_ACTIONS.INTERROGATE) {
+        const target = resolveTargetActorByName(parsed.target);
+        if (!target?.name) {
+            return { applied: false, reason: 'missing_target' };
+        }
+        const endCue = String(parsed.status || parsed.detail || parsed.reason || parsed.note || '')
+            .trim()
+            .toLowerCase();
+        const shouldEnd = endCue === INTERROGATION_STATUS.ENDED
+            || /^(end|stop|close)$/i.test(endCue);
+        if (shouldEnd) {
+            const result = endInterrogation(target);
+            return {
+                applied: Boolean(result.applied),
+                reason: result.reason || 'interrogation_ended',
+                interrogation: result.interrogation,
+            };
+        }
+        const result = startInterrogation(target, {
+            autoClip: parsed.note !== 'no-clip',
+        });
+        return {
+            applied: Boolean(result.applied),
+            reason: result.reason || 'interrogation_started',
+            interrogation: result.interrogation,
+        };
+    }
+
     return { applied: false, reason: 'unhandled_action' };
 }
 
@@ -2002,13 +2343,21 @@ export function buildCasePromptReplacements() {
     const plants = (state.surveillance || []).filter((entry) => entry.status === SURVEILLANCE_STATUS.ACTIVE);
     const traps = (state.broadcastTraps || []).filter((entry) => entry.status === BROADCAST_TRAP_STATUS.ACTIVE);
     const recentSignals = (state.signals || []).slice(0, 5);
+    const activeInterrogations = (state.interrogations || [])
+        .filter((entry) => entry.status === INTERROGATION_STATUS.ACTIVE);
 
     return {
         play_role: getPlayRole(),
         case_id: state.caseId,
         case_title: state.caseTitle,
+        tf_trust: String(getTaskForceTrust()),
         case_action_tag: CASE_ACTION_BLOCK_TAG,
         example_officer: officers[0]?.actor?.name || 'Officer Name',
+        interrogations_block: activeInterrogations.length
+            ? activeInterrogations.map((entry) => (
+                `- ${entry.actor?.name || 'Unknown'} (clip:${entry.autoClip === false ? 'off' : 'on'})`
+            )).join('\n')
+            : 'No active interrogations.',
         officers_block: officers.length
             ? officers.map((entry) => (
                 `- ${entry.actor?.name || 'Officer'} (${entry.rank || 'Officer'} / clearance:${entry.clearance || OFFICER_CLEARANCE.FIELD})`
@@ -2050,10 +2399,15 @@ export {
     CASE_ACTIONS,
     CASE_ACTION_BLOCK_TAG,
     DEFAULT_CASE_PROMPT_TEMPLATE,
+    DEFAULT_TASK_FORCE_TRUST,
+    EVIDENCE_CUSTODY,
+    INTERROGATION_STATUS,
     OFFICER_CLEARANCE,
     SURVEILLANCE_KINDS,
     SURVEILLANCE_STATUS,
     BROADCAST_TRAP_STATUS,
+    TASK_FORCE_TRUST_BLOCK,
+    TASK_FORCE_TRUST_WARN,
     WARRANT_STATUS,
     WARRANT_RESULTS,
     getActorKey,
