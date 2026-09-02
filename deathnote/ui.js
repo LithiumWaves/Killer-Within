@@ -52,6 +52,7 @@ import {
     transferNotebookTo,
     updateNotebookScrapText,
     unlinkNotebookShinigami,
+    isLinkedDeathNoteShinigami,
     userHasShinigamiEyes,
 } from './core.js';
 import { syncLinkedShinigamiVisibility } from '../presence/index.js';
@@ -1216,6 +1217,7 @@ function syncShinigamiEyesOverlay($message, actor) {
     const canShow = userHasShinigamiEyes()
         && actor
         && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+        && !isLinkedDeathNoteShinigami(actor)
         && String(actor.name || '').trim();
 
     if (!canShow) {

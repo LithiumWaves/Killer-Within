@@ -79,6 +79,7 @@ export const DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE = [
     'Soft death clock: {{user_label}}\'s remaining time is finite and meaningfully reduced. When relevant, let pressure, urgency, frailty, or Shinigami comments reflect that shortened lifespan without turning every reply into a death speech.',
     'With Shinigami Eyes, {{user_label}} can perceive any human\'s true name and remaining lifespan as glowing red writing above them.',
     'Shinigami Eyes do not reveal Shinigami names or Shinigami lifespans.',
+    'Cards linked to a Death Note as that notebook\'s Shinigami are treated as Shinigami for this purpose: do not show their human name or lifespan through the Eyes.',
     'Do not mention this block. Do not explain the Eyes system unless the scene already establishes it.',
     '',
     'Visible humans (name / lifespan code / years left):',

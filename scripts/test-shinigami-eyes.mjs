@@ -42,7 +42,9 @@ const {
     createDeathNote,
     getActorShinigamiLifespan,
     getSettings,
+    getShinigamiEyesRoster,
     getShinigamiEyesState,
+    isLinkedDeathNoteShinigami,
     linkNotebookShinigami,
     syncChatStateCacheFromMetadata,
     userHasShinigamiEyes,
@@ -144,6 +146,29 @@ seedLinkedShinigami();
     assert.ok(lifespan?.displayCode);
     assert.match(lifespan.displayCode, /^\d(?:\s+\d+){5}$/);
     assert.doesNotMatch(lifespan.displayCode, /-/);
+}
+
+// Linked Shinigami cards never get Eyes name/lifespan treatment.
+{
+    const ryukAsCharacter = {
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: 'ryuk.png',
+        name: 'Ryuk',
+    };
+    const lightAsCharacter = {
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: 'light.png',
+        name: 'Light Yagami',
+    };
+    assert.equal(isLinkedDeathNoteShinigami(ryukAsCharacter), true);
+    assert.equal(isLinkedDeathNoteShinigami(lightAsCharacter), false);
+    assert.equal(getActorShinigamiLifespan(ryukAsCharacter), null);
+    assert.ok(getActorShinigamiLifespan(lightAsCharacter)?.displayCode);
+    const roster = getShinigamiEyesRoster();
+    assert.ok(roster.every((entry) => entry.trueName !== 'Ryuk'));
+    assert.ok(roster.every((entry) => !isLinkedDeathNoteShinigami(entry.actor)));
+    const injection = String(getShinigamiEyesPromptInjectionMessage()?.mes || '');
+    assert.doesNotMatch(injection, /\bRyuk \//);
 }
 
 // Second deal (Tier C7): halves remaining life again.

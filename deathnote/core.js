@@ -795,6 +795,55 @@ function actorRefsMatch(left, right) {
         && left.name === right.name;
 }
 
+function actorMatchesLinkedShinigamiIdentity(actor, linked) {
+    if (!actor || !linked?.active) {
+        return false;
+    }
+
+    const actorId = normalizeKnowledgeKey(actor.id);
+    const linkedId = normalizeKnowledgeKey(linked.actor?.id || linked.avatar);
+    if (actorId && linkedId && actorId === linkedId) {
+        return true;
+    }
+
+    const actorName = normalizeKnowledgeKey(actor.name);
+    const linkedName = normalizeKnowledgeKey(linked.actor?.name);
+    if (!actorName || !linkedName || actorName !== linkedName) {
+        return false;
+    }
+
+    // Name-only match is allowed only when ids are missing or agree.
+    if (actorId && linkedId && actorId !== linkedId) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * True when this card/actor is linked as a Shinigami on any active Death Note.
+ * Linked Shinigami are not human targets for Shinigami Eyes name/lifespan.
+ */
+export function isLinkedDeathNoteShinigami(actor) {
+    if (!actor) {
+        return false;
+    }
+
+    const notebooks = getDeathNotes();
+    for (const notebook of notebooks) {
+        if (!notebook || notebook.destroyed || notebook.exists === false) {
+            continue;
+        }
+
+        const linked = normalizeShinigamiLinkState(notebook.linkedShinigami);
+        if (actorMatchesLinkedShinigamiIdentity(actor, linked)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function getCharacterRosterActors() {
     const context = getContext();
     const characters = context && Array.isArray(context.characters) ? context.characters : [];
@@ -1880,6 +1929,10 @@ function ensureActorLifespanEntry(state, actor, options = {}) {
         return null;
     }
 
+    if (isLinkedDeathNoteShinigami(normalized)) {
+        return null;
+    }
+
     const existing = state.shinigamiEyes.lifespans[key];
     if (existing && Number.isFinite(Number(existing.yearsRemaining))) {
         return existing;
@@ -1913,7 +1966,11 @@ export function getShinigamiEyesRoster() {
     }
 
     return getCurrentChatCharacterActors()
-        .filter((actor) => actor && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER)
+        .filter((actor) => (
+            actor
+            && actor.type === NOTEBOOK_ACTOR_TYPES.CHARACTER
+            && !isLinkedDeathNoteShinigami(actor)
+        ))
         .map((actor) => {
             const lifespan = getActorShinigamiLifespan(actor);
             return {
@@ -1931,6 +1988,9 @@ function revealAllHumanNamesForEyes(state, reason = 'Shinigami Eyes revealed thi
     let changed = false;
     for (const actor of roster) {
         if (!actor || actor.type !== NOTEBOOK_ACTOR_TYPES.CHARACTER) {
+            continue;
+        }
+        if (isLinkedDeathNoteShinigami(actor)) {
             continue;
         }
         ensureActorLifespanEntry(state, actor);
