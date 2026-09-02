@@ -2946,6 +2946,7 @@ function renderShinigamiEyesPanelHtml() {
                         <span class="kw-deathnote-item__meta-line"><b>Cost:</b> Half of remaining life per deal (irreversible)</span>
                     </div>
                     <p class="kw-shinigami-eyes-card__warning">${escapeHtml(warning)}</p>
+                    <small class="kw-shinigami-eyes-card__scope">Eye ownership and remaining lifespan are saved with this chat only.</small>
                     <div class="kw-deathnote-item__actions">
                         <button
                             type="button"
