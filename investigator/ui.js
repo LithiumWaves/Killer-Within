@@ -31,9 +31,26 @@ const SCREENS = Object.freeze({
 });
 
 let refreshDeathNoteUiHook = null;
+let dockDragState = {
+    dragging: false,
+    moved: false,
+    ignoreClick: false,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    pointerId: null,
+    handlersInstalled: false,
+    moveHandler: null,
+    upHandler: null,
+};
 
 export function registerDeathNoteUiRefresh(fn) {
     refreshDeathNoteUiHook = typeof fn === 'function' ? fn : null;
+}
+
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
 }
 
 function escapeHtml(value) {
@@ -395,36 +412,89 @@ function renderActiveScreen(settings, state) {
 function buildHubHtml(settings, state) {
     const mobile = isMobileViewport();
     return `
-        <div class="kw-investigator-hub__chrome">
-            <header class="kw-investigator-hub__titlebar">
-                <div class="kw-investigator-hub__brand">
-                    <span class="kw-investigator-hub__led" aria-hidden="true"></span>
-                    <div>
-                        <div class="kw-investigator-hub__os">TASK FORCE OS // TERMINAL</div>
-                        <div class="kw-investigator-hub__case">${escapeHtml(state.caseId)} — ${escapeHtml(state.caseTitle)}</div>
+        <div class="kw-investigator-hub__room">
+            <div class="kw-investigator-hub__bezel" aria-label="Task Force computer">
+                <span class="kw-investigator-hub__screw kw-investigator-hub__screw--tl" aria-hidden="true"></span>
+                <span class="kw-investigator-hub__screw kw-investigator-hub__screw--tr" aria-hidden="true"></span>
+                <span class="kw-investigator-hub__screw kw-investigator-hub__screw--bl" aria-hidden="true"></span>
+                <span class="kw-investigator-hub__screw kw-investigator-hub__screw--br" aria-hidden="true"></span>
+                <div class="kw-investigator-hub__plate">
+                    <span class="kw-investigator-hub__plate-mark">NPA</span>
+                    <span class="kw-investigator-hub__plate-name">Task Force Terminal</span>
+                </div>
+                <div class="kw-investigator-hub__crt">
+                    <div class="kw-investigator-hub__scan" aria-hidden="true"></div>
+                    <div class="kw-investigator-hub__chrome">
+                        <header class="kw-investigator-hub__titlebar">
+                            <div class="kw-investigator-hub__brand">
+                                <span class="kw-investigator-hub__led" aria-hidden="true"></span>
+                                <div>
+                                    <div class="kw-investigator-hub__os">TASK FORCE OS // TERMINAL</div>
+                                    <div class="kw-investigator-hub__case">${escapeHtml(state.caseId)} — ${escapeHtml(state.caseTitle)}</div>
+                                </div>
+                            </div>
+                        </header>
+                        <nav class="kw-investigator-nav ${mobile ? 'kw-investigator-nav--dock' : ''}" aria-label="Hub screens">
+                            ${renderNavHtml(settings.activeScreen || SCREENS.BOARD)}
+                        </nav>
+                        <div class="kw-investigator-hub__body">
+                            ${renderActiveScreen(settings, state)}
+                        </div>
+                        <footer class="kw-investigator-hub__status">
+                            <span>ROLE: INVESTIGATOR</span>
+                            <span>SECURE // LOCAL CASE STATE</span>
+                        </footer>
                     </div>
                 </div>
-                <div class="kw-investigator-hub__window-controls">
-                    <button type="button" class="kw-investigator-hub__winbtn" data-inv-close title="Lock terminal">${mobile ? 'Lock' : 'Lock session'}</button>
+                <div class="kw-investigator-hub__hardware">
+                    <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
+                    <button type="button" class="kw-investigator-hub__power" data-inv-close title="Lock terminal">
+                        ${mobile ? 'Lock' : 'Power / Lock'}
+                    </button>
+                    <span class="kw-investigator-hub__vent" aria-hidden="true"></span>
                 </div>
-            </header>
-            <nav class="kw-investigator-nav ${mobile ? 'kw-investigator-nav--dock' : ''}" aria-label="Hub screens">
-                ${renderNavHtml(settings.activeScreen || SCREENS.BOARD)}
-            </nav>
-            <div class="kw-investigator-hub__body">
-                ${renderActiveScreen(settings, state)}
             </div>
-            <footer class="kw-investigator-hub__status">
-                <span>ROLE: INVESTIGATOR</span>
-                <span>SECURE // LOCAL CASE STATE</span>
-            </footer>
         </div>
     `;
 }
 
+function applyDockPosition(root) {
+    if (!root) {
+        return;
+    }
+    const settings = getInvestigatorSettings();
+    const mobile = isMobileViewport();
+    const hasSaved = Number.isFinite(Number(settings.dockX)) && Number.isFinite(Number(settings.dockY));
+
+    if (hasSaved) {
+        const width = root.offsetWidth || 180;
+        const height = Math.min(root.offsetHeight || 48, 64);
+        const maxX = Math.max(0, window.innerWidth - width);
+        const maxY = Math.max(0, window.innerHeight - height);
+        const x = clamp(Number(settings.dockX), 0, maxX);
+        const y = clamp(Number(settings.dockY), 0, maxY);
+        root.style.left = `${Math.round(x)}px`;
+        root.style.top = `${Math.round(y)}px`;
+        root.style.right = 'auto';
+        root.style.bottom = 'auto';
+        return;
+    }
+
+    if (mobile) {
+        root.style.left = '';
+        root.style.top = '';
+        root.style.right = '';
+        root.style.bottom = '';
+    } else {
+        root.style.left = '';
+        root.style.top = '';
+        root.style.right = '';
+        root.style.bottom = '';
+    }
+}
+
 function ensureTaskForceDock() {
     let root = document.getElementById(INVESTIGATOR_DOCK_ID);
-    // Clean up legacy session bar if an older build left it mounted.
     document.getElementById('kw-investigator-session-bar')?.remove();
     document.getElementById('kw-investigator-workstation')?.remove();
 
@@ -452,7 +522,7 @@ function ensureTaskForceDock() {
     root.setAttribute('aria-label', 'Task Force terminal');
     root.innerHTML = `
         <div class="kw-investigator-dock__shell">
-            <button type="button" class="kw-investigator-dock__open" data-inv-wake>
+            <button type="button" class="kw-investigator-dock__open" data-inv-wake data-inv-drag-handle="true">
                 <span class="kw-investigator-dock__led" aria-hidden="true"></span>
                 <span class="kw-investigator-dock__copy">
                     <span class="kw-investigator-dock__label">Task Force</span>
@@ -462,6 +532,7 @@ function ensureTaskForceDock() {
             </button>
         </div>
     `;
+    requestAnimationFrame(() => applyDockPosition(root));
     return root;
 }
 
@@ -552,10 +623,105 @@ function bindTaskForceDock(root) {
     if (!root) {
         return;
     }
-    const wake = root.querySelector('[data-inv-wake]');
-    if (wake) {
-        wake.addEventListener('click', () => openHub());
+
+    const handle = root.querySelector('[data-inv-drag-handle="true"]');
+    if (!(handle instanceof HTMLElement)) {
+        return;
     }
+
+    handle.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 && event.pointerType === 'mouse') {
+            return;
+        }
+        if (!event.isPrimary) {
+            return;
+        }
+
+        event.preventDefault();
+        const rect = root.getBoundingClientRect();
+        dockDragState.dragging = true;
+        dockDragState.moved = false;
+        dockDragState.pointerId = event.pointerId;
+        dockDragState.startX = event.clientX;
+        dockDragState.startY = event.clientY;
+        dockDragState.originX = rect.left;
+        dockDragState.originY = rect.top;
+
+        if (!dockDragState.handlersInstalled) {
+            dockDragState.handlersInstalled = true;
+
+            dockDragState.moveHandler = (moveEvent) => {
+                if (!dockDragState.dragging) {
+                    return;
+                }
+                if (dockDragState.pointerId !== null && moveEvent.pointerId !== dockDragState.pointerId) {
+                    return;
+                }
+                const activeRoot = document.getElementById(INVESTIGATOR_DOCK_ID);
+                if (!activeRoot) {
+                    return;
+                }
+
+                const dx = moveEvent.clientX - dockDragState.startX;
+                const dy = moveEvent.clientY - dockDragState.startY;
+                if (Math.abs(dx) + Math.abs(dy) > 4) {
+                    dockDragState.moved = true;
+                }
+
+                const rectNow = activeRoot.getBoundingClientRect();
+                const maxX = Math.max(0, window.innerWidth - rectNow.width);
+                const maxY = Math.max(0, window.innerHeight - Math.min(rectNow.height, 72));
+                const nextX = clamp(dockDragState.originX + dx, 0, maxX);
+                const nextY = clamp(dockDragState.originY + dy, 0, maxY);
+                activeRoot.style.left = `${Math.round(nextX)}px`;
+                activeRoot.style.top = `${Math.round(nextY)}px`;
+                activeRoot.style.right = 'auto';
+                activeRoot.style.bottom = 'auto';
+            };
+
+            dockDragState.upHandler = (upEvent) => {
+                if (!dockDragState.dragging) {
+                    return;
+                }
+                if (dockDragState.pointerId !== null && upEvent.pointerId !== dockDragState.pointerId) {
+                    return;
+                }
+
+                const activeRoot = document.getElementById(INVESTIGATOR_DOCK_ID);
+                dockDragState.dragging = false;
+                dockDragState.pointerId = null;
+                dockDragState.ignoreClick = dockDragState.moved;
+
+                if (activeRoot && dockDragState.moved) {
+                    const rectFinal = activeRoot.getBoundingClientRect();
+                    const settings = getInvestigatorSettings();
+                    settings.dockX = Math.round(rectFinal.left);
+                    settings.dockY = Math.round(rectFinal.top);
+                    scheduleInvestigatorSettingsSave();
+                }
+
+                window.removeEventListener('pointermove', dockDragState.moveHandler, true);
+                window.removeEventListener('pointerup', dockDragState.upHandler, true);
+                window.removeEventListener('pointercancel', dockDragState.upHandler, true);
+                dockDragState.handlersInstalled = false;
+            };
+
+            window.addEventListener('pointermove', dockDragState.moveHandler, true);
+            window.addEventListener('pointerup', dockDragState.upHandler, true);
+            window.addEventListener('pointercancel', dockDragState.upHandler, true);
+        }
+    });
+
+    handle.addEventListener('click', (event) => {
+        if (dockDragState.ignoreClick) {
+            dockDragState.ignoreClick = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        event.preventDefault();
+        openHub();
+    });
 }
 
 function bindHubInteractions(root) {
