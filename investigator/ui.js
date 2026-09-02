@@ -1,5 +1,13 @@
-import { INVESTIGATOR_HUB_ID, INVESTIGATOR_DOCK_ID, PLAY_ROLES, SUSPECT_STATUSES, EVIDENCE_TYPES } from './config.js';
 import {
+    DEFAULT_CASE_PROMPT_TEMPLATE,
+    EVIDENCE_TYPES,
+    INVESTIGATOR_DOCK_ID,
+    INVESTIGATOR_HUB_ID,
+    PLAY_ROLES,
+    SUSPECT_STATUSES,
+} from './config.js';
+import {
+    assignOfficer,
     commitInvestigatorMutation,
     getBoardSuspectChoices,
     getInvestigatorSettings,
@@ -12,14 +20,17 @@ import {
     logEvidence,
     pinSuspect,
     releaseRestrainedActor,
+    removeOfficer,
     restrainActor,
     scheduleInvestigatorSettingsSave,
     seizeNotebook,
     seizeScrap,
     setPlayRole,
     setSuspectStatus,
+    syncAllCaseActionMessageVisibility,
     syncDeathReportsIntoTimelineEvidence,
 } from './core.js';
+import { persistChatChanges } from '../deathnote/core.js';
 import { NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
 
 const MOBILE_VIEWPORT_MAX = 720;
@@ -305,6 +316,7 @@ function renderLockerScreen(state) {
 }
 
 function renderOpsScreen(state) {
+    const settings = getInvestigatorSettings();
     const choices = getBoardSuspectChoices();
     const options = choices.map((actor) => {
         const value = JSON.stringify({
@@ -325,6 +337,18 @@ function renderOpsScreen(state) {
             </article>
         `).join('')
         : '<p class="kw-investigator-empty">Nobody marked restrained.</p>';
+
+    const officersHtml = (state.officers || []).length
+        ? state.officers.map((entry) => `
+            <article class="kw-investigator-row">
+                <div class="kw-investigator-row__main">
+                    <div class="kw-investigator-row__title">${escapeHtml(entry.actor?.name || 'Officer')}</div>
+                    <div class="kw-investigator-row__meta">${escapeHtml(entry.rank || 'Officer')}${entry.notes ? ` · ${escapeHtml(entry.notes)}` : ''}</div>
+                </div>
+                <button type="button" class="menu_button kw-investigator-btn" data-inv-remove-officer="${escapeHtml(entry.key)}">Remove</button>
+            </article>
+        `).join('')
+        : '<p class="kw-investigator-empty">No Task Force officers assigned. Assign characters so they can file case actions.</p>';
 
     const candidates = getSeizeCandidates();
     const notebookSeize = (candidates.notebooks || []).map((notebook) => `
@@ -347,11 +371,13 @@ function renderOpsScreen(state) {
         <div class="kw-investigator-logline"><span>${escapeHtml(formatClock(entry.at))}</span> ${escapeHtml(entry.text)}</div>
     `).join('') || '<p class="kw-investigator-empty">System log quiet.</p>';
 
+    const casePromptTemplate = String(settings.casePromptTemplate || DEFAULT_CASE_PROMPT_TEMPLATE);
+
     return `
         <section class="kw-investigator-screen kw-investigator-screen--ops" data-screen="ops">
             <header class="kw-investigator-screen__head">
                 <h2>Operations</h2>
-                <p>Restrain subjects, seize evidence, switch play role.</p>
+                <p>Assign officers, restrain subjects, seize evidence, tune case AI.</p>
             </header>
             <div class="kw-investigator-ops-grid">
                 <div class="kw-investigator-panel">
@@ -365,6 +391,25 @@ function renderOpsScreen(state) {
                         </select>
                     </label>
                     <small class="kw-investigator-hint">One role at a time. Switching roles swaps which tools are available.</small>
+                </div>
+                <div class="kw-investigator-panel">
+                    <div class="kw-investigator-subhead">Task Force officers</div>
+                    <form class="kw-investigator-form kw-investigator-form--embedded" data-inv-form="assign-officer">
+                        <label class="kw-investigator-field">
+                            <span>Character</span>
+                            <select name="actorJson" class="text_pole" required>
+                                <option value="">Select character…</option>
+                                ${options}
+                            </select>
+                        </label>
+                        <label class="kw-investigator-field">
+                            <span>Rank</span>
+                            <input name="rank" class="text_pole" type="text" maxlength="80" placeholder="Officer / Detective / Lead" />
+                        </label>
+                        <button type="submit" class="menu_button kw-investigator-btn kw-investigator-btn--primary kw-investigator-btn--block">Assign officer</button>
+                    </form>
+                    <small class="kw-investigator-hint">Only assigned officers can append hidden <code>kwCaseAction</code> blocks that update this case file.</small>
+                    <div class="kw-investigator-list">${officersHtml}</div>
                 </div>
                 <div class="kw-investigator-panel">
                     <div class="kw-investigator-subhead">Mark restrained</div>
@@ -387,6 +432,18 @@ function renderOpsScreen(state) {
                 <div class="kw-investigator-panel">
                     <div class="kw-investigator-subhead">Seize (restrained only)</div>
                     <div class="kw-investigator-actions">${seizeBlock}</div>
+                </div>
+                <div class="kw-investigator-panel">
+                    <div class="kw-investigator-subhead">Case AI</div>
+                    <label class="kw-investigator-field kw-investigator-field--row">
+                        <input id="kw-investigator-show-case-action-debug" type="checkbox" ${settings.showCaseActionDebugBlocks ? 'checked' : ''} />
+                        <span>Show hidden officer case-action blocks in chat</span>
+                    </label>
+                    <label class="kw-investigator-field">
+                        <span>Case context prompt template</span>
+                        <textarea id="kw-investigator-case-prompt-template" class="text_pole" rows="10">${escapeHtml(casePromptTemplate)}</textarea>
+                    </label>
+                    <small class="kw-investigator-hint">Placeholders: play_role, case_id, case_title, officers_block, suspects_block, evidence_block, restrained_block, case_action_tag, example_officer.</small>
                 </div>
                 <div class="kw-investigator-panel">
                     <div class="kw-investigator-subhead">System log</div>
@@ -757,6 +814,14 @@ function bindHubInteractions(root) {
         });
     });
 
+    root.querySelectorAll('[data-inv-remove-officer]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const key = button.getAttribute('data-inv-remove-officer');
+            await commitInvestigatorMutation(() => removeOfficer(key), 'Officer removed from Task Force.');
+            refreshInvestigatorUi();
+        });
+    });
+
     root.querySelectorAll('[data-inv-seize-notebook]').forEach((button) => {
         button.addEventListener('click', async () => {
             const id = button.getAttribute('data-inv-seize-notebook');
@@ -796,6 +861,28 @@ function bindHubInteractions(root) {
         });
     }
 
+    const debugToggle = root.querySelector('#kw-investigator-show-case-action-debug');
+    if (debugToggle) {
+        debugToggle.addEventListener('change', async () => {
+            const settings = getInvestigatorSettings();
+            settings.showCaseActionDebugBlocks = Boolean(debugToggle.checked);
+            scheduleInvestigatorSettingsSave();
+            if (syncAllCaseActionMessageVisibility()) {
+                await persistChatChanges();
+            }
+            refreshInvestigatorUi();
+        });
+    }
+
+    const casePromptField = root.querySelector('#kw-investigator-case-prompt-template');
+    if (casePromptField) {
+        casePromptField.addEventListener('change', () => {
+            const settings = getInvestigatorSettings();
+            settings.casePromptTemplate = String(casePromptField.value || '').trim() || DEFAULT_CASE_PROMPT_TEMPLATE;
+            scheduleInvestigatorSettingsSave();
+        });
+    }
+
     root.querySelectorAll('form[data-inv-form]').forEach((form) => {
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -829,6 +916,15 @@ function bindHubInteractions(root) {
                 await commitInvestigatorMutation(
                     () => restrainActor(actor, { reason: String(data.get('reason') || '') }),
                     'Subject marked restrained.',
+                );
+            } else if (kind === 'assign-officer') {
+                const actor = parseActorJson(data.get('actorJson'));
+                if (!actor?.name) {
+                    return;
+                }
+                await commitInvestigatorMutation(
+                    () => assignOfficer(actor, { rank: String(data.get('rank') || 'Officer') }),
+                    'Task Force officer assigned.',
                 );
             } else if (kind === 'link-evidence') {
                 const evidenceId = form.getAttribute('data-evidence-id');

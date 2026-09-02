@@ -3152,6 +3152,26 @@
     gap: 0.25rem;
 }
 
+.kw-investigator-field--row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    grid-template-columns: none;
+}
+
+.kw-investigator-field--row > span {
+    text-transform: none;
+    letter-spacing: 0.01em;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: var(--kw-inv-text);
+}
+
+.kw-investigator-field--row input[type="checkbox"] {
+    margin-top: 0.15rem;
+    flex: 0 0 auto;
+}
+
 .kw-investigator-field > span,
 .kw-investigator-inline-field > span {
     font-family: var(--kw-inv-font-mono);
