@@ -21,3 +21,11 @@ void import('./presence/index.js')
     .catch((error) => {
         console.error('[killer_within_presence] Failed to load presence module', error);
     });
+
+void import('./investigator/index.js')
+    .then((module) => {
+        module.setupInvestigatorExtension?.();
+    })
+    .catch((error) => {
+        console.error('[killer_within_investigator] Failed to load investigator module', error);
+    });

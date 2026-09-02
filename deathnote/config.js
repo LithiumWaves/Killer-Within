@@ -137,4 +137,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
     presencePromptTemplate: DEFAULT_PRESENCE_PROMPT_TEMPLATE,
     shinigamiEyesPromptTemplate: DEFAULT_SHINIGAMI_EYES_PROMPT_TEMPLATE,
     characterShinigamiEyesPromptTemplate: DEFAULT_CHARACTER_SHINIGAMI_EYES_PROMPT_TEMPLATE,
+    /**
+     * User play role for this settings profile.
+     * - kira: Death Note / Eyes / inventory (default)
+     * - investigator: clinical Task Force hub; Kira tools hidden
+     */
+    playRole: 'kira',
+});
+
+/** @type {Readonly<{ KIRA: 'kira', INVESTIGATOR: 'investigator' }>} */
+export const PLAY_ROLES = Object.freeze({
+    KIRA: 'kira',
+    INVESTIGATOR: 'investigator',
 });

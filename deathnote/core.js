@@ -262,6 +262,8 @@ function normalizeNotebookState(value, index = 0) {
         }),
         returnRequest: normalizeNotebookReturnRequestState(notebook.returnRequest),
         presenceReveal: normalizeNotebookPresenceRevealState(notebook.presenceReveal),
+        /** When true, notebook is sealed Task Force evidence — writes blocked. */
+        evidenceCustody: Boolean(notebook.evidenceCustody),
         text,
         pages,
         createdAt: normalizeTransferredAt(notebook.createdAt),
@@ -1667,6 +1669,9 @@ function appendAiNotebookLine(entryLine, actor, options = {}) {
     const notebook = resolveNotebookForActorWriter(state, writer, options.notebookItemId);
     if (!notebook) {
         return { applied: false, reason: 'notebook_unavailable' };
+    }
+    if (notebook.evidenceCustody) {
+        return { applied: false, reason: 'evidence_custody' };
     }
 
     if (/[\r\n]/.test(line)) {
@@ -4317,6 +4322,9 @@ export function setNotebookText(text, notebookId = '') {
     if (!notebook) {
         return false;
     }
+    if (notebook.evidenceCustody) {
+        return false;
+    }
     const value = String(text ?? '');
 
     if (notebook.text === value && Array.isArray(notebook.pages) && notebook.pages.length === 1 && notebook.pages[0] === value) {
@@ -4349,6 +4357,9 @@ export function setNotebookPages(pages, notebookId = '') {
     const state = getChatState();
     const notebook = getNotebookById(state, notebookId);
     if (!notebook) {
+        return false;
+    }
+    if (notebook.evidenceCustody) {
         return false;
     }
     const normalized = enforcePermanentNotebookPages(normalizeNotebookPages(pages, notebook.text ?? ''), notebook.itemId);
