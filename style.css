@@ -3067,8 +3067,6 @@
 }
 
 .kw-investigator-hub__body {
-    display: flex;
-    flex-direction: column;
     min-height: 0;
     overflow: auto;
     overflow-x: hidden;
@@ -3077,27 +3075,26 @@
     overscroll-behavior: contain;
 }
 
+/* Ops scrolls with the CRT body — nested height:100%/flex scroll collapses to blank on desktop. */
 .kw-investigator-screen--ops {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
+    display: block;
+    min-width: 0;
     min-height: 0;
-    height: 100%;
-    max-height: 100%;
 }
 
 .kw-investigator-screen--ops .kw-investigator-screen__head {
-    flex: 0 0 auto;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: -0.15rem 0 0.85rem;
+    padding: 0.15rem 0 0.55rem;
+    background: linear-gradient(180deg, rgba(7, 16, 24, 0.98), rgba(7, 16, 24, 0.92) 70%, transparent);
 }
 
 .kw-investigator-ops-scroll {
-    min-height: 0;
-    flex: 1 1 auto;
-    overflow: auto;
-    overflow-x: hidden;
-    padding-right: 0.15rem;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
+    display: block;
+    min-width: 0;
+    overflow: visible;
 }
 
 .kw-investigator-ops-grid {
