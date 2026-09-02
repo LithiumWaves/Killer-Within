@@ -1,4 +1,4 @@
-import { INVESTIGATOR_HUB_ID, INVESTIGATOR_SESSION_BAR_ID, PLAY_ROLES, SUSPECT_STATUSES, EVIDENCE_TYPES } from './config.js';
+import { INVESTIGATOR_HUB_ID, INVESTIGATOR_DOCK_ID, PLAY_ROLES, SUSPECT_STATUSES, EVIDENCE_TYPES } from './config.js';
 import {
     commitInvestigatorMutation,
     getBoardSuspectChoices,
@@ -422,8 +422,12 @@ function buildHubHtml(settings, state) {
     `;
 }
 
-function ensureSessionBar() {
-    let root = document.getElementById(INVESTIGATOR_SESSION_BAR_ID);
+function ensureTaskForceDock() {
+    let root = document.getElementById(INVESTIGATOR_DOCK_ID);
+    // Clean up legacy session bar if an older build left it mounted.
+    document.getElementById('kw-investigator-session-bar')?.remove();
+    document.getElementById('kw-investigator-workstation')?.remove();
+
     const settings = getInvestigatorSettings();
     const shouldShow = isInvestigatorRole() && !settings.hubOpen;
 
@@ -435,25 +439,26 @@ function ensureSessionBar() {
     }
 
     const state = getInvestigatorState();
+    const mobile = isMobileViewport();
 
     if (!root) {
         root = document.createElement('div');
-        root.id = INVESTIGATOR_SESSION_BAR_ID;
+        root.id = INVESTIGATOR_DOCK_ID;
         document.body.append(root);
     }
 
-    root.className = 'kw-investigator-session-bar';
+    root.className = `kw-investigator-dock ${mobile ? 'is-mobile' : 'is-desktop'}`;
     root.setAttribute('role', 'region');
-    root.setAttribute('aria-label', 'Task Force terminal session');
+    root.setAttribute('aria-label', 'Task Force terminal');
     root.innerHTML = `
-        <div class="kw-investigator-session-bar__inner">
-            <span class="kw-investigator-session-bar__led" aria-hidden="true"></span>
-            <div class="kw-investigator-session-bar__meta">
-                <span class="kw-investigator-session-bar__os">Task Force terminal</span>
-                <span class="kw-investigator-session-bar__case">${escapeHtml(state.caseId)}</span>
-            </div>
-            <button type="button" class="kw-investigator-session-bar__resume" data-inv-wake>
-                Resume
+        <div class="kw-investigator-dock__shell">
+            <button type="button" class="kw-investigator-dock__open" data-inv-wake>
+                <span class="kw-investigator-dock__led" aria-hidden="true"></span>
+                <span class="kw-investigator-dock__copy">
+                    <span class="kw-investigator-dock__label">Task Force</span>
+                    <span class="kw-investigator-dock__case">${escapeHtml(state.caseId)}</span>
+                </span>
+                <span class="kw-investigator-dock__action">Open</span>
             </button>
         </div>
     `;
@@ -543,7 +548,7 @@ async function handleRoleChange(nextRole) {
     );
 }
 
-function bindSessionBar(root) {
+function bindTaskForceDock(root) {
     if (!root) {
         return;
     }
@@ -677,9 +682,9 @@ export function refreshInvestigatorUi() {
         settings.activeScreen = SCREENS.BOARD;
     }
 
-    const sessionBar = ensureSessionBar();
+    const dock = ensureTaskForceDock();
     const hub = ensureHub();
-    bindSessionBar(sessionBar);
+    bindTaskForceDock(dock);
     bindHubInteractions(hub);
 }
 
