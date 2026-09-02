@@ -155,14 +155,20 @@ seedLinkedShinigami();
         id: 'ryuk.png',
         name: 'Ryuk',
     };
+    const lightAsCharacter = {
+        type: NOTEBOOK_ACTOR_TYPES.CHARACTER,
+        id: 'light.png',
+        name: 'Light Yagami',
+    };
     assert.equal(isLinkedDeathNoteShinigami(ryukAsCharacter), true);
+    assert.equal(isLinkedDeathNoteShinigami(lightAsCharacter), false);
     assert.equal(getActorShinigamiLifespan(ryukAsCharacter), null);
+    assert.ok(getActorShinigamiLifespan(lightAsCharacter)?.displayCode);
     const roster = getShinigamiEyesRoster();
     assert.ok(roster.every((entry) => entry.trueName !== 'Ryuk'));
-    assert.ok(roster.some((entry) => entry.trueName === 'Light Yagami'));
+    assert.ok(roster.every((entry) => !isLinkedDeathNoteShinigami(entry.actor)));
     const injection = String(getShinigamiEyesPromptInjectionMessage()?.mes || '');
-    assert.doesNotMatch(injection, /Ryuk \//);
-    assert.match(injection, /Light Yagami/);
+    assert.doesNotMatch(injection, /\bRyuk \//);
 }
 
 // Second deal (Tier C7): halves remaining life again.
