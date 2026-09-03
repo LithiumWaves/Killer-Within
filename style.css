@@ -2650,11 +2650,14 @@
 }
 
 #kw-investigator-dock.is-mobile {
-    left: auto;
-    right: 10px;
-    top: calc(env(safe-area-inset-top, 0px) + 10px);
-    bottom: auto;
+    left: auto !important;
+    right: max(10px, env(safe-area-inset-right, 0px)) !important;
+    top: auto !important;
+    /* Clear SillyTavern’s message form + Samsung gesture/nav bars */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 5.75rem) !important;
     z-index: 2147483647;
+    width: auto;
+    max-width: min(22rem, calc(100vw - 20px));
 }
 
 .kw-investigator-dock__shell {
@@ -2697,9 +2700,13 @@
 }
 
 #kw-investigator-dock.is-mobile .kw-investigator-dock__open {
-    min-height: 2.5rem;
-    padding: 0.48rem 0.7rem 0.55rem;
+    min-height: 2.75rem;
+    padding: 0.55rem 0.78rem 0.6rem;
     border-radius: 999px;
+    box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.28);
 }
 
 .kw-investigator-dock__led {
