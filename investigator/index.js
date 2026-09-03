@@ -6,6 +6,7 @@ import {
     syncDeathReportsIntoTimelineEvidence,
 } from './core.js';
 import { persistChatChanges } from '../deathnote/core.js';
+import { registerInvestigatorSlashCommands } from './slash.js';
 import {
     refreshInvestigatorUi,
     registerDeathNoteUiRefresh,
@@ -66,6 +67,7 @@ export function setupInvestigatorExtension() {
         getInvestigatorSettings();
         setupInvestigatorUi();
         registerInvestigatorEvents();
+        registerInvestigatorSlashCommands();
         refreshInvestigatorUi();
 
         // Late-bind Death Note UI refresh so role switches tear down Kira widgets.
