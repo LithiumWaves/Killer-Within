@@ -53,6 +53,7 @@ import { getDeathNotes, persistChatChanges } from '../deathnote/core.js';
 import { NOTEBOOK_ACTOR_TYPES } from '../deathnote/config.js';
 
 const MOBILE_VIEWPORT_MAX = 720;
+const MOBILE_DOCK_WIDTH_MAX = 1200;
 const SCREENS = Object.freeze({
     BOARD: 'board',
     TIMELINE: 'timeline',
@@ -94,8 +95,30 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function isCoarsePointerDevice() {
+    try {
+        if (window.matchMedia('(pointer: coarse)').matches) {
+            return true;
+        }
+        if (window.matchMedia('(hover: none)').matches) {
+            return true;
+        }
+    } catch (_error) {
+        // matchMedia unavailable
+    }
+    return 'ontouchstart' in window || (navigator.maxTouchPoints || 0) > 0;
+}
+
 function isMobileViewport() {
     return window.innerWidth <= MOBILE_VIEWPORT_MAX;
+}
+
+/** Phones (incl. S25 Ultra landscape / “Desktop site”) should use mobile dock placement. */
+function useMobileDockPlacement() {
+    if (isMobileViewport()) {
+        return true;
+    }
+    return isCoarsePointerDevice() && window.innerWidth <= MOBILE_DOCK_WIDTH_MAX;
 }
 
 function formatClock(ms) {
@@ -853,14 +876,14 @@ function applyDockPosition(root) {
         return;
     }
     const settings = getInvestigatorSettings();
-    const mobile = isMobileViewport();
 
-    // Mobile always uses CSS defaults (top-right); saved position is desktop-only.
-    if (mobile) {
+    // Phones / touch devices always use CSS placement — never restored desktop coords.
+    if (useMobileDockPlacement()) {
         root.style.left = '';
         root.style.top = '';
         root.style.right = '';
         root.style.bottom = '';
+        root.style.transform = '';
         return;
     }
 
@@ -885,6 +908,30 @@ function applyDockPosition(root) {
     root.style.bottom = '';
 }
 
+function recoverStuckInvestigatorShell() {
+    const settings = getInvestigatorSettings();
+    if (!isInvestigatorRole() || !settings.hubOpen || !useMobileDockPlacement()) {
+        return false;
+    }
+    const hub = document.getElementById(INVESTIGATOR_HUB_ID);
+    // Missing node means ensureHub has not run yet — do not treat as stuck.
+    if (!hub) {
+        return false;
+    }
+    const rect = hub.getBoundingClientRect();
+    const visible = rect.width >= 120
+        && rect.height >= 120
+        && rect.bottom > 80
+        && rect.top < window.innerHeight - 40;
+    if (visible) {
+        return false;
+    }
+    settings.hubOpen = false;
+    scheduleInvestigatorSettingsSave();
+    hub.remove();
+    return true;
+}
+
 function ensureTaskForceDock() {
     let root = document.getElementById(INVESTIGATOR_DOCK_ID);
     document.getElementById('kw-investigator-session-bar')?.remove();
@@ -901,7 +948,7 @@ function ensureTaskForceDock() {
     }
 
     const state = getInvestigatorState();
-    const mobile = isMobileViewport();
+    const mobileDock = useMobileDockPlacement();
 
     if (!root) {
         root = document.createElement('div');
@@ -909,9 +956,13 @@ function ensureTaskForceDock() {
         document.body.append(root);
     }
 
-    root.className = `kw-investigator-dock ${mobile ? 'is-mobile' : 'is-desktop'}`;
+    root.className = `kw-investigator-dock ${mobileDock ? 'is-mobile' : 'is-desktop'}`;
     root.setAttribute('role', 'region');
     root.setAttribute('aria-label', 'Task Force terminal');
+    root.hidden = false;
+    root.style.display = '';
+    root.style.visibility = 'visible';
+    root.style.opacity = '1';
     root.innerHTML = `
         <div class="kw-investigator-dock__shell">
             <button type="button" class="kw-investigator-dock__open" data-inv-wake data-inv-drag-handle="true">
@@ -992,7 +1043,8 @@ async function handleRoleChange(nextRole) {
     }
     if (nextRole === PLAY_ROLES.INVESTIGATOR) {
         const settings = getInvestigatorSettings();
-        settings.hubOpen = true;
+        // On phones, land on the dock so a stuck/off-screen hub cannot hide the only entry point.
+        settings.hubOpen = !useMobileDockPlacement();
         settings.hubCollapsed = false;
         scheduleInvestigatorSettingsSave();
     } else {
@@ -1004,7 +1056,9 @@ async function handleRoleChange(nextRole) {
     refreshInvestigatorUi();
     globalThis.toastr?.info?.(
         nextRole === PLAY_ROLES.INVESTIGATOR
-            ? 'Logging into Task Force terminal…'
+            ? (useMobileDockPlacement()
+                ? 'Task Force dock ready — tap Open on the floating control.'
+                : 'Logging into Task Force terminal…')
             : 'Returned to Death Note tools.',
     );
 }
@@ -1445,8 +1499,11 @@ export function refreshInvestigatorUi() {
         settings.activeScreen = SCREENS.BOARD;
     }
 
+    let hub = ensureHub();
+    if (recoverStuckInvestigatorShell()) {
+        hub = null;
+    }
     const dock = ensureTaskForceDock();
-    const hub = ensureHub();
     bindTaskForceDock(dock);
     bindHubInteractions(hub);
 }
