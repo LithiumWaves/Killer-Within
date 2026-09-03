@@ -1066,12 +1066,28 @@ function parseActorJson(raw) {
     }
 }
 
-async function handleRoleChange(nextRole) {
-    const changed = setPlayRole(nextRole);
-    if (!changed && getPlayRole() === nextRole) {
-        return;
+/**
+ * Switch Killer Within play role and refresh both UIs.
+ * @param {string} nextRole
+ * @param {{ notify?: boolean }} [options]
+ * @returns {Promise<string>} Human-readable status for slash / toasts.
+ */
+export async function switchPlayRole(nextRole, options = {}) {
+    const notify = options.notify !== false;
+    const role = String(nextRole || '').trim().toLowerCase() === PLAY_ROLES.INVESTIGATOR
+        ? PLAY_ROLES.INVESTIGATOR
+        : PLAY_ROLES.KIRA;
+    const changed = setPlayRole(role);
+    if (!changed && getPlayRole() === role) {
+        const message = role === PLAY_ROLES.INVESTIGATOR
+            ? 'Already playing as Investigator.'
+            : 'Already playing as Kira.';
+        if (notify) {
+            globalThis.toastr?.info?.(message);
+        }
+        return message;
     }
-    if (nextRole === PLAY_ROLES.INVESTIGATOR) {
+    if (role === PLAY_ROLES.INVESTIGATOR) {
         activateInvestigatorShell();
     } else {
         const settings = getInvestigatorSettings();
@@ -1080,13 +1096,19 @@ async function handleRoleChange(nextRole) {
         refreshInvestigatorUi();
     }
     refreshDeathNoteUiHook?.();
-    globalThis.toastr?.info?.(
-        nextRole === PLAY_ROLES.INVESTIGATOR
-            ? (useMobileDockPlacement()
-                ? 'Task Force dock ready — tap Open on the floating control.'
-                : 'Logging into Task Force terminal…')
-            : 'Returned to Death Note tools.',
-    );
+    const message = role === PLAY_ROLES.INVESTIGATOR
+        ? (useMobileDockPlacement()
+            ? 'Switched to Investigator. Task Force dock ready — tap Open on the floating control.'
+            : 'Switched to Investigator. Logging into Task Force terminal…')
+        : 'Switched to Kira. Returned to Death Note tools.';
+    if (notify) {
+        globalThis.toastr?.info?.(message);
+    }
+    return message;
+}
+
+async function handleRoleChange(nextRole) {
+    await switchPlayRole(nextRole);
 }
 
 function bindTaskForceDock(root) {
@@ -1528,6 +1550,9 @@ function bindHubInteractions(root) {
 }
 
 export function refreshInvestigatorUi() {
+    if (typeof document === 'undefined') {
+        return;
+    }
     const settings = getInvestigatorSettings();
     if (!Object.values(SCREENS).includes(settings.activeScreen)) {
         settings.activeScreen = SCREENS.BOARD;
