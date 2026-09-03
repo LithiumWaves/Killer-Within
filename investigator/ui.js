@@ -65,6 +65,7 @@ const SCREENS = Object.freeze({
 
 let refreshDeathNoteUiHook = null;
 let lastHubOpenIntentAt = 0;
+let lastHubToggleAt = 0;
 const HUB_OPEN_GRACE_MS = 4000;
 let dockDragState = {
     dragging: false,
@@ -255,15 +256,21 @@ function openHub() {
         // ignore
     }
     markHubOpenIntent();
+    lastHubToggleAt = Date.now();
     scheduleInvestigatorSettingsSave();
     refreshInvestigatorUi();
-    // Re-assert after layout — never leave hubOpen=true with no node.
+    // Re-assert after layout — never leave hubOpen=true with no visible box.
     scheduleFrame(() => {
         if (!getInvestigatorSettings().hubOpen) {
             return;
         }
-        if (!document.getElementById(INVESTIGATOR_HUB_ID)) {
+        let hub = document.getElementById(INVESTIGATOR_HUB_ID);
+        if (!hub) {
             refreshInvestigatorUi();
+            hub = document.getElementById(INVESTIGATOR_HUB_ID);
+        }
+        if (hub) {
+            applyHubViewportBox(hub);
         }
     });
 }
@@ -1113,6 +1120,63 @@ function ensureTaskForceDock() {
     return root;
 }
 
+function getViewportBox() {
+    const vv = window.visualViewport;
+    const width = Math.max(
+        1,
+        Math.round(Number(vv?.width) || Number(window.innerWidth) || document.documentElement?.clientWidth || 1),
+    );
+    const height = Math.max(
+        1,
+        Math.round(Number(vv?.height) || Number(window.innerHeight) || document.documentElement?.clientHeight || 1),
+    );
+    const left = Math.round(Number(vv?.offsetLeft) || 0);
+    const top = Math.round(Number(vv?.offsetTop) || 0);
+    return { width, height, left, top };
+}
+
+function applyHubViewportBox(root) {
+    if (!root) {
+        return;
+    }
+    const box = getViewportBox();
+    // Explicit pixels — percentage/inset chains collapse on some mobile WebViews
+    // (especially with the soft keyboard / visualViewport), leaving a "mounted"
+    // hub that paints nothing. Death Note avoids this by setting pixel size.
+    const style = root.style || (root.style = {});
+    const set = (name, value) => {
+        if (typeof style.setProperty === 'function') {
+            style.setProperty(name, value, 'important');
+        } else {
+            style[name] = value;
+        }
+    };
+    set('position', 'fixed');
+    set('left', `${box.left}px`);
+    set('top', `${box.top}px`);
+    set('right', 'auto');
+    set('bottom', 'auto');
+    set('width', `${box.width}px`);
+    set('height', `${box.height}px`);
+    set('max-width', 'none');
+    set('max-height', 'none');
+    set('min-width', `${box.width}px`);
+    set('min-height', `${box.height}px`);
+    set('z-index', '2147483646');
+    set('display', 'block');
+    set('visibility', 'visible');
+    set('opacity', '1');
+    set('pointer-events', 'auto');
+    set('transform', 'none');
+    set('inset', 'auto');
+    root.hidden = false;
+    try {
+        root.removeAttribute?.('hidden');
+    } catch (_error) {
+        // ignore
+    }
+}
+
 function ensureHub() {
     const settings = getInvestigatorSettings();
     let root = document.getElementById(INVESTIGATOR_HUB_ID);
@@ -1124,9 +1188,6 @@ function ensureHub() {
         return null;
     }
 
-    syncDeathReportsIntoTimelineEvidence();
-    const state = getInvestigatorState();
-    // Large phones (S25 Ultra landscape / “Desktop site”) still need the mobile shell.
     const mobile = useMobileDockPlacement();
 
     if (!root) {
@@ -1138,20 +1199,42 @@ function ensureHub() {
     root.className = `kw-investigator-hub ${mobile ? 'is-mobile' : 'is-desktop'}`;
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-modal', 'true');
-    root.innerHTML = buildHubHtml(settings, state);
+    root.setAttribute('aria-label', 'Task Force terminal');
 
-    // Pin with inset only — avoid width/height fighting fixed positioning.
-    root.style.left = '0';
-    root.style.top = '0';
-    root.style.right = '0';
-    root.style.bottom = '0';
-    root.style.width = '';
-    root.style.height = '';
-    root.style.maxHeight = '';
-    root.style.display = '';
-    root.style.visibility = 'visible';
-    root.style.opacity = '1';
-    root.style.zIndex = '2147483646';
+    try {
+        syncDeathReportsIntoTimelineEvidence();
+        const state = getInvestigatorState();
+        root.innerHTML = buildHubHtml(settings, state);
+    } catch (error) {
+        console.error('[killer_within_investigator] Hub render failed; showing fallback shell', error);
+        root.innerHTML = `
+            <div class="kw-investigator-hub__room">
+                <div class="kw-investigator-hub__bezel" aria-label="Task Force computer">
+                    <div class="kw-investigator-hub__crt">
+                        <div class="kw-investigator-hub__chrome">
+                            <header class="kw-investigator-hub__titlebar">
+                                <div class="kw-investigator-hub__brand">
+                                    <span class="kw-investigator-hub__led" aria-hidden="true"></span>
+                                    <div>
+                                        <div class="kw-investigator-hub__os">TASK FORCE OS // TERMINAL</div>
+                                        <div class="kw-investigator-hub__case">Render error — UI still online</div>
+                                    </div>
+                                </div>
+                            </header>
+                            <div class="kw-investigator-hub__body">
+                                <p class="kw-investigator-hint">The terminal shell mounted, but case content failed to render. Try Lock and Open again.</p>
+                            </div>
+                            <div class="kw-investigator-hub__hardware">
+                                <button type="button" class="kw-investigator-hub__power" data-inv-close>Lock</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    applyHubViewportBox(root);
     if (!mobile) {
         root.classList.add('is-immersive');
     }
@@ -1219,6 +1302,12 @@ async function handleRoleChange(nextRole) {
 }
 
 function toggleHubFromDock() {
+    const now = Date.now();
+    // Swallow ghost click / second pointerup that would instantly close a fresh open.
+    if (now - lastHubToggleAt < 350) {
+        return;
+    }
+    lastHubToggleAt = now;
     if (getInvestigatorSettings().hubOpen) {
         closeHub();
     } else {
@@ -1713,27 +1802,39 @@ export function refreshInvestigatorUi() {
     bindTaskForceDock(dock);
     bindHubInteractions(hub);
 
-    // Defer stuck recovery until after layout/paint so a freshly mounted fullscreen
-    // hub is not torn down by zero getBoundingClientRect during the open tick.
-    if (settings.hubOpen && useMobileDockPlacement()) {
-        scheduleFrame(() => {
-            scheduleFrame(() => {
-                if (recoverStuckInvestigatorShell()) {
-                    ensureTaskForceDock();
-                }
-            });
-        });
+    // Keep the hub sized to the live visual viewport (keyboard / URL bar changes).
+    if (hub) {
+        applyHubViewportBox(hub);
     }
+
+    // Stuck auto-close removed: it was tearing down healthy hubs on phones.
+    // The floating Lock dock is the escape hatch.
 }
 
 export function setupInvestigatorUi() {
     getInvestigatorSettings();
     refreshInvestigatorUi();
-    window.addEventListener('resize', () => {
-        if (isInvestigatorRole()) {
-            refreshInvestigatorUi();
+    const onViewportChange = () => {
+        if (!isInvestigatorRole()) {
+            return;
         }
-    });
+        const hub = document.getElementById(INVESTIGATOR_HUB_ID);
+        if (hub && getInvestigatorSettings().hubOpen) {
+            applyHubViewportBox(hub);
+            return;
+        }
+        refreshInvestigatorUi();
+    };
+    window.addEventListener('resize', onViewportChange);
+    window.visualViewport?.addEventListener?.('resize', onViewportChange);
+    window.visualViewport?.addEventListener?.('scroll', onViewportChange);
 }
 
-export { openHub, closeHub, setActiveScreen, toggleHubFromDock };
+export {
+    openHub,
+    closeHub,
+    setActiveScreen,
+    toggleHubFromDock,
+    applyHubViewportBox,
+    getViewportBox,
+};
