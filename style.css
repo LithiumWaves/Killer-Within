@@ -2660,6 +2660,11 @@
     max-width: min(22rem, calc(100vw - 20px));
 }
 
+#kw-investigator-dock.is-mobile.is-hub-open {
+    /* Stay above the CRT so Lock remains tappable while the hub is open. */
+    z-index: 2147483647;
+}
+
 .kw-investigator-dock__shell {
     display: grid;
     justify-items: start;

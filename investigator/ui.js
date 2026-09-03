@@ -121,6 +121,31 @@ function useMobileDockPlacement() {
     return isCoarsePointerDevice() && window.innerWidth <= MOBILE_DOCK_WIDTH_MAX;
 }
 
+export function shouldShowTaskForceDock({
+    isInvestigator = false,
+    hubOpen = false,
+    mobileDockPlacement = false,
+} = {}) {
+    if (!isInvestigator) {
+        return false;
+    }
+    // Desktop: hide dock while the immersive hub is open.
+    // Mobile: always keep the dock so a stuck/off-screen hub cannot trap the user.
+    if (hubOpen && !mobileDockPlacement) {
+        return false;
+    }
+    return true;
+}
+
+export function activateInvestigatorShell() {
+    const settings = getInvestigatorSettings();
+    // Phones land on the dock; desktop auto-opens the terminal.
+    settings.hubOpen = !useMobileDockPlacement();
+    settings.hubCollapsed = false;
+    scheduleInvestigatorSettingsSave();
+    refreshInvestigatorUi();
+}
+
 function formatClock(ms) {
     const value = Number(ms);
     if (!Number.isFinite(value) || value <= 0) {
@@ -938,7 +963,13 @@ function ensureTaskForceDock() {
     document.getElementById('kw-investigator-workstation')?.remove();
 
     const settings = getInvestigatorSettings();
-    const shouldShow = isInvestigatorRole() && !settings.hubOpen;
+    const mobileDock = useMobileDockPlacement();
+    const hubOpen = Boolean(settings.hubOpen);
+    const shouldShow = shouldShowTaskForceDock({
+        isInvestigator: isInvestigatorRole(),
+        hubOpen,
+        mobileDockPlacement: mobileDock,
+    });
 
     if (!shouldShow) {
         if (root) {
@@ -948,7 +979,6 @@ function ensureTaskForceDock() {
     }
 
     const state = getInvestigatorState();
-    const mobileDock = useMobileDockPlacement();
 
     if (!root) {
         root = document.createElement('div');
@@ -956,22 +986,22 @@ function ensureTaskForceDock() {
         document.body.append(root);
     }
 
-    root.className = `kw-investigator-dock ${mobileDock ? 'is-mobile' : 'is-desktop'}`;
+    root.className = `kw-investigator-dock ${mobileDock ? 'is-mobile' : 'is-desktop'}${hubOpen ? ' is-hub-open' : ''}`;
     root.setAttribute('role', 'region');
-    root.setAttribute('aria-label', 'Task Force terminal');
+    root.setAttribute('aria-label', hubOpen ? 'Lock Task Force terminal' : 'Task Force terminal');
     root.hidden = false;
     root.style.display = '';
     root.style.visibility = 'visible';
     root.style.opacity = '1';
     root.innerHTML = `
         <div class="kw-investigator-dock__shell">
-            <button type="button" class="kw-investigator-dock__open" data-inv-wake data-inv-drag-handle="true">
+            <button type="button" class="kw-investigator-dock__open" data-inv-dock-toggle="true" data-inv-drag-handle="true">
                 <span class="kw-investigator-dock__led" aria-hidden="true"></span>
                 <span class="kw-investigator-dock__copy">
                     <span class="kw-investigator-dock__label">Task Force</span>
                     <span class="kw-investigator-dock__case">${escapeHtml(state.caseId)}</span>
                 </span>
-                <span class="kw-investigator-dock__action">Open</span>
+                <span class="kw-investigator-dock__action">${hubOpen ? 'Lock' : 'Open'}</span>
             </button>
         </div>
     `;
@@ -1042,18 +1072,14 @@ async function handleRoleChange(nextRole) {
         return;
     }
     if (nextRole === PLAY_ROLES.INVESTIGATOR) {
-        const settings = getInvestigatorSettings();
-        // On phones, land on the dock so a stuck/off-screen hub cannot hide the only entry point.
-        settings.hubOpen = !useMobileDockPlacement();
-        settings.hubCollapsed = false;
-        scheduleInvestigatorSettingsSave();
+        activateInvestigatorShell();
     } else {
         const settings = getInvestigatorSettings();
         settings.hubOpen = false;
         scheduleInvestigatorSettingsSave();
+        refreshInvestigatorUi();
     }
     refreshDeathNoteUiHook?.();
-    refreshInvestigatorUi();
     globalThis.toastr?.info?.(
         nextRole === PLAY_ROLES.INVESTIGATOR
             ? (useMobileDockPlacement()
@@ -1078,6 +1104,10 @@ function bindTaskForceDock(root) {
             return;
         }
         if (!event.isPrimary) {
+            return;
+        }
+        // Don't drag the Lock chip while the hub is open — tap to close only.
+        if (getInvestigatorSettings().hubOpen && useMobileDockPlacement()) {
             return;
         }
 
@@ -1136,7 +1166,7 @@ function bindTaskForceDock(root) {
                 dockDragState.pointerId = null;
                 dockDragState.ignoreClick = dockDragState.moved;
 
-                if (activeRoot && dockDragState.moved) {
+                if (activeRoot && dockDragState.moved && !useMobileDockPlacement()) {
                     const rectFinal = activeRoot.getBoundingClientRect();
                     const settings = getInvestigatorSettings();
                     settings.dockX = Math.round(rectFinal.left);
@@ -1164,7 +1194,11 @@ function bindTaskForceDock(root) {
             return;
         }
         event.preventDefault();
-        openHub();
+        if (getInvestigatorSettings().hubOpen) {
+            closeHub();
+        } else {
+            openHub();
+        }
     });
 }
 

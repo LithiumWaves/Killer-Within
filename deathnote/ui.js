@@ -72,7 +72,7 @@ import {
     syncAllCaseActionMessageVisibility,
 } from '../investigator/core.js';
 import { DEFAULT_CASE_PROMPT_TEMPLATE } from '../investigator/config.js';
-import { closeHub, openHub, refreshInvestigatorUi } from '../investigator/ui.js';
+import { closeHub, refreshInvestigatorUi, activateInvestigatorShell } from '../investigator/ui.js';
 
 const PAGE_TURN_MS = 240;
 const CLOSED_WIDTH = 240;
@@ -2340,7 +2340,8 @@ function bindSettingsUi() {
         const next = value === PLAY_ROLES.INVESTIGATOR ? PLAY_ROLES.INVESTIGATOR : PLAY_ROLES.KIRA;
         setPlayRole(next);
         if (next === PLAY_ROLES.INVESTIGATOR) {
-            openHub();
+            // Phones keep the floating dock as the entry point (avoid stuck/off-screen hub).
+            activateInvestigatorShell();
         } else {
             closeHub();
         }
