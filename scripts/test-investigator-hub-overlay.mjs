@@ -130,10 +130,18 @@ assert.equal(hub.style.getPropertyValue('width'), '390px');
 assert.equal(hub.style.getPropertyValue('height'), '560px');
 assert.equal(hub.style.getPropertyPriority('width'), 'important');
 assert.equal(hub.style.getPropertyPriority('height'), 'important');
+assert.equal(hub.style.getPropertyValue('max-height'), '560px');
+assert.equal(hub.style.getPropertyValue('min-height'), '0');
 assert.equal(hub.style.getPropertyValue('display'), 'block');
 assert.equal(hub.style.getPropertyValue('visibility'), 'visible');
 assert.equal(hub.style.getPropertyValue('opacity'), '1');
 assert.ok(String(hub.innerHTML).includes('TASK FORCE OS'), 'hub content rendered');
+assert.equal(String(hub.innerHTML).includes('kw-investigator-hub__hardware'), false, 'mobile hub omits hardware chrome');
+
+// When layout viewport is shorter than visualViewport reports, clamp down.
+window.innerHeight = 500;
+Object.defineProperty(document.documentElement, 'clientHeight', { value: 500, configurable: true });
+assert.equal(getViewportBox().height, 500, 'clamp hub height to layout viewport');
 
 // Re-apply after viewport shrink should keep a real box.
 window.visualViewport.height = 480;

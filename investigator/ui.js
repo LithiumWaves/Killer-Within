@@ -939,6 +939,25 @@ function renderActiveScreen(settings, state) {
 
 function buildHubHtml(settings, state) {
     const mobile = useMobileDockPlacement();
+    // On phones the floating dock already provides Lock — drop plate/hardware
+    // chrome so the CRT can fit inside the visible viewport.
+    const plateHtml = mobile
+        ? ''
+        : `
+                <div class="kw-investigator-hub__plate">
+                    <span class="kw-investigator-hub__plate-mark">NPA</span>
+                    <span class="kw-investigator-hub__plate-name">Task Force Terminal</span>
+                </div>`;
+    const hardwareHtml = mobile
+        ? ''
+        : `
+                <div class="kw-investigator-hub__hardware">
+                    <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
+                    <button type="button" class="kw-investigator-hub__power" data-inv-close title="Lock terminal">
+                        Power / Lock
+                    </button>
+                    <span class="kw-investigator-hub__vent" aria-hidden="true"></span>
+                </div>`;
     return `
         <div class="kw-investigator-hub__room">
             <div class="kw-investigator-hub__bezel" aria-label="Task Force computer">
@@ -946,10 +965,7 @@ function buildHubHtml(settings, state) {
                 <span class="kw-investigator-hub__screw kw-investigator-hub__screw--tr" aria-hidden="true"></span>
                 <span class="kw-investigator-hub__screw kw-investigator-hub__screw--bl" aria-hidden="true"></span>
                 <span class="kw-investigator-hub__screw kw-investigator-hub__screw--br" aria-hidden="true"></span>
-                <div class="kw-investigator-hub__plate">
-                    <span class="kw-investigator-hub__plate-mark">NPA</span>
-                    <span class="kw-investigator-hub__plate-name">Task Force Terminal</span>
-                </div>
+                ${plateHtml}
                 <div class="kw-investigator-hub__crt">
                     <div class="kw-investigator-hub__scan" aria-hidden="true"></div>
                     <div class="kw-investigator-hub__chrome">
@@ -975,13 +991,7 @@ function buildHubHtml(settings, state) {
                         </footer>
                     </div>
                 </div>
-                <div class="kw-investigator-hub__hardware">
-                    <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
-                    <button type="button" class="kw-investigator-hub__power" data-inv-close title="Lock terminal">
-                        ${mobile ? 'Lock' : 'Power / Lock'}
-                    </button>
-                    <span class="kw-investigator-hub__vent" aria-hidden="true"></span>
-                </div>
+                ${hardwareHtml}
             </div>
         </div>
     `;
@@ -1122,13 +1132,33 @@ function ensureTaskForceDock() {
 
 function getViewportBox() {
     const vv = window.visualViewport;
+    const vvWidth = Number(vv?.width);
+    const vvHeight = Number(vv?.height);
+    const layoutWidth = Math.min(
+        Number(window.innerWidth) || Infinity,
+        Number(document.documentElement?.clientWidth) || Infinity,
+    );
+    const layoutHeight = Math.min(
+        Number(window.innerHeight) || Infinity,
+        Number(document.documentElement?.clientHeight) || Infinity,
+    );
+    // Prefer the *visible* viewport, and never exceed the layout viewport —
+    // 100vh-sized shells routinely extend under mobile browser chrome.
     const width = Math.max(
         1,
-        Math.round(Number(vv?.width) || Number(window.innerWidth) || document.documentElement?.clientWidth || 1),
+        Math.round(
+            Number.isFinite(vvWidth) && vvWidth > 0
+                ? Math.min(vvWidth, layoutWidth || vvWidth)
+                : (layoutWidth || window.innerWidth || 1),
+        ),
     );
     const height = Math.max(
         1,
-        Math.round(Number(vv?.height) || Number(window.innerHeight) || document.documentElement?.clientHeight || 1),
+        Math.round(
+            Number.isFinite(vvHeight) && vvHeight > 0
+                ? Math.min(vvHeight, layoutHeight || vvHeight)
+                : (layoutHeight || window.innerHeight || 1),
+        ),
     );
     const left = Math.round(Number(vv?.offsetLeft) || 0);
     const top = Math.round(Number(vv?.offsetTop) || 0);
@@ -1140,9 +1170,8 @@ function applyHubViewportBox(root) {
         return;
     }
     const box = getViewportBox();
-    // Explicit pixels — percentage/inset chains collapse on some mobile WebViews
-    // (especially with the soft keyboard / visualViewport), leaving a "mounted"
-    // hub that paints nothing. Death Note avoids this by setting pixel size.
+    // Explicit pixels pinned to the visible visualViewport. Avoid min-height:100vh
+    // style forcing — that is what pushed the terminal off the bottom of phones.
     const style = root.style || (root.style = {});
     const set = (name, value) => {
         if (typeof style.setProperty === 'function') {
@@ -1158,10 +1187,10 @@ function applyHubViewportBox(root) {
     set('bottom', 'auto');
     set('width', `${box.width}px`);
     set('height', `${box.height}px`);
-    set('max-width', 'none');
-    set('max-height', 'none');
-    set('min-width', `${box.width}px`);
-    set('min-height', `${box.height}px`);
+    set('max-width', `${box.width}px`);
+    set('max-height', `${box.height}px`);
+    set('min-width', '0');
+    set('min-height', '0');
     set('z-index', '2147483646');
     set('display', 'block');
     set('visibility', 'visible');
@@ -1169,6 +1198,8 @@ function applyHubViewportBox(root) {
     set('pointer-events', 'auto');
     set('transform', 'none');
     set('inset', 'auto');
+    set('overflow', 'hidden');
+    set('box-sizing', 'border-box');
     root.hidden = false;
     try {
         root.removeAttribute?.('hidden');
