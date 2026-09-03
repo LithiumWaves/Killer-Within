@@ -952,17 +952,15 @@ function ensureHub() {
     root.setAttribute('aria-modal', 'true');
     root.innerHTML = buildHubHtml(settings, state);
 
-    if (mobile) {
-        root.style.left = '0';
-        root.style.top = '0';
-        root.style.right = '0';
-        root.style.bottom = '0';
-    } else {
-        // Desktop: also immersive full-bleed terminal session (GTA computer sit-down).
-        root.style.left = '0';
-        root.style.top = '0';
-        root.style.right = '0';
-        root.style.bottom = '0';
+    // Pin with inset only — avoid width/height fighting fixed positioning.
+    root.style.left = '0';
+    root.style.top = '0';
+    root.style.right = '0';
+    root.style.bottom = '0';
+    root.style.width = '';
+    root.style.height = '';
+    root.style.maxHeight = '';
+    if (!mobile) {
         root.classList.add('is-immersive');
     }
 
