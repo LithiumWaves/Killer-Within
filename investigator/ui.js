@@ -64,6 +64,8 @@ const SCREENS = Object.freeze({
 });
 
 let refreshDeathNoteUiHook = null;
+let lastHubOpenIntentAt = 0;
+const HUB_OPEN_GRACE_MS = 4000;
 let dockDragState = {
     dragging: false,
     moved: false,
@@ -77,6 +79,64 @@ let dockDragState = {
     moveHandler: null,
     upHandler: null,
 };
+
+function scheduleFrame(callback) {
+    if (typeof requestAnimationFrame === 'function') {
+        return requestAnimationFrame(callback);
+    }
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        return window.requestAnimationFrame(callback);
+    }
+    return setTimeout(callback, 16);
+}
+
+function markHubOpenIntent() {
+    lastHubOpenIntentAt = Date.now();
+}
+
+/**
+ * Mobile-safe toast — ST's default bottom toasts sit under the message form.
+ * @param {'info'|'success'|'warning'|'error'} type
+ * @param {string} message
+ */
+export function notifyInvestigator(type, message) {
+    const text = String(message || '').trim();
+    if (!text) {
+        return;
+    }
+    const fn = globalThis.toastr?.[type];
+    if (typeof fn !== 'function') {
+        console.info(`[killer_within_investigator] ${text}`);
+        return;
+    }
+    const mobile = typeof window !== 'undefined'
+        && (window.innerWidth <= MOBILE_DOCK_WIDTH_MAX || useMobileDockPlacement());
+    if (mobile) {
+        try {
+            document.body?.classList?.add('kw-investigator-toast-mobile');
+        } catch (_error) {
+            // ignore
+        }
+        fn.call(globalThis.toastr, text, '', {
+            positionClass: 'toast-top-center',
+            timeOut: 4500,
+            extendedTimeOut: 2000,
+            closeButton: true,
+            onHidden() {
+                try {
+                    const container = document.getElementById('toast-container');
+                    if (!container || container.childElementCount === 0) {
+                        document.body?.classList?.remove('kw-investigator-toast-mobile');
+                    }
+                } catch (_error) {
+                    // ignore
+                }
+            },
+        });
+        return;
+    }
+    fn.call(globalThis.toastr, text);
+}
 
 export function registerDeathNoteUiRefresh(fn) {
     refreshDeathNoteUiHook = typeof fn === 'function' ? fn : null;
@@ -140,8 +200,12 @@ export function shouldShowTaskForceDock({
 export function activateInvestigatorShell() {
     const settings = getInvestigatorSettings();
     // Phones land on the dock; desktop auto-opens the terminal.
-    settings.hubOpen = !useMobileDockPlacement();
+    const open = !useMobileDockPlacement();
+    settings.hubOpen = open;
     settings.hubCollapsed = false;
+    if (open) {
+        markHubOpenIntent();
+    }
     scheduleInvestigatorSettingsSave();
     refreshInvestigatorUi();
 }
@@ -180,8 +244,25 @@ function openHub() {
     const settings = getInvestigatorSettings();
     settings.hubOpen = true;
     settings.hubCollapsed = false;
+    // Keyboard / focused chat input collapses the visual viewport on phones and
+    // makes fixed fullscreen shells look "missing". Blur before mounting.
+    try {
+        document.activeElement?.blur?.();
+    } catch (_error) {
+        // ignore
+    }
+    markHubOpenIntent();
     scheduleInvestigatorSettingsSave();
     refreshInvestigatorUi();
+    // Re-assert after layout — never leave hubOpen=true with no node.
+    scheduleFrame(() => {
+        if (!getInvestigatorSettings().hubOpen) {
+            return;
+        }
+        if (!document.getElementById(INVESTIGATOR_HUB_ID)) {
+            refreshInvestigatorUi();
+        }
+    });
 }
 
 function closeHub() {
@@ -847,7 +928,7 @@ function renderActiveScreen(settings, state) {
 }
 
 function buildHubHtml(settings, state) {
-    const mobile = isMobileViewport();
+    const mobile = useMobileDockPlacement();
     return `
         <div class="kw-investigator-hub__room">
             <div class="kw-investigator-hub__bezel" aria-label="Task Force computer">
@@ -938,23 +1019,40 @@ function recoverStuckInvestigatorShell() {
     if (!isInvestigatorRole() || !settings.hubOpen || !useMobileDockPlacement()) {
         return false;
     }
+    // Fresh intentional opens must never be treated as stuck — measuring a hub in
+    // the same turn it mounts (or while the soft keyboard is up) falsely reported
+    // zero/off-screen bounds and immediately tore the terminal down on phones.
+    if (Date.now() - lastHubOpenIntentAt < HUB_OPEN_GRACE_MS) {
+        return false;
+    }
     const hub = document.getElementById(INVESTIGATOR_HUB_ID);
     // Missing node means ensureHub has not run yet — do not treat as stuck.
     if (!hub) {
         return false;
     }
-    const rect = hub.getBoundingClientRect();
-    const visible = rect.width >= 120
-        && rect.height >= 120
-        && rect.bottom > 80
-        && rect.top < window.innerHeight - 40;
-    if (visible) {
+    if (!shouldRecoverStuckMobileHub(hub.getBoundingClientRect(), {
+        viewportHeight: Math.max(
+            Number(window.visualViewport?.height) || 0,
+            Number(window.innerHeight) || 0,
+            1,
+        ),
+    })) {
         return false;
     }
     settings.hubOpen = false;
     scheduleInvestigatorSettingsSave();
     hub.remove();
     return true;
+}
+
+/**
+ * @param {{ width: number, height: number, top: number, bottom: number }} rect
+ * @param {{ viewportHeight: number }} options
+ */
+export function shouldRecoverStuckMobileHub(rect, { viewportHeight = 1 } = {}) {
+    const hasBox = Number(rect?.width) >= 80 && Number(rect?.height) >= 80;
+    const fullyOffscreen = Number(rect?.bottom) <= 0 || Number(rect?.top) >= Number(viewportHeight || 1);
+    return !hasBox || fullyOffscreen;
 }
 
 function ensureTaskForceDock() {
@@ -1005,7 +1103,7 @@ function ensureTaskForceDock() {
             </button>
         </div>
     `;
-    requestAnimationFrame(() => applyDockPosition(root));
+    scheduleFrame(() => applyDockPosition(root));
     return root;
 }
 
@@ -1022,7 +1120,8 @@ function ensureHub() {
 
     syncDeathReportsIntoTimelineEvidence();
     const state = getInvestigatorState();
-    const mobile = isMobileViewport();
+    // Large phones (S25 Ultra landscape / “Desktop site”) still need the mobile shell.
+    const mobile = useMobileDockPlacement();
 
     if (!root) {
         root = document.createElement('div');
@@ -1043,6 +1142,10 @@ function ensureHub() {
     root.style.width = '';
     root.style.height = '';
     root.style.maxHeight = '';
+    root.style.display = '';
+    root.style.visibility = 'visible';
+    root.style.opacity = '1';
+    root.style.zIndex = '2147483646';
     if (!mobile) {
         root.classList.add('is-immersive');
     }
@@ -1083,7 +1186,7 @@ export async function switchPlayRole(nextRole, options = {}) {
             ? 'Already playing as Investigator.'
             : 'Already playing as Kira.';
         if (notify) {
-            globalThis.toastr?.info?.(message);
+            notifyInvestigator('info', message);
         }
         return message;
     }
@@ -1098,11 +1201,11 @@ export async function switchPlayRole(nextRole, options = {}) {
     refreshDeathNoteUiHook?.();
     const message = role === PLAY_ROLES.INVESTIGATOR
         ? (useMobileDockPlacement()
-            ? 'Switched to Investigator. Task Force dock ready — tap Open on the floating control.'
+            ? 'Switched to Investigator. Task Force dock ready — tap Open, or run /kwterminal open.'
             : 'Switched to Investigator. Logging into Task Force terminal…')
         : 'Switched to Kira. Returned to Death Note tools.';
     if (notify) {
-        globalThis.toastr?.info?.(message);
+        notifyInvestigator('info', message);
     }
     return message;
 }
@@ -1558,13 +1661,22 @@ export function refreshInvestigatorUi() {
         settings.activeScreen = SCREENS.BOARD;
     }
 
-    let hub = ensureHub();
-    if (recoverStuckInvestigatorShell()) {
-        hub = null;
-    }
+    const hub = ensureHub();
     const dock = ensureTaskForceDock();
     bindTaskForceDock(dock);
     bindHubInteractions(hub);
+
+    // Defer stuck recovery until after layout/paint so a freshly mounted fullscreen
+    // hub is not torn down by zero getBoundingClientRect during the open tick.
+    if (settings.hubOpen && useMobileDockPlacement()) {
+        scheduleFrame(() => {
+            scheduleFrame(() => {
+                if (recoverStuckInvestigatorShell()) {
+                    ensureTaskForceDock();
+                }
+            });
+        });
+    }
 }
 
 export function setupInvestigatorUi() {

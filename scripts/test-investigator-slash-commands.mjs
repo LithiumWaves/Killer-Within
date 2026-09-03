@@ -26,11 +26,16 @@ const registered = [];
 
 globalThis.window = {
     innerWidth: 1280,
+    innerHeight: 800,
     matchMedia() {
         return { matches: false };
     },
     addEventListener() {},
+    requestAnimationFrame(cb) {
+        return setTimeout(cb, 0);
+    },
 };
+globalThis.requestAnimationFrame = globalThis.window.requestAnimationFrame;
 
 function makeArgument(props) {
     return { ...props };

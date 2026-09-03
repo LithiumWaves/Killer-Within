@@ -3,6 +3,7 @@ import { getInvestigatorSettings, getPlayRole, isInvestigatorRole } from './core
 import {
     activateInvestigatorShell,
     closeHub,
+    notifyInvestigator,
     openHub,
     switchPlayRole,
 } from './ui.js';
@@ -49,15 +50,21 @@ async function runTerminalAction(actionRaw) {
     if (action === 'status') {
         const role = getPlayRole();
         const settings = getInvestigatorSettings();
-        return `Role: ${role}. Terminal: ${settings.hubOpen ? 'open' : 'closed'}.`;
+        const message = `Role: ${role}. Terminal: ${settings.hubOpen ? 'open' : 'closed'}.`;
+        notifyInvestigator('info', message);
+        return message;
     }
 
     if (action === 'close' || action === 'lock' || action === 'hide') {
         if (!isInvestigatorRole()) {
-            return 'Terminal is only available in Investigator role. Use /kwrole investigator first.';
+            const message = 'Terminal is only available in Investigator role. Use /kwrole investigator first.';
+            notifyInvestigator('warning', message);
+            return message;
         }
         closeHub();
-        return 'Task Force terminal closed. Use /kwterminal open (or the dock) to reopen.';
+        const message = 'Task Force terminal closed. Use /kwterminal open (or the dock) to reopen.';
+        notifyInvestigator('info', message);
+        return message;
     }
 
     if (action === 'open' || action === 'show' || action === 'unlock') {
@@ -65,7 +72,9 @@ async function runTerminalAction(actionRaw) {
             await runRoleSwitch(PLAY_ROLES.INVESTIGATOR, { notify: false });
         }
         openHub();
-        return 'Task Force terminal opened.';
+        const message = 'Task Force terminal opened.';
+        notifyInvestigator('info', message);
+        return message;
     }
 
     if (action === 'dock' || action === 'activate') {
@@ -75,12 +84,16 @@ async function runTerminalAction(actionRaw) {
             activateInvestigatorShell();
         }
         const settings = getInvestigatorSettings();
-        return settings.hubOpen
+        const message = settings.hubOpen
             ? 'Investigator shell active — terminal opened.'
             : 'Investigator shell active — use the floating dock (or /kwterminal open).';
+        notifyInvestigator('info', message);
+        return message;
     }
 
-    return 'Unknown action. Use /kwterminal open|close|status|dock';
+    const message = 'Unknown action. Use /kwterminal open|close|status|dock';
+    notifyInvestigator('warning', message);
+    return message;
 }
 
 /**
