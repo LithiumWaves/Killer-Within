@@ -2761,8 +2761,8 @@
     position: fixed;
     z-index: 2147483646;
     inset: 0;
-    width: 100vw;
-    height: 100dvh;
+    width: auto;
+    height: auto;
     max-width: none;
     max-height: none;
     color: var(--kw-inv-text);
@@ -2777,9 +2777,14 @@
 }
 
 .kw-investigator-hub__room {
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100%;
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
     padding: clamp(0.55rem, 2vw, 1.4rem);
     padding-bottom: calc(clamp(0.55rem, 2vw, 1.4rem) + env(safe-area-inset-bottom, 0px));
 }
@@ -2787,10 +2792,15 @@
 .kw-investigator-hub__bezel {
     position: relative;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    box-sizing: border-box;
     width: min(1080px, 100%);
     height: min(720px, 100%);
+    max-width: 100%;
     max-height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
     padding: 0.85rem 0.95rem 0.75rem;
     border-radius: 1.15rem;
     background:
@@ -2805,6 +2815,7 @@
 #kw-investigator-hub.is-mobile .kw-investigator-hub__bezel {
     width: 100%;
     height: 100%;
+    max-height: 100%;
     border-radius: 0.75rem;
     padding: 0.55rem 0.55rem 0.5rem;
 }
@@ -2864,6 +2875,7 @@
 
 .kw-investigator-hub__crt {
     position: relative;
+    min-width: 0;
     min-height: 0;
     height: 100%;
     overflow: hidden;
@@ -2898,24 +2910,32 @@
     position: relative;
     z-index: 1;
     display: grid;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+        "title"
+        "nav"
+        "body"
+        "status";
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
+    overflow: hidden;
     background:
         radial-gradient(ellipse at 50% 0%, rgba(70, 170, 220, 0.12), transparent 45%),
         linear-gradient(180deg, #0b1822, #071018 55%, #050b10);
 }
 
 #kw-investigator-hub.is-mobile .kw-investigator-hub__chrome {
-    grid-template-rows: auto 1fr auto auto;
+    grid-template-areas:
+        "title"
+        "body"
+        "nav"
+        "status";
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
 }
 
-#kw-investigator-hub.is-mobile .kw-investigator-hub__titlebar { order: 1; }
-#kw-investigator-hub.is-mobile .kw-investigator-hub__body { order: 2; }
-#kw-investigator-hub.is-mobile .kw-investigator-nav--dock { order: 3; }
-#kw-investigator-hub.is-mobile .kw-investigator-hub__status { order: 4; }
-
 .kw-investigator-hub__titlebar {
+    grid-area: title;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3023,6 +3043,7 @@
 }
 
 .kw-investigator-nav {
+    grid-area: nav;
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
@@ -3032,12 +3053,24 @@
 }
 
 #kw-investigator-hub.is-mobile .kw-investigator-nav--dock {
-    order: 3;
+    order: unset;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 0.3rem;
+    padding: 0.45rem 0.4rem;
     border-bottom: 0;
     border-top: 1px solid var(--kw-inv-line);
-    justify-content: space-around;
-    padding: 0.5rem 0.35rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
     background: rgba(6, 12, 18, 0.95);
+    scrollbar-width: thin;
+}
+
+#kw-investigator-hub.is-mobile .kw-investigator-nav--dock .kw-investigator-nav__btn {
+    flex: 0 0 auto;
+    min-width: 4.25rem;
 }
 
 .kw-investigator-nav__btn {
@@ -3069,12 +3102,16 @@
 }
 
 .kw-investigator-hub__body {
+    grid-area: body;
+    min-width: 0;
     min-height: 0;
+    height: auto;
     overflow: auto;
     overflow-x: hidden;
     padding: 0.85rem 0.95rem 1rem;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    touch-action: pan-y;
 }
 
 /* Ops scrolls with the CRT body — nested height:100%/flex scroll collapses to blank on desktop. */
@@ -3106,6 +3143,7 @@
 }
 
 .kw-investigator-hub__status {
+    grid-area: status;
     display: flex;
     justify-content: space-between;
     gap: 0.75rem;
@@ -3120,7 +3158,6 @@
 }
 
 #kw-investigator-hub.is-mobile .kw-investigator-hub__status {
-    order: 4;
     border-top: 0;
 }
 
@@ -3445,10 +3482,13 @@
         padding: 0.55rem 0.55rem 0.7rem;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
+        touch-action: pan-y;
     }
 
-    #kw-investigator-hub.is-mobile .kw-investigator-screen--ops {
+    #kw-investigator-hub.is-mobile .kw-investigator-screen--ops,
+    #kw-investigator-hub.is-mobile .kw-investigator-ops-scroll {
         min-width: 0;
+        min-height: 0;
     }
 
     #kw-investigator-hub.is-mobile .kw-investigator-screen--ops .kw-investigator-screen__head p {
