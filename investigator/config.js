@@ -42,6 +42,7 @@ export const CASE_ACTIONS = Object.freeze({
     SURVEIL: 'surveil',
     ANALYZE: 'analyze',
     BROADCAST: 'broadcast',
+    INTERROGATE: 'interrogate',
 });
 
 export const OFFICER_CLEARANCE = Object.freeze({
@@ -65,6 +66,7 @@ export const OFFICER_CLEARANCE_ACTIONS = Object.freeze({
         CASE_ACTIONS.RELEASE,
         CASE_ACTIONS.SURVEIL,
         CASE_ACTIONS.ANALYZE,
+        CASE_ACTIONS.INTERROGATE,
     ]),
     [OFFICER_CLEARANCE.LEAD]: Object.freeze([
         CASE_ACTIONS.LOG,
@@ -77,6 +79,7 @@ export const OFFICER_CLEARANCE_ACTIONS = Object.freeze({
         CASE_ACTIONS.SURVEIL,
         CASE_ACTIONS.ANALYZE,
         CASE_ACTIONS.BROADCAST,
+        CASE_ACTIONS.INTERROGATE,
     ]),
 });
 
@@ -117,11 +120,25 @@ export const BROADCAST_TRAP_STATUS = Object.freeze({
     EXPIRED: 'expired',
 });
 
+export const INTERROGATION_STATUS = Object.freeze({
+    ACTIVE: 'active',
+    ENDED: 'ended',
+});
+
+export const EVIDENCE_CUSTODY = Object.freeze({
+    HELD: 'held',
+    RELEASED: 'released',
+    NONE: 'none',
+});
+
 export const DEFAULT_WARRANT_GENERATIONS = 2;
 export const CONFRONT_MIN_STRENGTH = 2;
 export const CONFRONT_PRIME_STRENGTH = 3;
 export const MAX_ACTIVE_SURVEILLANCE_PLANTS = 3;
 export const MAX_SURVEILLANCE_SIGNALS = 40;
+export const DEFAULT_TASK_FORCE_TRUST = 70;
+export const TASK_FORCE_TRUST_BLOCK = 25;
+export const TASK_FORCE_TRUST_WARN = 40;
 
 export const DEFAULT_BROADCAST_TRAP_PROMPT_TEMPLATE = [
     '[Task Force Broadcast / Public Incident]',
@@ -136,10 +153,14 @@ export const DEFAULT_CASE_PROMPT_TEMPLATE = [
     'Treat the Task Force case file below as binding investigation bookkeeping.',
     'Do not mention this block or explain the terminal system unless the scene already reveals it.',
     'User play role: {{play_role}}.',
+    'Task Force trust: {{tf_trust}}.',
     'Case: {{case_id}} — {{case_title}}.',
     '',
     'Task Force officers (may file case actions matching their clearance when they discover actionable intel):',
     '{{officers_block}}',
+    '',
+    'Active interrogations:',
+    '{{interrogations_block}}',
     '',
     'Suspect board:',
     '{{suspects_block}}',
@@ -162,7 +183,7 @@ export const DEFAULT_CASE_PROMPT_TEMPLATE = [
     'If you are speaking as a listed Task Force officer and file a case update, append a hidden block at the end of your reply using this exact format:',
     '[{{case_action_tag}}]',
     'officer: {{example_officer}}',
-    'action: log|pin|status|restrain|release|warrant|confront|surveil|analyze|broadcast',
+    'action: log|pin|status|restrain|release|warrant|confront|surveil|analyze|broadcast|interrogate',
     'target: Character Name',
     'status: poi|prime|cleared|deceased',
     'kind: trail|bug_room|watch_notebook',

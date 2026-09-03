@@ -44,6 +44,17 @@ export function setupDeathNoteExtension() {
                 });
                 const nameLearned = autoLearnCharacterNameFromMessage(messageIndex);
                 const confessionLearned = autoLearnQuotedCharacterNamesFromMessage(messageIndex);
+                let identityIngested = false;
+                if (details?.kind === 'received') {
+                    try {
+                        const investigator = await import('../investigator/core.js');
+                        identityIngested = Boolean(
+                            investigator.ingestIdentityTheftExposureForMessage(messageIndex),
+                        );
+                    } catch (error) {
+                        console.warn('[killer_within_deathnote] Investigator ID-theft ingest skipped', error);
+                    }
+                }
                 const identityExposureConsumed = details?.kind === 'received'
                     ? consumePendingIdentityTheftExposureForMessage(messageIndex)
                     : false;
@@ -56,6 +67,7 @@ export function setupDeathNoteExtension() {
                     || memoryTracked
                     || nameLearned
                     || confessionLearned
+                    || identityIngested
                     || identityExposureConsumed;
             },
             onAssistantMessageFinalized: async (messageIndex) => {
