@@ -854,8 +854,17 @@ function applyDockPosition(root) {
     }
     const settings = getInvestigatorSettings();
     const mobile = isMobileViewport();
-    const hasSaved = Number.isFinite(Number(settings.dockX)) && Number.isFinite(Number(settings.dockY));
 
+    // Mobile always uses CSS defaults (top-right); saved position is desktop-only.
+    if (mobile) {
+        root.style.left = '';
+        root.style.top = '';
+        root.style.right = '';
+        root.style.bottom = '';
+        return;
+    }
+
+    const hasSaved = Number.isFinite(Number(settings.dockX)) && Number.isFinite(Number(settings.dockY));
     if (hasSaved) {
         const width = root.offsetWidth || 180;
         const height = Math.min(root.offsetHeight || 48, 64);
@@ -870,17 +879,10 @@ function applyDockPosition(root) {
         return;
     }
 
-    if (mobile) {
-        root.style.left = '';
-        root.style.top = '';
-        root.style.right = '';
-        root.style.bottom = '';
-    } else {
-        root.style.left = '';
-        root.style.top = '';
-        root.style.right = '';
-        root.style.bottom = '';
-    }
+    root.style.left = '';
+    root.style.top = '';
+    root.style.right = '';
+    root.style.bottom = '';
 }
 
 function ensureTaskForceDock() {
