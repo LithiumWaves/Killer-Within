@@ -86,7 +86,7 @@ async function runTerminalAction(actionRaw) {
         const settings = getInvestigatorSettings();
         const message = settings.hubOpen
             ? 'Investigator shell active — terminal opened.'
-            : 'Investigator shell active — use the floating dock (or /kwterminal open).';
+            : 'Investigator shell active — terminal should be open; try /kwterminal open.';
         notifyInvestigator('info', message);
         return message;
     }

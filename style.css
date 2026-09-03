@@ -2652,9 +2652,9 @@
 #kw-investigator-dock.is-mobile {
     left: auto !important;
     right: max(10px, env(safe-area-inset-right, 0px)) !important;
-    top: auto !important;
-    /* Clear SillyTavern’s message form + Samsung gesture/nav bars */
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 5.75rem) !important;
+    /* Match Death Note inventory: top-right, clear of ST top chrome — not under the message bar. */
+    top: calc(env(safe-area-inset-top, 0px) + 10px) !important;
+    bottom: auto !important;
     z-index: 2147483647;
     width: auto;
     max-width: min(22rem, calc(100vw - 20px));

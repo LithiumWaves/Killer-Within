@@ -90,6 +90,7 @@ globalThis.document = {
     createElement() {
         return makeEl('');
     },
+    addEventListener() {},
 };
 
 globalThis.SillyTavern = {
@@ -137,6 +138,11 @@ assert.equal(shouldRecoverStuckMobileHub(
     { width: 0, height: 0, top: 0, bottom: 0 },
     { viewportHeight: 800 },
 ), true, 'zero-size hub may recover after grace');
+
+assert.equal(shouldRecoverStuckMobileHub(
+    { width: 390, height: 48, top: 0, bottom: 48 },
+    { viewportHeight: 800 },
+), false, 'short-but-present box must not be treated as stuck');
 
 assert.equal(shouldRecoverStuckMobileHub(
     { width: 390, height: 200, top: 900, bottom: 1100 },

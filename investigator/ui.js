@@ -70,6 +70,7 @@ let dockDragState = {
     dragging: false,
     moved: false,
     ignoreClick: false,
+    mobileTapOnly: false,
     startX: 0,
     startY: 0,
     originX: 0,
@@ -199,12 +200,14 @@ export function shouldShowTaskForceDock({
 
 export function activateInvestigatorShell() {
     const settings = getInvestigatorSettings();
-    // Phones land on the dock; desktop auto-opens the terminal.
-    const open = !useMobileDockPlacement();
-    settings.hubOpen = open;
+    // Always open the terminal. Mobile keeps the floating Lock dock as escape.
+    settings.hubOpen = true;
     settings.hubCollapsed = false;
-    if (open) {
-        markHubOpenIntent();
+    markHubOpenIntent();
+    try {
+        document.activeElement?.blur?.();
+    } catch (_error) {
+        // ignore
     }
     scheduleInvestigatorSettingsSave();
     refreshInvestigatorUi();
@@ -1050,7 +1053,10 @@ function recoverStuckInvestigatorShell() {
  * @param {{ viewportHeight: number }} options
  */
 export function shouldRecoverStuckMobileHub(rect, { viewportHeight = 1 } = {}) {
-    const hasBox = Number(rect?.width) >= 80 && Number(rect?.height) >= 80;
+    // Only treat a shell as gone when it has essentially no box (display:none /
+    // unmounted metrics). Never use a mid-size height threshold — that false-triggered
+    // while the soft keyboard or first layout pass reported a short rect.
+    const hasBox = Number(rect?.width) >= 40 && Number(rect?.height) >= 40;
     const fullyOffscreen = Number(rect?.bottom) <= 0 || Number(rect?.top) >= Number(viewportHeight || 1);
     return !hasBox || fullyOffscreen;
 }
@@ -1200,9 +1206,7 @@ export async function switchPlayRole(nextRole, options = {}) {
     }
     refreshDeathNoteUiHook?.();
     const message = role === PLAY_ROLES.INVESTIGATOR
-        ? (useMobileDockPlacement()
-            ? 'Switched to Investigator. Task Force dock ready — tap Open, or run /kwterminal open.'
-            : 'Switched to Investigator. Logging into Task Force terminal…')
+        ? 'Switched to Investigator. Task Force terminal opened.'
         : 'Switched to Kira. Returned to Death Note tools.';
     if (notify) {
         notifyInvestigator('info', message);
@@ -1214,37 +1218,68 @@ async function handleRoleChange(nextRole) {
     await switchPlayRole(nextRole);
 }
 
-function bindTaskForceDock(root) {
-    if (!root) {
+function toggleHubFromDock() {
+    if (getInvestigatorSettings().hubOpen) {
+        closeHub();
+    } else {
+        openHub();
+    }
+}
+
+let dockPointerDelegationInstalled = false;
+
+function bindTaskForceDock(_root) {
+    // Install once on document — ensureTaskForceDock rebuilds the button HTML every
+    // refresh, so per-button listeners would be easy to stack or miss on touch.
+    if (dockPointerDelegationInstalled) {
         return;
     }
-
-    const handle = root.querySelector('[data-inv-drag-handle="true"]');
-    if (!(handle instanceof HTMLElement)) {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
         return;
     }
+    dockPointerDelegationInstalled = true;
 
-    handle.addEventListener('pointerdown', (event) => {
+    // Mirror Death Note inventory/cover: toggle on pointerup, not click.
+    // Touch browsers suppress the synthetic click after pointerdown.preventDefault(),
+    // which is why Kira UI worked on phones and Investigator Open did not.
+    document.addEventListener('pointerdown', (event) => {
+        const handle = event.target?.closest?.('[data-inv-dock-toggle="true"]');
+        if (!(handle instanceof HTMLElement)) {
+            return;
+        }
         if (event.button !== 0 && event.pointerType === 'mouse') {
             return;
         }
         if (!event.isPrimary) {
             return;
         }
-        // Don't drag the Lock chip while the hub is open — tap to close only.
-        if (getInvestigatorSettings().hubOpen && useMobileDockPlacement()) {
+
+        const root = document.getElementById(INVESTIGATOR_DOCK_ID);
+        if (!root) {
             return;
         }
 
-        event.preventDefault();
-        const rect = root.getBoundingClientRect();
-        dockDragState.dragging = true;
-        dockDragState.moved = false;
-        dockDragState.pointerId = event.pointerId;
-        dockDragState.startX = event.clientX;
-        dockDragState.startY = event.clientY;
-        dockDragState.originX = rect.left;
-        dockDragState.originY = rect.top;
+        const mobilePinned = useMobileDockPlacement();
+        // While hub is open on mobile, Lock is tap-only (no drag session).
+        if (getInvestigatorSettings().hubOpen && mobilePinned) {
+            dockDragState.dragging = true;
+            dockDragState.moved = false;
+            dockDragState.pointerId = event.pointerId;
+            dockDragState.startX = event.clientX;
+            dockDragState.startY = event.clientY;
+            dockDragState.mobileTapOnly = true;
+        } else {
+            event.preventDefault();
+            const rect = root.getBoundingClientRect();
+            dockDragState.dragging = true;
+            dockDragState.moved = false;
+            dockDragState.mobileTapOnly = mobilePinned;
+            dockDragState.pointerId = event.pointerId;
+            dockDragState.startX = event.clientX;
+            dockDragState.startY = event.clientY;
+            dockDragState.originX = rect.left;
+            dockDragState.originY = rect.top;
+        }
 
         if (!dockDragState.handlersInstalled) {
             dockDragState.handlersInstalled = true;
@@ -1256,17 +1291,22 @@ function bindTaskForceDock(root) {
                 if (dockDragState.pointerId !== null && moveEvent.pointerId !== dockDragState.pointerId) {
                     return;
                 }
+                const dx = moveEvent.clientX - dockDragState.startX;
+                const dy = moveEvent.clientY - dockDragState.startY;
+                if (Math.abs(dx) + Math.abs(dy) > 10) {
+                    dockDragState.moved = true;
+                }
+
+                // Mobile dock is CSS-pinned (!important). Dragging only fights the
+                // stylesheet and falsely marks taps as moves — skip repositioning.
+                if (dockDragState.mobileTapOnly || useMobileDockPlacement()) {
+                    return;
+                }
+
                 const activeRoot = document.getElementById(INVESTIGATOR_DOCK_ID);
                 if (!activeRoot) {
                     return;
                 }
-
-                const dx = moveEvent.clientX - dockDragState.startX;
-                const dy = moveEvent.clientY - dockDragState.startY;
-                if (Math.abs(dx) + Math.abs(dy) > 4) {
-                    dockDragState.moved = true;
-                }
-
                 const rectNow = activeRoot.getBoundingClientRect();
                 const maxX = Math.max(0, window.innerWidth - rectNow.width);
                 const maxY = Math.max(0, window.innerHeight - Math.min(rectNow.height, 72));
@@ -1287,11 +1327,13 @@ function bindTaskForceDock(root) {
                 }
 
                 const activeRoot = document.getElementById(INVESTIGATOR_DOCK_ID);
+                const wasMoved = dockDragState.moved;
                 dockDragState.dragging = false;
                 dockDragState.pointerId = null;
-                dockDragState.ignoreClick = dockDragState.moved;
+                // Always swallow the trailing click — toggle happens here (Death Note pattern).
+                dockDragState.ignoreClick = true;
 
-                if (activeRoot && dockDragState.moved && !useMobileDockPlacement()) {
+                if (activeRoot && wasMoved && !useMobileDockPlacement()) {
                     const rectFinal = activeRoot.getBoundingClientRect();
                     const settings = getInvestigatorSettings();
                     settings.dockX = Math.round(rectFinal.left);
@@ -1303,28 +1345,33 @@ function bindTaskForceDock(root) {
                 window.removeEventListener('pointerup', dockDragState.upHandler, true);
                 window.removeEventListener('pointercancel', dockDragState.upHandler, true);
                 dockDragState.handlersInstalled = false;
+
+                if (!wasMoved) {
+                    toggleHubFromDock();
+                }
             };
 
             window.addEventListener('pointermove', dockDragState.moveHandler, true);
             window.addEventListener('pointerup', dockDragState.upHandler, true);
             window.addEventListener('pointercancel', dockDragState.upHandler, true);
         }
-    });
+    }, true);
 
-    handle.addEventListener('click', (event) => {
+    document.addEventListener('click', (event) => {
+        const handle = event.target?.closest?.('[data-inv-dock-toggle="true"]');
+        if (!(handle instanceof HTMLElement)) {
+            return;
+        }
         if (dockDragState.ignoreClick) {
             dockDragState.ignoreClick = false;
             event.preventDefault();
             event.stopPropagation();
             return;
         }
+        // Keyboard / non-pointer activation fallback.
         event.preventDefault();
-        if (getInvestigatorSettings().hubOpen) {
-            closeHub();
-        } else {
-            openHub();
-        }
-    });
+        toggleHubFromDock();
+    }, true);
 }
 
 function bindHubInteractions(root) {
@@ -1689,4 +1736,4 @@ export function setupInvestigatorUi() {
     });
 }
 
-export { openHub, closeHub, setActiveScreen };
+export { openHub, closeHub, setActiveScreen, toggleHubFromDock };
