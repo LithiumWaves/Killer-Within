@@ -1142,8 +1142,7 @@ function getViewportBox() {
         Number(window.innerHeight) || Infinity,
         Number(document.documentElement?.clientHeight) || Infinity,
     );
-    // Prefer the *visible* viewport, and never exceed the layout viewport —
-    // 100vh-sized shells routinely extend under mobile browser chrome.
+    // Prefer the *visible* viewport size, never larger than the layout viewport.
     const width = Math.max(
         1,
         Math.round(
@@ -1160,9 +1159,11 @@ function getViewportBox() {
                 : (layoutHeight || window.innerHeight || 1),
         ),
     );
-    const left = Math.round(Number(vv?.offsetLeft) || 0);
-    const top = Math.round(Number(vv?.offsetTop) || 0);
-    return { width, height, left, top };
+    // IMPORTANT: do NOT use visualViewport.offsetTop/Left as fixed top/left.
+    // On Chrome Android / Samsung Internet, position:fixed is already relative to
+    // the visual viewport — applying offsetTop double-offsets the hub so only the
+    // titlebar peeks from the bottom of the screen (S25 Ultra bug).
+    return { width, height, left: 0, top: 0 };
 }
 
 function applyHubViewportBox(root) {
@@ -1170,8 +1171,6 @@ function applyHubViewportBox(root) {
         return;
     }
     const box = getViewportBox();
-    // Explicit pixels pinned to the visible visualViewport. Avoid min-height:100vh
-    // style forcing — that is what pushed the terminal off the bottom of phones.
     const style = root.style || (root.style = {});
     const set = (name, value) => {
         if (typeof style.setProperty === 'function') {
@@ -1180,14 +1179,17 @@ function applyHubViewportBox(root) {
             style[name] = value;
         }
     };
+    // Anchor to the visual top-left of the fixed containing block (top/left 0).
+    // Size with visible viewport pixels so the soft keyboard shortens the shell
+    // instead of covering it — without shifting the origin.
     set('position', 'fixed');
-    set('left', `${box.left}px`);
-    set('top', `${box.top}px`);
-    set('right', 'auto');
+    set('left', '0');
+    set('top', '0');
+    set('right', '0');
     set('bottom', 'auto');
     set('width', `${box.width}px`);
     set('height', `${box.height}px`);
-    set('max-width', `${box.width}px`);
+    set('max-width', '100%');
     set('max-height', `${box.height}px`);
     set('min-width', '0');
     set('min-height', '0');

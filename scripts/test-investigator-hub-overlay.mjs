@@ -68,7 +68,8 @@ globalThis.HTMLElement = class HTMLElement {};
 globalThis.window = {
     innerWidth: 390,
     innerHeight: 700,
-    visualViewport: { width: 390, height: 560, offsetLeft: 0, offsetTop: 0 },
+    // offsetTop > 0 simulates a scrolled page — must NOT become CSS top on Samsung Chrome.
+    visualViewport: { width: 390, height: 560, offsetLeft: 12, offsetTop: 640 },
     matchMedia() { return { matches: true }; },
     addEventListener() {},
     requestAnimationFrame(cb) { return setTimeout(cb, 0); },
@@ -121,11 +122,15 @@ const { getInvestigatorSettings } = await import('../investigator/core.js');
 const box = getViewportBox();
 assert.equal(box.width, 390);
 assert.equal(box.height, 560, 'prefer visualViewport height while keyboard is up');
+assert.equal(box.top, 0, 'never use visualViewport.offsetTop as fixed top');
+assert.equal(box.left, 0, 'never use visualViewport.offsetLeft as fixed left');
 
 await openHub();
 assert.equal(getInvestigatorSettings().hubOpen, true);
 const hub = document.getElementById(INVESTIGATOR_HUB_ID);
 assert.ok(hub, 'hub node mounted');
+assert.equal(hub.style.getPropertyValue('top'), '0');
+assert.equal(hub.style.getPropertyValue('left'), '0');
 assert.equal(hub.style.getPropertyValue('width'), '390px');
 assert.equal(hub.style.getPropertyValue('height'), '560px');
 assert.equal(hub.style.getPropertyPriority('width'), 'important');
@@ -143,9 +148,12 @@ window.innerHeight = 500;
 Object.defineProperty(document.documentElement, 'clientHeight', { value: 500, configurable: true });
 assert.equal(getViewportBox().height, 500, 'clamp hub height to layout viewport');
 
-// Re-apply after viewport shrink should keep a real box.
+// Re-apply after viewport shrink should keep a real box at top:0.
 window.visualViewport.height = 480;
+window.visualViewport.offsetTop = 900;
 applyHubViewportBox(hub);
 assert.equal(hub.style.getPropertyValue('height'), '480px');
+assert.equal(hub.style.getPropertyValue('top'), '0', 'scrolled offsetTop must not push hub down');
+assert.equal(hub.style.getPropertyValue('left'), '0');
 
 console.log('investigator-hub-overlay tests passed');
