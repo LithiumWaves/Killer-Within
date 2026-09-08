@@ -1130,6 +1130,45 @@ function ensureTaskForceDock() {
     return root;
 }
 
+function dismissHubElement(root) {
+    if (!root) {
+        return;
+    }
+    try {
+        if (typeof root.close === 'function' && root.open) {
+            root.close();
+        }
+    } catch (_error) {
+        // ignore
+    }
+    root.remove();
+}
+
+function presentHubElement(root) {
+    if (!root) {
+        return;
+    }
+    // <dialog>.showModal() puts the hub in the browser top layer, escaping
+    // SillyTavern/mobile transform containing blocks that made position:fixed
+    // paint as a titlebar strip at the bottom of the S25 Ultra screen.
+    try {
+        if (typeof root.showModal === 'function') {
+            if (!root.open) {
+                root.showModal();
+            }
+            return;
+        }
+    } catch (error) {
+        console.warn('[killer_within_investigator] dialog.showModal failed; using open attribute', error);
+    }
+    try {
+        root.setAttribute('open', '');
+        root.open = true;
+    } catch (_error) {
+        // ignore
+    }
+}
+
 function getViewportBox() {
     const vv = window.visualViewport;
     const vvWidth = Number(vv?.width);
@@ -1142,7 +1181,6 @@ function getViewportBox() {
         Number(window.innerHeight) || Infinity,
         Number(document.documentElement?.clientHeight) || Infinity,
     );
-    // Prefer the *visible* viewport size, never larger than the layout viewport.
     const width = Math.max(
         1,
         Math.round(
@@ -1159,10 +1197,6 @@ function getViewportBox() {
                 : (layoutHeight || window.innerHeight || 1),
         ),
     );
-    // IMPORTANT: do NOT use visualViewport.offsetTop/Left as fixed top/left.
-    // On Chrome Android / Samsung Internet, position:fixed is already relative to
-    // the visual viewport — applying offsetTop double-offsets the hub so only the
-    // titlebar peeks from the bottom of the screen (S25 Ultra bug).
     return { width, height, left: 0, top: 0 };
 }
 
@@ -1179,29 +1213,33 @@ function applyHubViewportBox(root) {
             style[name] = value;
         }
     };
-    // Anchor to the visual top-left of the fixed containing block (top/left 0).
-    // Size with visible viewport pixels so the soft keyboard shortens the shell
-    // instead of covering it — without shifting the origin.
     set('position', 'fixed');
     set('left', '0');
     set('top', '0');
     set('right', '0');
-    set('bottom', 'auto');
-    set('width', `${box.width}px`);
-    set('height', `${box.height}px`);
+    set('bottom', '0');
+    set('width', '100%');
+    set('height', '100%');
     set('max-width', '100%');
-    set('max-height', `${box.height}px`);
+    set('max-height', '100%');
     set('min-width', '0');
     set('min-height', '0');
+    set('margin', '0');
+    set('padding', '0');
+    set('border', '0');
     set('z-index', '2147483646');
     set('display', 'block');
     set('visibility', 'visible');
     set('opacity', '1');
     set('pointer-events', 'auto');
     set('transform', 'none');
-    set('inset', 'auto');
+    set('inset', '0');
     set('overflow', 'hidden');
     set('box-sizing', 'border-box');
+    // Soft-keyboard: cap to the live visual viewport height when available.
+    if (box.height > 0) {
+        set('max-height', `${box.height}px`);
+    }
     root.hidden = false;
     try {
         root.removeAttribute?.('hidden');
@@ -1215,23 +1253,24 @@ function ensureHub() {
     let root = document.getElementById(INVESTIGATOR_HUB_ID);
 
     if (!isInvestigatorRole() || !settings.hubOpen) {
-        if (root) {
-            root.remove();
-        }
+        dismissHubElement(root);
         return null;
     }
 
     const mobile = useMobileDockPlacement();
 
-    if (!root) {
-        root = document.createElement('div');
+    if (!root || String(root.tagName || '').toUpperCase() !== 'DIALOG') {
+        dismissHubElement(root);
+        root = document.createElement('dialog');
         root.id = INVESTIGATOR_HUB_ID;
         document.body.append(root);
+        root.addEventListener?.('cancel', (event) => {
+            event.preventDefault();
+            closeHub();
+        });
     }
 
     root.className = `kw-investigator-hub ${mobile ? 'is-mobile' : 'is-desktop'}`;
-    root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-modal', 'true');
     root.setAttribute('aria-label', 'Task Force terminal');
 
     try {
@@ -1257,9 +1296,6 @@ function ensureHub() {
                             <div class="kw-investigator-hub__body">
                                 <p class="kw-investigator-hint">The terminal shell mounted, but case content failed to render. Try Lock and Open again.</p>
                             </div>
-                            <div class="kw-investigator-hub__hardware">
-                                <button type="button" class="kw-investigator-hub__power" data-inv-close>Lock</button>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -1268,6 +1304,7 @@ function ensureHub() {
     }
 
     applyHubViewportBox(root);
+    presentHubElement(root);
     if (!mobile) {
         root.classList.add('is-immersive');
     }
