@@ -141,7 +141,9 @@ assert.equal(hub.style.getPropertyValue('width'), '100%');
 assert.equal(hub.style.getPropertyValue('height'), '100%');
 assert.equal(hub.style.getPropertyValue('inset'), '0');
 assert.ok(String(hub.innerHTML).includes('TASK FORCE OS'), 'hub content rendered');
-assert.equal(String(hub.innerHTML).includes('kw-investigator-hub__hardware'), false, 'mobile hub omits hardware chrome');
+assert.ok(String(hub.innerHTML).includes('data-inv-close'), 'mobile hub includes Lock control');
+assert.ok(String(hub.innerHTML).includes('Lock'), 'mobile Lock label present');
+assert.equal(String(hub.innerHTML).includes('kw-investigator-hub__plate'), false, 'mobile hub omits plate chrome');
 
 window.visualViewport.offsetTop = 900;
 applyHubViewportBox(hub);

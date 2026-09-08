@@ -939,8 +939,8 @@ function renderActiveScreen(settings, state) {
 
 function buildHubHtml(settings, state) {
     const mobile = useMobileDockPlacement();
-    // On phones the floating dock already provides Lock — drop plate/hardware
-    // chrome so the CRT can fit inside the visible viewport.
+    // Modal dialog sits in the browser top layer above the floating dock, so Lock
+    // must live inside the hub itself on phones.
     const plateHtml = mobile
         ? ''
         : `
@@ -948,8 +948,18 @@ function buildHubHtml(settings, state) {
                     <span class="kw-investigator-hub__plate-mark">NPA</span>
                     <span class="kw-investigator-hub__plate-name">Task Force Terminal</span>
                 </div>`;
+    const lockButton = `
+                            <button type="button" class="kw-investigator-hub__power kw-investigator-hub__power--title" data-inv-close title="Lock terminal">
+                                ${mobile ? 'Lock' : 'Power / Lock'}
+                            </button>`;
     const hardwareHtml = mobile
-        ? ''
+        ? `
+                <div class="kw-investigator-hub__hardware kw-investigator-hub__hardware--mobile">
+                    <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
+                    <button type="button" class="kw-investigator-hub__power" data-inv-close title="Lock terminal">
+                        Lock / Log out
+                    </button>
+                </div>`
         : `
                 <div class="kw-investigator-hub__hardware">
                     <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
@@ -977,6 +987,7 @@ function buildHubHtml(settings, state) {
                                     <div class="kw-investigator-hub__case">${escapeHtml(state.caseId)} — ${escapeHtml(state.caseTitle)}</div>
                                 </div>
                             </div>
+                            ${lockButton}
                         </header>
                         <nav class="kw-investigator-nav ${mobile ? 'kw-investigator-nav--dock' : ''}" aria-label="Hub screens">
                             ${renderNavHtml(settings.activeScreen || SCREENS.BOARD)}
