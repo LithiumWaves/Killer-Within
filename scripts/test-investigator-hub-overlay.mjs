@@ -1,5 +1,5 @@
 /**
- * Hub overlay must mount with explicit pixel viewport box (not collapsed %).
+ * Hub overlay must mount as a top-layer <dialog> filling the viewport.
  */
 import assert from 'node:assert/strict';
 import {
@@ -27,7 +27,7 @@ const extensionSettings = {
 
 const bodyChildren = new Map();
 
-function makeEl(id = '') {
+function makeEl(id = '', tagName = 'DIV') {
     const styleProps = new Map();
     const style = {
         setProperty(name, value, priority) {
@@ -41,10 +41,12 @@ function makeEl(id = '') {
             return styleProps.get(name)?.priority || '';
         },
     };
-    return {
+    const el = {
         id,
+        tagName,
         className: '',
         hidden: false,
+        open: false,
         style,
         innerHTML: '',
         classList: { add() {}, remove() {} },
@@ -54,21 +56,23 @@ function makeEl(id = '') {
         querySelector() { return null; },
         querySelectorAll() { return []; },
         remove() { bodyChildren.delete(this.id); },
+        addEventListener() {},
+        showModal() { this.open = true; },
+        close() { this.open = false; },
         getBoundingClientRect() {
-            const width = Number.parseFloat(style.width) || 0;
-            const height = Number.parseFloat(style.height) || 0;
-            return { width, height, top: 0, bottom: height, left: 0, right: width };
+            return { width: 390, height: 700, top: 0, bottom: 700, left: 0, right: 390 };
         },
         append() {},
         _styleProps: styleProps,
     };
+    return el;
 }
 
 globalThis.HTMLElement = class HTMLElement {};
+globalThis.HTMLDialogElement = class HTMLDialogElement extends globalThis.HTMLElement {};
 globalThis.window = {
     innerWidth: 390,
     innerHeight: 700,
-    // offsetTop > 0 simulates a scrolled page — must NOT become CSS top on Samsung Chrome.
     visualViewport: { width: 390, height: 560, offsetLeft: 12, offsetTop: 640 },
     matchMedia() { return { matches: true }; },
     addEventListener() {},
@@ -89,8 +93,9 @@ globalThis.document = {
     getElementById(id) {
         return bodyChildren.get(id) || null;
     },
-    createElement() {
-        return makeEl('');
+    createElement(tag) {
+        const tagName = String(tag || 'div').toUpperCase();
+        return makeEl('', tagName);
     },
     addEventListener() {},
 };
@@ -116,44 +121,34 @@ const {
     applyHubViewportBox,
     getViewportBox,
     openHub,
+    closeHub,
 } = await import('../investigator/ui.js');
 const { getInvestigatorSettings } = await import('../investigator/core.js');
 
 const box = getViewportBox();
-assert.equal(box.width, 390);
-assert.equal(box.height, 560, 'prefer visualViewport height while keyboard is up');
-assert.equal(box.top, 0, 'never use visualViewport.offsetTop as fixed top');
-assert.equal(box.left, 0, 'never use visualViewport.offsetLeft as fixed left');
+assert.equal(box.top, 0);
+assert.equal(box.left, 0);
 
 await openHub();
 assert.equal(getInvestigatorSettings().hubOpen, true);
 const hub = document.getElementById(INVESTIGATOR_HUB_ID);
 assert.ok(hub, 'hub node mounted');
+assert.equal(hub.tagName, 'DIALOG', 'hub must be a native dialog for top-layer');
+assert.equal(hub.open, true, 'dialog.showModal() must present the hub');
 assert.equal(hub.style.getPropertyValue('top'), '0');
 assert.equal(hub.style.getPropertyValue('left'), '0');
-assert.equal(hub.style.getPropertyValue('width'), '390px');
-assert.equal(hub.style.getPropertyValue('height'), '560px');
-assert.equal(hub.style.getPropertyPriority('width'), 'important');
-assert.equal(hub.style.getPropertyPriority('height'), 'important');
-assert.equal(hub.style.getPropertyValue('max-height'), '560px');
-assert.equal(hub.style.getPropertyValue('min-height'), '0');
-assert.equal(hub.style.getPropertyValue('display'), 'block');
-assert.equal(hub.style.getPropertyValue('visibility'), 'visible');
-assert.equal(hub.style.getPropertyValue('opacity'), '1');
+assert.equal(hub.style.getPropertyValue('width'), '100%');
+assert.equal(hub.style.getPropertyValue('height'), '100%');
+assert.equal(hub.style.getPropertyValue('inset'), '0');
 assert.ok(String(hub.innerHTML).includes('TASK FORCE OS'), 'hub content rendered');
 assert.equal(String(hub.innerHTML).includes('kw-investigator-hub__hardware'), false, 'mobile hub omits hardware chrome');
 
-// When layout viewport is shorter than visualViewport reports, clamp down.
-window.innerHeight = 500;
-Object.defineProperty(document.documentElement, 'clientHeight', { value: 500, configurable: true });
-assert.equal(getViewportBox().height, 500, 'clamp hub height to layout viewport');
-
-// Re-apply after viewport shrink should keep a real box at top:0.
-window.visualViewport.height = 480;
 window.visualViewport.offsetTop = 900;
 applyHubViewportBox(hub);
-assert.equal(hub.style.getPropertyValue('height'), '480px');
 assert.equal(hub.style.getPropertyValue('top'), '0', 'scrolled offsetTop must not push hub down');
-assert.equal(hub.style.getPropertyValue('left'), '0');
+
+closeHub();
+assert.equal(getInvestigatorSettings().hubOpen, false);
+assert.equal(document.getElementById(INVESTIGATOR_HUB_ID), null, 'closed hub is dismissed');
 
 console.log('investigator-hub-overlay tests passed');
