@@ -3,8 +3,11 @@ import { getInvestigatorSettings, getPlayRole, isInvestigatorRole } from './core
 import {
     activateInvestigatorShell,
     closeHub,
+    hideTaskForceDock,
     notifyInvestigator,
-    openHub,
+    openTerminalFromWand,
+    setTaskForceDockVisible,
+    showTaskForceDock,
     switchPlayRole,
 } from './ui.js';
 
@@ -50,39 +53,51 @@ async function runTerminalAction(actionRaw) {
     if (action === 'status') {
         const role = getPlayRole();
         const settings = getInvestigatorSettings();
-        const message = `Role: ${role}. Terminal: ${settings.hubOpen ? 'open' : 'closed'}.`;
+        const message = `Role: ${role}. Terminal: ${settings.hubOpen ? 'open' : 'closed'}. Dock: ${settings.showDock === false ? 'hidden' : 'visible'}.`;
         notifyInvestigator('info', message);
         return message;
     }
 
-    if (action === 'close' || action === 'lock' || action === 'hide') {
+    if (action === 'close' || action === 'lock') {
         if (!isInvestigatorRole()) {
             const message = 'Terminal is only available in Investigator role. Use /kwrole investigator first.';
             notifyInvestigator('warning', message);
             return message;
         }
         closeHub();
-        const message = 'Task Force terminal closed. Use /kwterminal open (or the dock) to reopen.';
+        const message = 'Task Force terminal closed. Use /kwterminal open (or the wand menu) to reopen.';
         notifyInvestigator('info', message);
         return message;
     }
 
-    if (action === 'open' || action === 'show' || action === 'unlock') {
+    if (action === 'hide' || action === 'dockhide' || action === 'hide-dock') {
+        if (!isInvestigatorRole()) {
+            const message = 'Dock hide is only available in Investigator role.';
+            notifyInvestigator('warning', message);
+            return message;
+        }
+        hideTaskForceDock();
+        return 'Task Force button hidden.';
+    }
+
+    if (action === 'show' || action === 'dockshow' || action === 'show-dock') {
         if (!isInvestigatorRole()) {
             await runRoleSwitch(PLAY_ROLES.INVESTIGATOR, { notify: false });
         }
-        openHub();
-        const message = 'Task Force terminal opened.';
-        notifyInvestigator('info', message);
-        return message;
+        showTaskForceDock();
+        return 'Task Force button shown.';
+    }
+
+    if (action === 'open' || action === 'unlock') {
+        return openTerminalFromWand({ notify: true, restoreDock: true });
     }
 
     if (action === 'dock' || action === 'activate') {
         if (!isInvestigatorRole()) {
             await runRoleSwitch(PLAY_ROLES.INVESTIGATOR, { notify: false });
-        } else {
-            activateInvestigatorShell();
         }
+        setTaskForceDockVisible(true, { notify: false });
+        activateInvestigatorShell();
         const settings = getInvestigatorSettings();
         const message = settings.hubOpen
             ? 'Investigator shell active — terminal opened.'
@@ -91,7 +106,7 @@ async function runTerminalAction(actionRaw) {
         return message;
     }
 
-    const message = 'Unknown action. Use /kwterminal open|close|status|dock';
+    const message = 'Unknown action. Use /kwterminal open|close|status|dock|hide|show';
     notifyInvestigator('warning', message);
     return message;
 }
@@ -193,16 +208,18 @@ export function registerInvestigatorSlashCommands() {
                     <li><pre><code>/kwterminal open</code></pre></li>
                     <li><pre><code>/kwterminal close</code></pre></li>
                     <li><pre><code>/kwterminal status</code></pre></li>
+                    <li><pre><code>/kwterminal hide</code></pre></li>
+                    <li><pre><code>/kwterminal show</code></pre></li>
                     <li><pre><code>/taskforce dock</code></pre></li>
                 </ul>
             </div>
         `,
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
-                description: 'action: open | close | status | dock (default open)',
+                description: 'action: open | close | status | dock | hide | show (default open)',
                 typeList: stringType,
                 isRequired: false,
-                enumList: ['open', 'close', 'status', 'dock'],
+                enumList: ['open', 'close', 'status', 'dock', 'hide', 'show'],
             }),
         ],
         callback: async (_named, unnamed) => runTerminalAction(unnamed),

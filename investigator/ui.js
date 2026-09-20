@@ -71,7 +71,6 @@ let dockDragState = {
     dragging: false,
     moved: false,
     ignoreClick: false,
-    mobileTapOnly: false,
     startX: 0,
     startY: 0,
     originX: 0,
@@ -81,6 +80,9 @@ let dockDragState = {
     moveHandler: null,
     upHandler: null,
 };
+
+const INVESTIGATOR_WAND_ITEM_ID = 'kw-investigator-wand-terminal';
+const INVESTIGATOR_WAND_DOCK_ID = 'kw-investigator-wand-dock';
 
 function scheduleFrame(callback) {
     if (typeof requestAnimationFrame === 'function') {
@@ -187,8 +189,12 @@ export function shouldShowTaskForceDock({
     isInvestigator = false,
     hubOpen = false,
     mobileDockPlacement = false,
+    showDock = true,
 } = {}) {
     if (!isInvestigator) {
+        return false;
+    }
+    if (!showDock) {
         return false;
     }
     // Desktop: hide dock while the immersive hub is open.
@@ -197,6 +203,43 @@ export function shouldShowTaskForceDock({
         return false;
     }
     return true;
+}
+
+/**
+ * Persist show/hide for the floating Task Force button.
+ * @param {boolean} visible
+ * @param {{ notify?: boolean }} [options]
+ */
+export function setTaskForceDockVisible(visible, options = {}) {
+    const notify = options.notify !== false;
+    const settings = getInvestigatorSettings();
+    const next = Boolean(visible);
+    if (settings.showDock === next) {
+        if (notify && !next) {
+            notifyInvestigator('info', 'Task Force button is already hidden. Use the wand menu or /kwterminal dock to restore it.');
+        }
+        return next;
+    }
+    settings.showDock = next;
+    scheduleInvestigatorSettingsSave();
+    refreshInvestigatorUi();
+    if (notify) {
+        notifyInvestigator(
+            'info',
+            next
+                ? 'Task Force button shown.'
+                : 'Task Force button hidden. Open the terminal from the wand menu anytime.',
+        );
+    }
+    return next;
+}
+
+export function hideTaskForceDock(options = {}) {
+    return setTaskForceDockVisible(false, options);
+}
+
+export function showTaskForceDock(options = {}) {
+    return setTaskForceDockVisible(true, options);
 }
 
 export function activateInvestigatorShell() {
@@ -1013,9 +1056,10 @@ function applyDockPosition(root) {
         return;
     }
     const settings = getInvestigatorSettings();
+    const hasSaved = Number.isFinite(Number(settings.dockX)) && Number.isFinite(Number(settings.dockY));
 
-    // Phones / touch devices always use CSS placement — never restored desktop coords.
-    if (useMobileDockPlacement()) {
+    if (!hasSaved) {
+        root.classList.remove('is-positioned');
         root.style.left = '';
         root.style.top = '';
         root.style.right = '';
@@ -1024,25 +1068,18 @@ function applyDockPosition(root) {
         return;
     }
 
-    const hasSaved = Number.isFinite(Number(settings.dockX)) && Number.isFinite(Number(settings.dockY));
-    if (hasSaved) {
-        const width = root.offsetWidth || 180;
-        const height = Math.min(root.offsetHeight || 48, 64);
-        const maxX = Math.max(0, window.innerWidth - width);
-        const maxY = Math.max(0, window.innerHeight - height);
-        const x = clamp(Number(settings.dockX), 0, maxX);
-        const y = clamp(Number(settings.dockY), 0, maxY);
-        root.style.left = `${Math.round(x)}px`;
-        root.style.top = `${Math.round(y)}px`;
-        root.style.right = 'auto';
-        root.style.bottom = 'auto';
-        return;
-    }
-
-    root.style.left = '';
-    root.style.top = '';
-    root.style.right = '';
-    root.style.bottom = '';
+    const width = root.offsetWidth || 180;
+    const height = Math.min(root.offsetHeight || 48, 72);
+    const maxX = Math.max(0, window.innerWidth - width);
+    const maxY = Math.max(0, window.innerHeight - height);
+    const x = clamp(Number(settings.dockX), 0, maxX);
+    const y = clamp(Number(settings.dockY), 0, maxY);
+    root.classList.add('is-positioned');
+    root.style.left = `${Math.round(x)}px`;
+    root.style.top = `${Math.round(y)}px`;
+    root.style.right = 'auto';
+    root.style.bottom = 'auto';
+    root.style.transform = '';
 }
 
 function recoverStuckInvestigatorShell() {
@@ -1101,6 +1138,7 @@ function ensureTaskForceDock() {
         isInvestigator: isInvestigatorRole(),
         hubOpen,
         mobileDockPlacement: mobileDock,
+        showDock: settings.showDock !== false,
     });
 
     if (!shouldShow) {
@@ -1127,14 +1165,23 @@ function ensureTaskForceDock() {
     root.style.opacity = '1';
     root.innerHTML = `
         <div class="kw-investigator-dock__shell">
-            <button type="button" class="kw-investigator-dock__open" data-inv-dock-toggle="true" data-inv-drag-handle="true">
-                <span class="kw-investigator-dock__led" aria-hidden="true"></span>
-                <span class="kw-investigator-dock__copy">
-                    <span class="kw-investigator-dock__label">Task Force</span>
-                    <span class="kw-investigator-dock__case">${escapeHtml(state.caseId)}</span>
-                </span>
-                <span class="kw-investigator-dock__action">${hubOpen ? 'Lock' : 'Open'}</span>
-            </button>
+            <div class="kw-investigator-dock__cluster">
+                <button type="button" class="kw-investigator-dock__open" data-inv-dock-toggle="true" data-inv-drag-handle="true">
+                    <span class="kw-investigator-dock__led" aria-hidden="true"></span>
+                    <span class="kw-investigator-dock__copy">
+                        <span class="kw-investigator-dock__label">Task Force</span>
+                        <span class="kw-investigator-dock__case">${escapeHtml(state.caseId)}</span>
+                    </span>
+                    <span class="kw-investigator-dock__action">${hubOpen ? 'Lock' : 'Open'}</span>
+                </button>
+                <button
+                    type="button"
+                    class="kw-investigator-dock__hide"
+                    data-inv-dock-hide="true"
+                    title="Hide Task Force button"
+                    aria-label="Hide Task Force button"
+                >Hide</button>
+            </div>
         </div>
     `;
     scheduleFrame(() => applyDockPosition(root));
@@ -1396,6 +1443,96 @@ function toggleHubFromDock() {
     }
 }
 
+/**
+ * Open the Task Force terminal from the wand menu / recovery paths.
+ * Restores a hidden dock so the floating button returns with the terminal.
+ * @param {{ notify?: boolean, restoreDock?: boolean }} [options]
+ */
+export async function openTerminalFromWand(options = {}) {
+    const notify = options.notify !== false;
+    const restoreDock = options.restoreDock !== false;
+    if (!isInvestigatorRole()) {
+        await switchPlayRole(PLAY_ROLES.INVESTIGATOR, { notify: false });
+    }
+    if (restoreDock) {
+        setTaskForceDockVisible(true, { notify: false });
+    }
+    openHub();
+    const message = 'Task Force terminal opened.';
+    if (notify) {
+        notifyInvestigator('info', message);
+    }
+    return message;
+}
+
+function syncInvestigatorWandMenu() {
+    if (typeof document === 'undefined') {
+        return;
+    }
+    const menu = document.getElementById('extensionsMenu');
+    if (!menu) {
+        return;
+    }
+
+    let terminalItem = document.getElementById(INVESTIGATOR_WAND_ITEM_ID);
+    if (!terminalItem) {
+        terminalItem = document.createElement('div');
+        terminalItem.id = INVESTIGATOR_WAND_ITEM_ID;
+        terminalItem.className = 'list-group-item flex-container flexGap5 interactable';
+        terminalItem.tabIndex = 0;
+        terminalItem.title = 'Open the Investigator Task Force terminal';
+        terminalItem.innerHTML = `
+            <div class="fa-solid fa-terminal extensionsMenuExtensionButton"></div>
+            <span>Task Force Terminal</span>
+        `;
+        terminalItem.addEventListener('click', () => {
+            void openTerminalFromWand();
+            try {
+                document.getElementById('extensionsMenu')?.classList?.remove('open');
+                document.body?.classList?.remove?.('extensionsMenuOpen');
+            } catch (_error) {
+                // ignore
+            }
+        });
+        menu.append(terminalItem);
+    }
+
+    let dockItem = document.getElementById(INVESTIGATOR_WAND_DOCK_ID);
+    if (!dockItem) {
+        dockItem = document.createElement('div');
+        dockItem.id = INVESTIGATOR_WAND_DOCK_ID;
+        dockItem.className = 'list-group-item flex-container flexGap5 interactable';
+        dockItem.tabIndex = 0;
+        dockItem.addEventListener('click', () => {
+            const settings = getInvestigatorSettings();
+            if (!isInvestigatorRole()) {
+                void switchPlayRole(PLAY_ROLES.INVESTIGATOR, { notify: false }).then(() => {
+                    setTaskForceDockVisible(true);
+                });
+            } else if (settings.showDock === false) {
+                setTaskForceDockVisible(true);
+            } else {
+                setTaskForceDockVisible(false);
+            }
+            try {
+                document.getElementById('extensionsMenu')?.classList?.remove('open');
+            } catch (_error) {
+                // ignore
+            }
+        });
+        menu.append(dockItem);
+    }
+
+    const dockVisible = isInvestigatorRole() && getInvestigatorSettings().showDock !== false;
+    dockItem.title = dockVisible
+        ? 'Hide the floating Task Force button'
+        : 'Show the floating Task Force button';
+    dockItem.innerHTML = `
+        <div class="fa-solid ${dockVisible ? 'fa-eye-slash' : 'fa-eye'} extensionsMenuExtensionButton"></div>
+        <span>${dockVisible ? 'Hide Task Force Button' : 'Show Task Force Button'}</span>
+    `;
+}
+
 let dockPointerDelegationInstalled = false;
 
 function bindTaskForceDock(_root) {
@@ -1409,10 +1546,16 @@ function bindTaskForceDock(_root) {
     }
     dockPointerDelegationInstalled = true;
 
-    // Mirror Death Note inventory/cover: toggle on pointerup, not click.
-    // Touch browsers suppress the synthetic click after pointerdown.preventDefault(),
-    // which is why Kira UI worked on phones and Investigator Open did not.
     document.addEventListener('pointerdown', (event) => {
+        const hideBtn = event.target?.closest?.('[data-inv-dock-hide="true"]');
+        if (hideBtn instanceof HTMLElement) {
+            if (event.button !== 0 && event.pointerType === 'mouse') {
+                return;
+            }
+            // Hide is tap-only — do not start a drag session.
+            return;
+        }
+
         const handle = event.target?.closest?.('[data-inv-dock-toggle="true"]');
         if (!(handle instanceof HTMLElement)) {
             return;
@@ -1429,27 +1572,15 @@ function bindTaskForceDock(_root) {
             return;
         }
 
-        const mobilePinned = useMobileDockPlacement();
-        // While hub is open on mobile, Lock is tap-only (no drag session).
-        if (getInvestigatorSettings().hubOpen && mobilePinned) {
-            dockDragState.dragging = true;
-            dockDragState.moved = false;
-            dockDragState.pointerId = event.pointerId;
-            dockDragState.startX = event.clientX;
-            dockDragState.startY = event.clientY;
-            dockDragState.mobileTapOnly = true;
-        } else {
-            event.preventDefault();
-            const rect = root.getBoundingClientRect();
-            dockDragState.dragging = true;
-            dockDragState.moved = false;
-            dockDragState.mobileTapOnly = mobilePinned;
-            dockDragState.pointerId = event.pointerId;
-            dockDragState.startX = event.clientX;
-            dockDragState.startY = event.clientY;
-            dockDragState.originX = rect.left;
-            dockDragState.originY = rect.top;
-        }
+        event.preventDefault();
+        const rect = root.getBoundingClientRect();
+        dockDragState.dragging = true;
+        dockDragState.moved = false;
+        dockDragState.pointerId = event.pointerId;
+        dockDragState.startX = event.clientX;
+        dockDragState.startY = event.clientY;
+        dockDragState.originX = rect.left;
+        dockDragState.originY = rect.top;
 
         if (!dockDragState.handlersInstalled) {
             dockDragState.handlersInstalled = true;
@@ -1467,9 +1598,7 @@ function bindTaskForceDock(_root) {
                     dockDragState.moved = true;
                 }
 
-                // Mobile dock is CSS-pinned (!important). Dragging only fights the
-                // stylesheet and falsely marks taps as moves — skip repositioning.
-                if (dockDragState.mobileTapOnly || useMobileDockPlacement()) {
+                if (!dockDragState.moved) {
                     return;
                 }
 
@@ -1482,6 +1611,7 @@ function bindTaskForceDock(_root) {
                 const maxY = Math.max(0, window.innerHeight - Math.min(rectNow.height, 72));
                 const nextX = clamp(dockDragState.originX + dx, 0, maxX);
                 const nextY = clamp(dockDragState.originY + dy, 0, maxY);
+                activeRoot.classList.add('is-positioned');
                 activeRoot.style.left = `${Math.round(nextX)}px`;
                 activeRoot.style.top = `${Math.round(nextY)}px`;
                 activeRoot.style.right = 'auto';
@@ -1503,7 +1633,7 @@ function bindTaskForceDock(_root) {
                 // Always swallow the trailing click — toggle happens here (Death Note pattern).
                 dockDragState.ignoreClick = true;
 
-                if (activeRoot && wasMoved && !useMobileDockPlacement()) {
+                if (activeRoot && wasMoved) {
                     const rectFinal = activeRoot.getBoundingClientRect();
                     const settings = getInvestigatorSettings();
                     settings.dockX = Math.round(rectFinal.left);
@@ -1528,6 +1658,14 @@ function bindTaskForceDock(_root) {
     }, true);
 
     document.addEventListener('click', (event) => {
+        const hideBtn = event.target?.closest?.('[data-inv-dock-hide="true"]');
+        if (hideBtn instanceof HTMLElement) {
+            event.preventDefault();
+            event.stopPropagation();
+            hideTaskForceDock();
+            return;
+        }
+
         const handle = event.target?.closest?.('[data-inv-dock-toggle="true"]');
         if (!(handle instanceof HTMLElement)) {
             return;
@@ -1882,6 +2020,7 @@ export function refreshInvestigatorUi() {
     const dock = ensureTaskForceDock();
     bindTaskForceDock(dock);
     bindHubInteractions(hub);
+    syncInvestigatorWandMenu();
 
     // Keep the hub sized to the live visual viewport (keyboard / URL bar changes).
     if (hub) {
@@ -1909,6 +2048,17 @@ export function setupInvestigatorUi() {
     window.addEventListener('resize', onViewportChange);
     window.visualViewport?.addEventListener?.('resize', onViewportChange);
     window.visualViewport?.addEventListener?.('scroll', onViewportChange);
+
+    // Wand menu may mount after APP_READY — retry a few times.
+    let wandAttempts = 0;
+    const ensureWand = () => {
+        syncInvestigatorWandMenu();
+        wandAttempts += 1;
+        if (!document.getElementById(INVESTIGATOR_WAND_ITEM_ID) && wandAttempts < 20) {
+            setTimeout(ensureWand, 500);
+        }
+    };
+    ensureWand();
 }
 
 export {
@@ -1918,4 +2068,5 @@ export {
     toggleHubFromDock,
     applyHubViewportBox,
     getViewportBox,
+    syncInvestigatorWandMenu,
 };

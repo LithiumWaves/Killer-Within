@@ -111,6 +111,12 @@ assert.match(await runTerminalAction('close'), /closed/i);
 assert.equal(getInvestigatorSettings().hubOpen, false);
 
 assert.match(await runTerminalAction('status'), /Role: investigator/i);
+assert.match(await runTerminalAction('status'), /Dock: visible/i);
+
+assert.match(await runTerminalAction('hide'), /hidden/i);
+assert.equal(getInvestigatorSettings().showDock, false);
+assert.match(await runTerminalAction('show'), /shown/i);
+assert.equal(getInvestigatorSettings().showDock, true);
 
 const kiraCmd = registered.find((command) => command.name === 'kira');
 assert.match(await kiraCmd.callback({}, ''), /Switched to Kira|Already playing as Kira/);
