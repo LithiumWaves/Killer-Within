@@ -176,6 +176,15 @@ await openTerminalFromWand({ notify: false, restoreDock: true });
 assert.equal(getInvestigatorSettings().hubOpen, true, 'wand open opens the terminal');
 assert.equal(getInvestigatorSettings().showDock, true, 'wand open restores a hidden dock');
 
+const hub = document.getElementById('kw-investigator-hub');
+assert.ok(hub, 'hub mounts after wand open');
+assert.match(String(hub.innerHTML), /data-inv-dock-hide/, 'Conceal control lives inside the terminal');
+assert.match(String(hub.innerHTML), /Conceal/, 'Conceal label is present in hub chrome');
+
+const dock = document.getElementById(INVESTIGATOR_DOCK_ID);
+assert.ok(dock, 'dock restored');
+assert.doesNotMatch(String(dock.innerHTML), /data-inv-dock-hide/, 'dock no longer hosts the hide control');
+
 syncInvestigatorWandMenu();
 assert.ok(document.getElementById('kw-investigator-wand-terminal'), 'wand terminal item registered');
 assert.ok(document.getElementById('kw-investigator-wand-dock'), 'wand dock toggle registered');

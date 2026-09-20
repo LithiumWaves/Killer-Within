@@ -2681,13 +2681,6 @@
     justify-items: end;
 }
 
-.kw-investigator-dock__cluster {
-    display: inline-flex;
-    align-items: stretch;
-    gap: 0.35rem;
-    pointer-events: none;
-}
-
 .kw-investigator-dock__open {
     pointer-events: auto;
     display: inline-flex;
@@ -2779,39 +2772,6 @@
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: #e8f7ff;
-}
-
-.kw-investigator-dock__hide {
-    pointer-events: auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    min-width: 2.4rem;
-    padding: 0.45rem 0.55rem;
-    border: 1px solid rgba(20, 24, 28, 0.85);
-    border-radius: 0.85rem;
-    background:
-        linear-gradient(180deg, #7a828a 0%, #4e565e 42%, #343b42 100%);
-    box-shadow:
-        0 10px 22px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.28),
-        inset 0 -2px 0 rgba(0, 0, 0, 0.28);
-    color: #f2f4f6;
-    cursor: pointer;
-    touch-action: manipulation;
-    user-select: none;
-    font-family: var(--kw-inv-font-mono);
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-#kw-investigator-dock.is-mobile .kw-investigator-dock__hide {
-    min-height: 2.75rem;
-    border-radius: 999px;
-    padding: 0.55rem 0.7rem;
 }
 
 /* Full-screen sit-down at the computer — native <dialog> top layer */
@@ -3136,14 +3096,29 @@
     font-size: 0.72rem;
 }
 
+.kw-investigator-hub__power--conceal {
+    background: linear-gradient(180deg, #6a737c, #3a424a);
+    color: #e8eef2;
+    border-color: rgba(12, 16, 20, 0.9);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.22),
+        0 2px 0 rgba(0, 0, 0, 0.32);
+}
+
 #kw-investigator-hub.is-mobile .kw-investigator-hub__hardware--mobile {
     margin-top: 0.35rem;
     justify-content: center;
 }
 
 #kw-investigator-hub.is-mobile .kw-investigator-hub__hardware--mobile .kw-investigator-hub__power {
-    min-width: min(16rem, 100%);
+    min-width: auto;
+    flex: 1 1 auto;
     min-height: 2.6rem;
+}
+
+#kw-investigator-hub.is-mobile .kw-investigator-hub__hardware--mobile .kw-investigator-hub__power--conceal {
+    flex: 0 1 auto;
+    min-width: 6.5rem;
 }
 
 .kw-investigator-hub__vent {
@@ -3759,19 +3734,91 @@
     color: #fff;
 }
 
-/* Killer Within mobile toasts — keep above ST message form / nav chrome */
+/* Killer Within Task Force toasts — CRT / terminal chrome */
+body.kw-investigator-toast #toast-container.toast-top-center,
 body.kw-investigator-toast-mobile #toast-container.toast-top-center,
 #toast-container.toast-top-center.kw-investigator-toast {
     top: max(0.65rem, env(safe-area-inset-top, 0px)) !important;
     bottom: auto !important;
     left: 50% !important;
     transform: translateX(-50%);
-    width: min(28rem, calc(100vw - 1.25rem));
+    width: min(26rem, calc(100vw - 1.25rem));
     z-index: 2147483647 !important;
     pointer-events: none;
 }
 
+body.kw-investigator-toast #toast-container.toast-top-center > div,
 body.kw-investigator-toast-mobile #toast-container.toast-top-center > div,
-#toast-container.toast-top-center.kw-investigator-toast > div {
+#toast-container.toast-top-center.kw-investigator-toast > div,
+.toast.kw-investigator-toast__item {
     pointer-events: auto;
+    background:
+        linear-gradient(180deg, rgba(18, 36, 48, 0.98) 0%, rgba(7, 16, 24, 0.98) 100%) !important;
+    border: 1px solid rgba(90, 208, 255, 0.42) !important;
+    border-radius: 0.35rem !important;
+    box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.55),
+        0 0 18px rgba(90, 208, 255, 0.12),
+        inset 0 0 24px rgba(90, 208, 255, 0.05) !important;
+    color: #d8f0ff !important;
+    font-family: "IBM Plex Mono", "Consolas", "Courier New", monospace !important;
+    opacity: 1 !important;
+    padding: 0.7rem 0.9rem 0.75rem !important;
+}
+
+body.kw-investigator-toast #toast-container > div .toast-title,
+.toast.kw-investigator-toast__item .toast-title {
+    font-family: "IBM Plex Mono", "Consolas", "Courier New", monospace !important;
+    font-size: 0.68rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+    color: #5ad0ff !important;
+    text-shadow: 0 0 8px rgba(90, 208, 255, 0.35);
+    margin-bottom: 0.2rem !important;
+}
+
+body.kw-investigator-toast #toast-container > div .toast-message,
+.toast.kw-investigator-toast__item .toast-message {
+    font-family: "IBM Plex Mono", "Consolas", "Courier New", monospace !important;
+    font-size: 0.78rem !important;
+    line-height: 1.35 !important;
+    color: #d8f0ff !important;
+}
+
+body.kw-investigator-toast #toast-container > .toast-success,
+.toast.kw-investigator-toast__item.toast-success {
+    border-color: rgba(77, 255, 176, 0.55) !important;
+}
+
+body.kw-investigator-toast #toast-container > .toast-success .toast-title,
+.toast.kw-investigator-toast__item.toast-success .toast-title {
+    color: #4dffb0 !important;
+    text-shadow: 0 0 8px rgba(77, 255, 176, 0.4);
+}
+
+body.kw-investigator-toast #toast-container > .toast-warning,
+.toast.kw-investigator-toast__item.toast-warning {
+    border-color: rgba(230, 180, 80, 0.55) !important;
+}
+
+body.kw-investigator-toast #toast-container > .toast-warning .toast-title,
+.toast.kw-investigator-toast__item.toast-warning .toast-title {
+    color: #e6b450 !important;
+}
+
+body.kw-investigator-toast #toast-container > .toast-error,
+.toast.kw-investigator-toast__item.toast-error {
+    border-color: rgba(208, 112, 96, 0.6) !important;
+}
+
+body.kw-investigator-toast #toast-container > .toast-error .toast-title,
+.toast.kw-investigator-toast__item.toast-error .toast-title {
+    color: #d07060 !important;
+}
+
+body.kw-investigator-toast #toast-container > div .toast-close-button,
+.toast.kw-investigator-toast__item .toast-close-button {
+    color: rgba(216, 240, 255, 0.75) !important;
+    text-shadow: none !important;
 }
