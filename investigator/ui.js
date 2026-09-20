@@ -115,31 +115,34 @@ export function notifyInvestigator(type, message) {
     }
     const mobile = typeof window !== 'undefined'
         && (window.innerWidth <= MOBILE_DOCK_WIDTH_MAX || useMobileDockPlacement());
-    if (mobile) {
-        try {
+    try {
+        document.body?.classList?.add('kw-investigator-toast');
+        if (mobile) {
             document.body?.classList?.add('kw-investigator-toast-mobile');
+        }
+    } catch (_error) {
+        // ignore
+    }
+    const clearToastChrome = () => {
+        try {
+            const container = document.getElementById('toast-container');
+            if (!container || container.childElementCount === 0) {
+                document.body?.classList?.remove('kw-investigator-toast');
+                document.body?.classList?.remove('kw-investigator-toast-mobile');
+            }
         } catch (_error) {
             // ignore
         }
-        fn.call(globalThis.toastr, text, '', {
-            positionClass: 'toast-top-center',
-            timeOut: 4500,
-            extendedTimeOut: 2000,
-            closeButton: true,
-            onHidden() {
-                try {
-                    const container = document.getElementById('toast-container');
-                    if (!container || container.childElementCount === 0) {
-                        document.body?.classList?.remove('kw-investigator-toast-mobile');
-                    }
-                } catch (_error) {
-                    // ignore
-                }
-            },
-        });
-        return;
-    }
-    fn.call(globalThis.toastr, text);
+    };
+    fn.call(globalThis.toastr, text, 'TASK FORCE OS', {
+        positionClass: mobile ? 'toast-top-center' : 'toast-top-center',
+        timeOut: 4500,
+        extendedTimeOut: 2000,
+        closeButton: true,
+        progressBar: false,
+        toastClass: 'kw-investigator-toast__item',
+        onHidden: clearToastChrome,
+    });
 }
 
 export function registerDeathNoteUiRefresh(fn) {
@@ -228,7 +231,7 @@ export function setTaskForceDockVisible(visible, options = {}) {
             'info',
             next
                 ? 'Task Force button shown.'
-                : 'Task Force button hidden. Open the terminal from the wand menu anytime.',
+                : 'Floating button concealed. Open the terminal from the wand menu anytime.',
         );
     }
     return next;
@@ -927,7 +930,13 @@ function renderAccessScreen(state) {
                                 <option value="${PLAY_ROLES.KIRA}">Kira</option>
                             </select>
                         </label>
-                        <small class="kw-investigator-hint">Kira and Investigator stay exclusive. Switching tears down the other side’s widgets.</small>
+                        <button
+                            type="button"
+                            class="menu_button kw-investigator-btn kw-investigator-btn--block"
+                            data-inv-dock-hide="true"
+                            title="Hide the floating Task Force button"
+                        >Conceal floating button</button>
+                        <small class="kw-investigator-hint">Kira and Investigator stay exclusive. Switching tears down the other side’s widgets. Conceal hides the dock beacon — reopen from the wand menu.</small>
                     </div>
                     <div class="kw-investigator-panel">
                         <div class="kw-investigator-subhead">Task Force officers</div>
@@ -995,10 +1004,18 @@ function buildHubHtml(settings, state) {
                             <button type="button" class="kw-investigator-hub__power kw-investigator-hub__power--title" data-inv-close title="Lock terminal">
                                 ${mobile ? 'Lock' : 'Power / Lock'}
                             </button>`;
+    const concealButton = `
+                    <button
+                        type="button"
+                        class="kw-investigator-hub__power kw-investigator-hub__power--conceal"
+                        data-inv-dock-hide="true"
+                        title="Hide the floating Task Force button"
+                    >Conceal</button>`;
     const hardwareHtml = mobile
         ? `
                 <div class="kw-investigator-hub__hardware kw-investigator-hub__hardware--mobile">
                     <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
+                    ${concealButton}
                     <button type="button" class="kw-investigator-hub__power" data-inv-close title="Lock terminal">
                         Lock / Log out
                     </button>
@@ -1006,6 +1023,7 @@ function buildHubHtml(settings, state) {
         : `
                 <div class="kw-investigator-hub__hardware">
                     <span class="kw-investigator-hub__power-led" aria-hidden="true"></span>
+                    ${concealButton}
                     <button type="button" class="kw-investigator-hub__power" data-inv-close title="Lock terminal">
                         Power / Lock
                     </button>
@@ -1165,23 +1183,14 @@ function ensureTaskForceDock() {
     root.style.opacity = '1';
     root.innerHTML = `
         <div class="kw-investigator-dock__shell">
-            <div class="kw-investigator-dock__cluster">
-                <button type="button" class="kw-investigator-dock__open" data-inv-dock-toggle="true" data-inv-drag-handle="true">
-                    <span class="kw-investigator-dock__led" aria-hidden="true"></span>
-                    <span class="kw-investigator-dock__copy">
-                        <span class="kw-investigator-dock__label">Task Force</span>
-                        <span class="kw-investigator-dock__case">${escapeHtml(state.caseId)}</span>
-                    </span>
-                    <span class="kw-investigator-dock__action">${hubOpen ? 'Lock' : 'Open'}</span>
-                </button>
-                <button
-                    type="button"
-                    class="kw-investigator-dock__hide"
-                    data-inv-dock-hide="true"
-                    title="Hide Task Force button"
-                    aria-label="Hide Task Force button"
-                >Hide</button>
-            </div>
+            <button type="button" class="kw-investigator-dock__open" data-inv-dock-toggle="true" data-inv-drag-handle="true">
+                <span class="kw-investigator-dock__led" aria-hidden="true"></span>
+                <span class="kw-investigator-dock__copy">
+                    <span class="kw-investigator-dock__label">Task Force</span>
+                    <span class="kw-investigator-dock__case">${escapeHtml(state.caseId)}</span>
+                </span>
+                <span class="kw-investigator-dock__action">${hubOpen ? 'Lock' : 'Open'}</span>
+            </button>
         </div>
     `;
     scheduleFrame(() => applyDockPosition(root));
@@ -1547,15 +1556,6 @@ function bindTaskForceDock(_root) {
     dockPointerDelegationInstalled = true;
 
     document.addEventListener('pointerdown', (event) => {
-        const hideBtn = event.target?.closest?.('[data-inv-dock-hide="true"]');
-        if (hideBtn instanceof HTMLElement) {
-            if (event.button !== 0 && event.pointerType === 'mouse') {
-                return;
-            }
-            // Hide is tap-only — do not start a drag session.
-            return;
-        }
-
         const handle = event.target?.closest?.('[data-inv-dock-toggle="true"]');
         if (!(handle instanceof HTMLElement)) {
             return;
@@ -1658,14 +1658,6 @@ function bindTaskForceDock(_root) {
     }, true);
 
     document.addEventListener('click', (event) => {
-        const hideBtn = event.target?.closest?.('[data-inv-dock-hide="true"]');
-        if (hideBtn instanceof HTMLElement) {
-            event.preventDefault();
-            event.stopPropagation();
-            hideTaskForceDock();
-            return;
-        }
-
         const handle = event.target?.closest?.('[data-inv-dock-toggle="true"]');
         if (!(handle instanceof HTMLElement)) {
             return;
@@ -1695,6 +1687,12 @@ function bindHubInteractions(root) {
 
     root.querySelectorAll('[data-inv-close]').forEach((button) => {
         button.addEventListener('click', () => closeHub());
+    });
+
+    root.querySelectorAll('[data-inv-dock-hide]').forEach((button) => {
+        button.addEventListener('click', () => {
+            hideTaskForceDock();
+        });
     });
 
     root.querySelectorAll('[data-suspect-status]').forEach((select) => {
