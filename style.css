@@ -2650,14 +2650,20 @@
 }
 
 #kw-investigator-dock.is-mobile {
-    left: auto !important;
-    right: max(10px, env(safe-area-inset-right, 0px)) !important;
+    /* Default phone placement — no !important so drag can override with inline left/top. */
+    left: auto;
+    right: max(10px, env(safe-area-inset-right, 0px));
     /* Clear Android status bar + SillyTavern top icon row (gear / close). */
-    top: calc(env(safe-area-inset-top, 0px) + 3.25rem) !important;
-    bottom: auto !important;
+    top: calc(env(safe-area-inset-top, 0px) + 3.25rem);
+    bottom: auto;
     z-index: 2147483647;
     width: auto;
     max-width: min(22rem, calc(100vw - 20px));
+}
+
+#kw-investigator-dock.is-mobile.is-positioned {
+    right: auto;
+    bottom: auto;
 }
 
 #kw-investigator-dock.is-mobile.is-hub-open {
@@ -2673,6 +2679,13 @@
 
 #kw-investigator-dock.is-mobile .kw-investigator-dock__shell {
     justify-items: end;
+}
+
+.kw-investigator-dock__cluster {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 0.35rem;
+    pointer-events: none;
 }
 
 .kw-investigator-dock__open {
@@ -2766,6 +2779,39 @@
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: #e8f7ff;
+}
+
+.kw-investigator-dock__hide {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    min-width: 2.4rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid rgba(20, 24, 28, 0.85);
+    border-radius: 0.85rem;
+    background:
+        linear-gradient(180deg, #7a828a 0%, #4e565e 42%, #343b42 100%);
+    box-shadow:
+        0 10px 22px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -2px 0 rgba(0, 0, 0, 0.28);
+    color: #f2f4f6;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    font-family: var(--kw-inv-font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+#kw-investigator-dock.is-mobile .kw-investigator-dock__hide {
+    min-height: 2.75rem;
+    border-radius: 999px;
+    padding: 0.55rem 0.7rem;
 }
 
 /* Full-screen sit-down at the computer — native <dialog> top layer */

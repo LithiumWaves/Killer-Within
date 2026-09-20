@@ -65,4 +65,18 @@ assert.equal(shouldShowTaskForceDock({
     mobileDockPlacement: true,
 }), true, 'mobile investigator with hub closed shows dock');
 
+assert.equal(shouldShowTaskForceDock({
+    isInvestigator: true,
+    hubOpen: false,
+    mobileDockPlacement: true,
+    showDock: false,
+}), false, 'showDock false hides the floating button even on mobile');
+
+assert.equal(shouldShowTaskForceDock({
+    isInvestigator: true,
+    hubOpen: true,
+    mobileDockPlacement: false,
+    showDock: true,
+}), false, 'desktop still hides dock while hub is open');
+
 console.log('investigator-dock-visibility tests passed');

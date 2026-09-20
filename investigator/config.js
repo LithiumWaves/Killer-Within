@@ -204,6 +204,8 @@ export const DEFAULT_INVESTIGATOR_SETTINGS = Object.freeze({
     hubY: null,
     dockX: null,
     dockY: null,
+    /** When false the floating Task Force button is hidden (wand / slash can restore). */
+    showDock: true,
     showCaseActionDebugBlocks: false,
     casePromptTemplate: DEFAULT_CASE_PROMPT_TEMPLATE,
     broadcastTrapPromptTemplate: DEFAULT_BROADCAST_TRAP_PROMPT_TEMPLATE,
